@@ -1,0 +1,6 @@
+# === Next.js build & environment ===
+.next
+node_modules
+.env.local
+.DS_Store
+.vscode
