@@ -2,11 +2,14 @@
   "name": "tekkin-site-v2",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "fetch:events": "tsx scripts/fetch_events.ts",
+    "fetch:test": "SUPABASE_URL=$SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY tsx scripts/fetch_events.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.75.1",
@@ -29,6 +32,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }
