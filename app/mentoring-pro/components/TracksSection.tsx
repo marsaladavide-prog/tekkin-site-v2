@@ -1,197 +1,163 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Play, Pause, Download, MessageSquare } from "lucide-react";
-import WaveSurfer from "wavesurfer.js";
 
-interface Track {
-  title: string;
-  artist: string;
-  url: string;
-}
+import React, { useEffect, useState } from "react";
+import { Plus, X } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
+import PlayerLight from "./player/PlayerLight";
 
-interface Comment {
-  time: number;
-  text: string;
-}
+export default function TracksSection({ userId }: { userId: string }) {
+  const [open, setOpen] = useState(false);
+  const [tracks, setTracks] = useState<any[]>([]);
+  const [reload, setReload] = useState(false);
 
-const TRACKS: Track[] = [
-  { title: "Groove Intentions", artist: "Davide Marsala", url: "/tracks/groove.wav" },
-  { title: "Floorstate", artist: "Davide Marsala", url: "/tracks/floorstate.wav" },
-  { title: "Take It Off", artist: "Davide Marsala", url: "/tracks/takeitoff.wav" },
-];
-
-export default function TracksSection() {
-  const waveformRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const wavesurferRefs = useRef<(WaveSurfer | null)[]>([]);
-  const [activeTrack, setActiveTrack] = useState<number | null>(null);
-  const [comments, setComments] = useState<Record<number, Comment[]>>({});
-  const [showBox, setShowBox] = useState<{ i: number; time: number } | null>(null);
-  const [newComment, setNewComment] = useState("");
-
-  // === CREA WAVEFORM PER OGNI TRACCIA ===
   useEffect(() => {
-    TRACKS.forEach((track, i) => {
-      if (!waveformRefs.current[i]) return;
+    (async () => {
+      const { data } = await supabase
+        .from("tracks")
+        .select("id,title,artist,artwork_url,audio_url,created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      setTracks(data || []);
+    })();
+  }, [userId, reload]);
 
-      const ws = WaveSurfer.create({
-        container: waveformRefs.current[i]!,
-        waveColor: "rgba(0,255,255,0.3)",
-        progressColor: "rgba(0,255,255,0.8)",
-        cursorColor: "#00ffff",
-        height: 60,
-        barWidth: 2,
-        barGap: 2,
-        responsive: true,
-      });
+  return (
+    <section className="rounded-2xl bg-white/90 border border-[#e8ecef] shadow-[0_10px_30px_rgba(0,0,0,0.04)] overflow-hidden">
+      <div className="px-4 pt-4 pb-3 border-b border-[#eef1f4] bg-white/60 flex items-center justify-between">
+        <div>
+          <div className="text-sm text-zinc-500">Work in progress</div>
+          <div className="text-xl font-semibold">Tracce in lavorazione</div>
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-2 rounded-lg border border-[#e8ecef] bg-white px-3 py-2 text-sm hover:bg-zinc-50"
+        >
+          <Plus className="h-4 w-4" /> Aggiungi
+        </button>
+      </div>
 
-      ws.load(track.url);
-      wavesurferRefs.current[i] = ws;
+      <div className="px-4 pb-4 space-y-4">
+        {tracks.length === 0 ? (
+          <div className="text-sm text-zinc-500">
+            Nessuna traccia nel database. Aggiungi una preview col pulsante sopra oppure inserisci nella tabella <b>tracks</b> in Supabase.
+          </div>
+        ) : (
+          tracks.map((t) => (
+            <div key={t.id} className="rounded-xl border border-[#eef1f4] bg-white p-3">
+              <PlayerLight
+                audioUrl={t.audio_url}
+                title={t.title || "Untitled"}
+                artist={t.artist || "Unknown"}
+                artworkUrl={t.artwork_url || undefined}
+              />
+            </div>
+          ))
+        )}
+      </div>
 
-      ws.on("click", (e) => {
-        const duration = ws.getDuration();
-        const pixelRatio = ws.drawer?.width / duration;
-        const time = e.offsetX / pixelRatio;
-        setShowBox({ i, time });
-      });
+      {open && (
+        <AddTrackModal onClose={() => setOpen(false)} onSaved={() => setReload((v) => !v)} userId={userId} />
+      )}
+    </section>
+  );
+}
 
-      return () => {
-        ws.destroy();
-      };
-    });
-  }, []);
+function AddTrackModal({ onClose, onSaved, userId }: { onClose: () => void; onSaved: () => void; userId: string }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [artist, setArtist] = useState("");
+  const [artwork, setArtwork] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  const togglePlay = (i: number) => {
-    if (activeTrack !== null && activeTrack !== i) {
-      wavesurferRefs.current[activeTrack]?.pause();
-    }
-    const ws = wavesurferRefs.current[i];
-    if (!ws) return;
-    if (ws.isPlaying()) {
-      ws.pause();
-      setActiveTrack(null);
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const onFile = (f: File | null) => {
+    setFile(f);
+    if (f) {
+      setPreviewUrl(URL.createObjectURL(f));
+      if (!title) setTitle(f.name.replace(/\.[^/.]+$/, ""));
     } else {
-      ws.play();
-      setActiveTrack(i);
+      setPreviewUrl(null);
     }
   };
 
-  const addComment = (i: number) => {
-    if (!newComment.trim() || !showBox) return;
-    const updated = [
-      ...(comments[i] || []),
-      { time: parseFloat(showBox.time.toFixed(1)), text: newComment },
-    ];
-    setComments({ ...comments, [i]: updated });
-    setNewComment("");
-    setShowBox(null);
+  const save = async () => {
+    if (!file) return;
+    setUploading(true);
+
+    const path = `${userId}/${Date.now()}_${file.name}`;
+    const { error: upErr } = await supabase.storage.from("tracks").upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+    });
+    if (upErr) {
+      setUploading(false);
+      return;
+    }
+    const { data: pub } = supabase.storage.from("tracks").getPublicUrl(path);
+
+    await supabase.from("tracks").insert({
+      user_id: userId,
+      title: title || file.name,
+      artist: artist || null,
+      artwork_url: artwork || null,
+      audio_url: pub.publicUrl,
+    });
+
+    setUploading(false);
+    onSaved();
+    onClose();
   };
 
   return (
-    <Card className="relative z-10 bg-[#111] border border-[#00ffff33] mb-6">
-      <CardContent className="p-5">
-        <h3 className="text-lg font-semibold gradText mb-4">Tracce in lavorazione</h3>
-
-        <div className="flex flex-col gap-6">
-          {TRACKS.map((t, i) => (
-            <div
-              key={i}
-              className="bg-[#0b0b0b] border border-[#00ffff22] rounded-xl overflow-hidden hover:bg-[#0f0f0f] transition relative"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between p-3">
-                <div>
-                  <p className="font-semibold text-cyan-300">{t.title}</p>
-                  <p className="text-sm text-zinc-400">{t.artist}</p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => togglePlay(i)}
-                    className="p-2 rounded-md bg-[#00ffff22] hover:bg-[#00ffff44] text-cyan-300"
-                  >
-                    {activeTrack === i ? <Pause size={18} /> : <Play size={18} />}
-                  </button>
-                  <button
-                    onClick={() =>
-                      alert("💬 Clicca sulla waveform per aggiungere un commento")
-                    }
-                    className="p-2 rounded-md bg-[#222] hover:bg-[#333]"
-                  >
-                    <MessageSquare size={18} className="text-zinc-400" />
-                  </button>
-                  <a
-                    href={t.url}
-                    download
-                    className="p-2 rounded-md bg-[#222] hover:bg-[#333]"
-                  >
-                    <Download size={18} className="text-zinc-400" />
-                  </a>
-                </div>
-              </div>
-
-              {/* Waveform */}
-              <div className="relative px-3 pb-4">
-                <div ref={(el) => (waveformRefs.current[i] = el)} />
-
-                {/* Comment markers */}
-                {comments[i]?.map((c, idx) => (
-                  <div
-                    key={idx}
-                    className="absolute top-0 h-[60px] w-[2px] bg-cyan-400 cursor-pointer opacity-70 hover:opacity-100"
-                    style={{
-                      left: `${
-                        (c.time / (wavesurferRefs.current[i]?.getDuration() || 1)) * 100
-                      }%`,
-                    }}
-                    title={`${c.time}s - ${c.text}`}
-                  />
-                ))}
-
-                {/* Floating comment box */}
-                {showBox?.i === i && (
-                  <div
-                    className="absolute bg-[#0b0b0b] border border-[#00ffff66] rounded-lg p-3 shadow-lg w-64 text-sm"
-                    style={{
-                      top: 0,
-                      left: `${
-                        (showBox.time /
-                          (wavesurferRefs.current[i]?.getDuration() || 1)) *
-                        100
-                      }%`,
-                      transform: "translate(-50%, -110%)",
-                    }}
-                  >
-                    <p className="text-cyan-300 text-xs mb-1">
-                      Commento @ {showBox.time.toFixed(1)}s
-                    </p>
-                    <textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      className="w-full bg-[#111] border border-[#00ffff33] rounded-md p-2 text-sm text-zinc-200"
-                      placeholder="Scrivi un commento..."
-                    />
-                    <div className="flex justify-end gap-2 mt-2">
-                      <button
-                        onClick={() => setShowBox(null)}
-                        className="text-zinc-400 text-xs hover:text-zinc-200"
-                      >
-                        Annulla
-                      </button>
-                      <button
-                        onClick={() => addComment(i)}
-                        className="text-cyan-300 text-xs hover:text-cyan-200"
-                      >
-                        Aggiungi
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute right-0 left-0 top-12 mx-auto w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-[#e8ecef]">
+        <div className="px-4 py-3 border-b border-[#eef1f4] flex items-center justify-between">
+          <div className="text-sm font-semibold">Aggiungi traccia</div>
+          <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-md hover:bg-zinc-50">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      </CardContent>
-    </Card>
+
+        <div className="p-4 space-y-3">
+          <label className="text-xs text-zinc-500">File audio</label>
+          <input type="file" accept="audio/*" onChange={(e) => onFile(e.target.files?.[0] || null)} />
+
+          {previewUrl && (
+            <div className="rounded-xl border border-[#eef1f4] bg-white p-3">
+              <audio controls className="w-full" src={previewUrl} />
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-zinc-500">Titolo</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full rounded-lg border border-[#e8ecef] bg-white px-3 py-2" />
+            </div>
+            <div>
+              <label className="text-xs text-zinc-500">Artista</label>
+              <input value={artist} onChange={(e) => setArtist(e.target.value)} className="w-full rounded-lg border border-[#e8ecef] bg-white px-3 py-2" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs text-zinc-500">Artwork URL</label>
+              <input value={artwork} onChange={(e) => setArtwork(e.target.value)} className="w-full rounded-lg border border-[#e8ecef] bg-white px-3 py-2" />
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-3 border-t border-[#eef1f4] flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-[#e8ecef] bg-white px-4 py-2 text-sm hover:bg-zinc-50">Annulla</button>
+          <button onClick={save} disabled={!file || uploading} className="rounded-lg bg-black text-white px-4 py-2 text-sm disabled:opacity-60">
+            {uploading ? "Carico..." : "Salva"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
