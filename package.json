@@ -7,9 +7,7 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint",
-    "fetch:events": "tsx scripts/fetch_events.ts",
-    "fetch:test": "SUPABASE_URL=$SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY tsx scripts/fetch_events.ts"
+    "lint": "eslint"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",
@@ -35,9 +33,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.6",
-    "playwright": "^1.56.1",
     "tailwindcss": "^4",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }
