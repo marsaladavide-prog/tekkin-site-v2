@@ -12,7 +12,10 @@
     "fetch:test": "SUPABASE_URL=$SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY tsx scripts/fetch_events.ts"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.75.1",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/auth-helpers-react": "^0.5.0",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.81.0",
     "@wavesurfer/react": "^1.0.11",
     "class-variance-authority": "^0.7.1",
     "framer-motion": "^12.23.24",

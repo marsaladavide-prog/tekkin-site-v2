@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
-import PlayerLight from "./player/PlayerLight";
+import SoundCloudLikePlayer from "./SoundCloudLikePlayer";
 
 export default function TracksSection({ userId }: { userId: string }) {
   const [open, setOpen] = useState(false);
@@ -39,16 +39,18 @@ export default function TracksSection({ userId }: { userId: string }) {
       <div className="px-4 pb-4 space-y-4">
         {tracks.length === 0 ? (
           <div className="text-sm text-zinc-500">
-            Nessuna traccia nel database. Aggiungi una preview col pulsante sopra oppure inserisci nella tabella <b>tracks</b> in Supabase.
+            Nessuna traccia nel database. Aggiungi una preview con il pulsante sopra oppure inserisci nella tabella <b>tracks</b> in Supabase.
           </div>
         ) : (
           tracks.map((t) => (
             <div key={t.id} className="rounded-xl border border-[#eef1f4] bg-white p-3">
-              <PlayerLight
+              <SoundCloudLikePlayer
                 audioUrl={t.audio_url}
+                artworkUrl={t.artwork_url || undefined}
                 title={t.title || "Untitled"}
                 artist={t.artist || "Unknown"}
-                artworkUrl={t.artwork_url || undefined}
+                allowRateChange
+                allowLoop
               />
             </div>
           ))
@@ -131,7 +133,7 @@ function AddTrackModal({ onClose, onSaved, userId }: { onClose: () => void; onSa
 
           {previewUrl && (
             <div className="rounded-xl border border-[#eef1f4] bg-white p-3">
-              <audio controls className="w-full" src={previewUrl} />
+              <SoundCloudLikePlayer audioUrl={previewUrl} title={title || "Preview"} artist={artist || ""} artworkUrl={artwork || undefined} />
             </div>
           )}
 

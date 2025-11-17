@@ -1,7 +1,17 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import Splash from "@/components/core/Splash";
+import Splash from "@/components/core/Splash"; // ok se esiste qui
+
+// 🔧 usa il path giusto (sotto mentoring-pro)
+import TracksSection from "./mentoring-pro/components/TracksSection";
+import ProgressCharts from "./mentoring-pro/components/ProgressCharts";
+import CalendarSection from "./mentoring-pro/components/CalendarSection";
+import PressKitCard from "./mentoring-pro/components/PressKitCard";
+
+// se vuoi mostrare il player in homepage:
+import SoundCloudLikePlayer from "./mentoring-pro/components/player/SoundCloudLikePlayer";
 
 export default function HomePage() {
   const pathname = usePathname();

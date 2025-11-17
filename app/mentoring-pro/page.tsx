@@ -24,6 +24,7 @@ import ProgressCharts from "./components/ProgressCharts";
 import CalendarSection from "./components/CalendarSection";
 import PressKitCard from "./components/PressKitCard";
 import IntroModal from "./components/IntroModal";
+import SoundCloudLikePlayer from "./components/SoundCloudLikePlayer";
 
 type Profile = {
   id: string;
@@ -59,41 +60,50 @@ export default function MentoringProPage() {
   const [showIntro, setShowIntro] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Usa sessione cookie based
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) {
-        router.push("/mentoring-pro/login");
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session;
+
+      if (!session) {
+        router.replace("/mentoring-pro/login?next=/mentoring-pro");
         return;
       }
-      setUser(u.user);
+
+      if (cancelled) return;
+      const userId = session.user.id;
+      setUser(session.user);
 
       const [{ data: prof }, { data: cy }, { data: gs }] = await Promise.all([
         supabase
           .from("users_profile")
           .select("id,artist_name,photo_url,avatar_seed,avatar_variant,basic_completed")
-          .eq("id", u.user.id)
+          .eq("id", userId)
           .single(),
         supabase
           .from("mentoring_cycles")
           .select("month_start,month_end,paid,notes")
-          .eq("user_id", u.user.id)
+          .eq("user_id", userId)
           .order("month_start", { ascending: false })
           .limit(1)
           .maybeSingle(),
         supabase
           .from("goals")
           .select("id,label,due_date,progress,done")
-          .eq("user_id", u.user.id)
+          .eq("user_id", userId)
           .order("created_at"),
       ]);
 
+      if (cancelled) return;
       setProfile((prof as any) || null);
       setCycle((cy as any) || null);
       setGoals((gs as any) || []);
       if (!(prof as any)?.basic_completed) setShowIntro(true);
       setLoading(false);
     })();
+    return () => { cancelled = true; };
   }, [router]);
 
   const paidBadge = useMemo(() => {
@@ -103,7 +113,7 @@ export default function MentoringProPage() {
         className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${
           cycle.paid
             ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-            : "bg-amber-100 text-amber-700 border border-amber-200"
+            : "bg-amber-100 text-amber-700 border-amber-200"
         }`}
       >
         <BadgeEuro className="h-4 w-4" /> {cycle.paid ? "Pagato" : "In attesa"}
@@ -113,7 +123,7 @@ export default function MentoringProPage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/mentoring-pro/login");
+    router.replace("/mentoring-pro/login");
   };
 
   if (loading) {
@@ -161,9 +171,9 @@ export default function MentoringProPage() {
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid principale */}
       <div className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left */}
+        {/* Sidebar sinistra */}
         <aside className="lg:col-span-3 space-y-4">
           <motion.div
             initial={{ opacity: 0, y: 6 }}
@@ -189,19 +199,15 @@ export default function MentoringProPage() {
               </div>
               <div>
                 <div className="text-xs text-zinc-500">Benvenuto</div>
-                <div className="font-semibold">
-                  {profile?.artist_name || user?.email}
-                </div>
+                <div className="font-semibold">{profile?.artist_name || user?.email}</div>
               </div>
             </div>
-
             <div className="mt-4 grid grid-cols-3 gap-2">
               <MiniShortcut icon={<Music2 className="h-4 w-4" />} label="Tracce" href="#tracks" />
               <MiniShortcut icon={<Target className="h-4 w-4" />} label="Goals" href="#goals" />
               <MiniShortcut icon={<CalendarDays className="h-4 w-4" />} label="Calendario" href="#calendar" />
             </div>
           </motion.div>
-
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -226,29 +232,10 @@ export default function MentoringProPage() {
               </div>
             ) : null}
           </motion.div>
-
           <ActivityTimeline />
         </aside>
-
-        {/* Center */}
+        {/* Colonna centrale */}
         <section className="lg:col-span-6 space-y-4">
-          <StudioCard
-            title="Panoramica mese"
-            subtitle={cycle ? `Dal ${cycle.month_start}${cycle.month_end ? ` al ${cycle.month_end}` : ""}` : "Nessun ciclo disponibile"}
-          >
-            <StudioStat label="Pagato" value={cycle?.paid ? "Sì" : "No"} ok={!!cycle?.paid} />
-            <div className="mt-2 text-sm text-zinc-600">
-              {cycle?.notes ? (
-                <>
-                  <span className="font-medium">Note: </span>
-                  {cycle.notes}
-                </>
-              ) : (
-                <span className="text-zinc-400">Nessuna nota del mentor</span>
-              )}
-            </div>
-          </StudioCard>
-
           <StudioCard id="goals" title="Obiettivi" subtitle="Il tuo focus di questo mese">
             {goals.length === 0 ? (
               <div className="text-sm text-zinc-500">
@@ -263,27 +250,25 @@ export default function MentoringProPage() {
               </div>
             )}
           </StudioCard>
-
           <StudioCard title="Press Kit" subtitle="Materiale ufficiale aggiornato">
             <PressKitCard />
           </StudioCard>
-
-          {/* Tracce */}
-          <div id="tracks">
+          {/* Tracce: niente titolo sovrastante, solo la sezione e il player */}
+          <div id="tracks" className="space-y-4">
             <TracksSection userId={user.id} />
+            <StudioCard title="Aggiungi traccia">
+              <SoundCloudLikePlayer />
+            </StudioCard>
           </div>
         </section>
-
-        {/* Right */}
+        {/* Sidebar destra */}
         <aside className="lg:col-span-3 space-y-4">
           <StudioCard title="Andamento">
             <ProgressCharts />
           </StudioCard>
-
           <StudioCard id="calendar" title="Calendario">
             <CalendarSection />
           </StudioCard>
-
           <div className="rounded-2xl bg-gradient-to-b from-white to-[#f7fbff] border border-[#e8ecef] shadow-[0_10px_30px_rgba(0,0,0,0.04)] p-4">
             <div className="text-sm font-semibold mb-1">Suggerimento veloce</div>
             <div className="text-xs text-zinc-600">
@@ -292,7 +277,6 @@ export default function MentoringProPage() {
           </div>
         </aside>
       </div>
-
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {showIntro && <IntroModal user={user} setShowIntro={setShowIntro} />}
     </main>
@@ -309,18 +293,6 @@ function StudioCard({ id, title, subtitle, children }: { id?: string; title: str
       </div>
       <div className="px-4 pb-4">{children}</div>
     </section>
-  );
-}
-
-function StudioStat({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
-  return (
-    <div className="rounded-xl border border-[#eef1f4] bg-white p-3 flex items-center justify-between">
-      <div className="text-sm text-zinc-600">{label}</div>
-      <div className="flex items-center gap-2">
-        {ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : null}
-        <div className="text-sm font-medium">{value}</div>
-      </div>
-    </div>
   );
 }
 
@@ -346,10 +318,7 @@ function GoalRow({ g }: { g: { label: string; due_date: string | null; progress:
 
 function MiniShortcut({ icon, label, href }: { icon: React.ReactNode; label: string; href: string }) {
   return (
-    <a
-      href={href}
-      className="group rounded-xl bg-white border border-[#eef1f4] p-2 text-xs text-zinc-700 flex items-center gap-2 hover:shadow"
-    >
+    <a href={href} className="group rounded-xl bg-white border border-[#eef1f4] p-2 text-xs text-zinc-700 flex items-center gap-2 hover:shadow">
       <span className="grid place-items-center h-6 w-6 rounded-md bg-zinc-50 text-zinc-800">{icon}</span>
       <span className="font-medium">{label}</span>
     </a>
@@ -392,23 +361,25 @@ function SettingsDrawer({ open, onClose }: { open: boolean; onClose: () => void 
   useEffect(() => {
     if (!open) return;
     (async () => {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) return;
-      const { data } = await supabase
+      const { data } = await supabase.auth.getSession();
+      const session = data?.session;
+      if (!session) return;
+      const { data: prof } = await supabase
         .from("users_profile")
         .select("artist_name,photo_url")
-        .eq("id", u.user.id)
+        .eq("id", session.user.id)
         .single();
-      setForm((data as any) || { artist_name: "", photo_url: "" });
+      setForm((prof as any) || { artist_name: "", photo_url: "" });
     })();
   }, [open]);
 
   const save = async () => {
     if (!form) return;
     setSaving(true);
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) return;
-    const { error } = await supabase.from("users_profile").update(form).eq("id", u.user.id);
+    const { data } = await supabase.auth.getSession();
+    const session = data?.session;
+    if (!session) return;
+    const { error } = await supabase.from("users_profile").update(form).eq("id", session.user.id);
     setSaving(false);
     if (!error) onClose();
   };

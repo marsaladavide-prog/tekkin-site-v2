@@ -1,19 +1,21 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { CalendarDays } from "lucide-react";
-
+"use client";
 export default function CalendarSection() {
+  const items = [
+    { id: "1", t: "Mix finale traccia", d: "21 Ottobre" },
+    { id: "2", t: "Call mensile", d: "22 Ottobre ore 18:00" },
+    { id: "3", t: "Invio progetto su Trackstack", d: "25 Ottobre" },
+  ];
   return (
-    <Card className="relative z-10 bg-[#111] border border-[#00ffff33] mb-6">
-      <CardContent className="p-5">
-        <h3 className="text-lg font-semibold flex items-center gap-2 mb-3">
-          <CalendarDays className="h-5 w-5 text-cyan-300" /> Prossime attività
-        </h3>
-        <ul className="text-sm text-zinc-400 space-y-1">
-          <li>✅ Mix finale traccia “Groove Intentions” — 21 Ottobre</li>
-          <li>📞 Call mensile — 22 Ottobre ore 18:00</li>
-          <li>📤 Invia progetto “0079” su Trackstack — 25 Ottobre</li>
-        </ul>
-      </CardContent>
-    </Card>
+    <div className="rounded-xl border border-[#eef1f4] bg-white p-4">
+      <div className="text-sm font-semibold mb-2">Prossime attività</div>
+      <ul className="space-y-2">
+        {items.map(i => (
+          <li key={i.id} className="rounded-lg border border-[#eef1f4] bg-white px-3 py-2 text-sm">
+            <div className="font-medium">{i.t}</div>
+            <div className="text-xs text-zinc-500">{i.d}</div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

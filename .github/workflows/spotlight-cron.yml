@@ -2,28 +2,26 @@ name: Tekkin Spotlight Cron
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # ogni 6 ore
+    - cron: "0 */6 * * *"  # ogni 6 ore
   workflow_dispatch:
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20     # più che sufficiente
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: 20
+          cache: npm
 
       - name: Install deps
-        run: npm ci
-
-      # NECESSARIO se lo script usa Playwright per aprire le pagine evento
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: npm ci --no-audit --no-fund
 
       - name: Run fetch events
         env:
