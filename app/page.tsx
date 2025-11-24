@@ -44,17 +44,11 @@ useEffect(() => {
       {/* === CONTENUTO === */}
       <h1 className="text-4xl font-bold tracking-[0.2em] mb-6 z-10">TEKKIN</h1>
       <p className="text-zinc-400 mb-8 text-center max-w-lg z-10">
-        Analyzer Pro — Spotlight — Sample Packs — Dashboard
+        Analyzer Pro — Sample Packs — Dashboard
       </p>
 
       <div className="flex flex-wrap justify-center gap-4 z-10">
-        <a
-          href="/spotlight"
-          className="border border-[#222] rounded-md px-6 py-3 hover:bg-[#111]"
-        >
-          Tekkin Spotlight
-        </a>
-
+       
         <a
           href="/analyzer"
           className="border border-[#222] rounded-md px-6 py-3 hover:bg-[#111]"
@@ -81,6 +75,13 @@ useEffect(() => {
           className="border border-[#222] rounded-md px-6 py-3 hover:bg-[#111]"
         >
           News & Tips
+        </a>
+
+        <a
+          href="/artist"
+          className="border border-[#222] rounded-md px-6 py-3 hover:bg-[#111]"
+        >
+          Artist
         </a>
       </div>
 

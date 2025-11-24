@@ -6,26 +6,30 @@ import type { NewsRow } from "@/types/news";
 import { NewsCard } from "./NewsCard";
 import { Button } from "@/components/ui/button";
 
-type Props = { initialItems: NewsRow[] };
+type Props = {
+  initialItems: NewsRow[];
+  initialTotal?: number | null;
+  initialParams?: { q?: string; category?: string; source?: string };
+};
 
-export function NewsGrid({ initialItems }: Props) {
+export function NewsGrid({ initialItems, initialTotal = null, initialParams }: Props) {
   const [items, setItems] = useState<NewsRow[]>(initialItems);
   const [from, setFrom] = useState(initialItems.length);
   const [loading, setLoading] = useState(false);
-  const [total, setTotal] = useState<number | null>(null);
+  const [total, setTotal] = useState<number | null>(initialTotal);
   const sentinel = useRef<HTMLDivElement | null>(null);
 
-  const params = useMemo(() => {
-    const form = document.getElementById("filters") as HTMLFormElement | null;
-    const fd = new FormData(form ?? undefined);
-    const q = (fd.get("q") as string) || "";
-    const category = (fd.get("category") as string) || "";
-    const source = (fd.get("source") as string) || "";
-    return { q, category, source };
-  }, []);
+  const params = useMemo(
+    () => ({
+      q: initialParams?.q || "",
+      category: initialParams?.category || "",
+      source: initialParams?.source || "",
+    }),
+    [initialParams]
+  );
 
   async function loadMore() {
-    if (loading) return;
+    if (loading || typeof window === "undefined") return;
     setLoading(true);
     const url = new URL("/api/news", window.location.origin);
     url.searchParams.set("from", String(from));
@@ -47,15 +51,19 @@ export function NewsGrid({ initialItems }: Props) {
 
   // auto load via IntersectionObserver
   useEffect(() => {
-    if (!sentinel.current) return;
-    const io = new IntersectionObserver(entries => {
-      entries.forEach(e => {
-        if (e.isIntersecting) loadMore();
-      });
-    }, { rootMargin: "600px" });
-    io.observe(sentinel.current);
+    const node = sentinel.current;
+    if (!node || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      entries => {
+        entries.forEach(e => {
+          if (e.isIntersecting) loadMore();
+        });
+      },
+      { rootMargin: "600px" }
+    );
+    io.observe(node);
     return () => io.disconnect();
-  }, [sentinel.current]); // eslint-disable-line
+  }, [sentinel.current]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!items.length) {
     return <p className="text-sm text-muted-foreground">Nessuna notizia trovata.</p>;

@@ -1,0 +1,20 @@
+name: Tekkin Artists Sync
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # ogni ora
+  workflow_dispatch:       # lancio manuale
+
+jobs:
+  sync-artists:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Tekkin sync endpoint
+        env:
+          CRON_SECRET: ${{ secrets.TEKKIN_CRON_SECRET }}
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-TEKKIN-CRON: $CRON_SECRET" \
+            -d '{}' \
+            https://TUO-DOMINIO.vercel.app/api/sync-artists

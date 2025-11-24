@@ -1,5 +1,12 @@
 "use client";
+import { Share_Tech_Mono } from "next/font/google";
 import { useState } from "react";
+
+const shareTechMono = Share_Tech_Mono({
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap",
+});
 
 export default function AnalyzerPage() {
   const [open, setOpen] = useState(false);
@@ -42,7 +49,9 @@ export default function AnalyzerPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-[#00ffff] flex flex-col items-center justify-center relative overflow-hidden font-[Share_Tech_Mono]">
+    <main
+      className={`${shareTechMono.className} min-h-screen bg-[#0a0a0a] text-[#00ffff] flex flex-col items-center justify-center relative overflow-hidden`}
+    >
       <div className="absolute inset-0 pointer-events-none animate-scanlines bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.05),rgba(255,255,255,0.05)_1px,transparent_2px,transparent_4px)]"></div>
 
       <h1
@@ -175,7 +184,6 @@ export default function AnalyzerPage() {
       )}
 
       <style jsx>{`
-        @import url("https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap");
         @keyframes scanlines {
           0% {
             background-position: 0 0;

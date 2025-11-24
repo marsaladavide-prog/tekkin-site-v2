@@ -42,7 +42,8 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "connect-src 'self' https:",
               "font-src 'self' https: data:",
-              "media-src 'self' https:",
+              // consentiamo blob:/data: per audio caricati via objectURL/local
+              "media-src 'self' blob: data: https:",
             ].join("; "),
           },
         ],

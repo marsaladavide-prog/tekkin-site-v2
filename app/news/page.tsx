@@ -8,20 +8,43 @@ import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
-async function getInitial() {
+async function getInitial(filters: { q?: string; category?: string; source?: string }) {
   const supabase = supabaseServer();
-  const { data, error } = await supabase
+  let query = supabase
     .from("news")
-    .select("id,title,slug,url,source,category,summary,created_at,image_url")
+    .select("id,title,slug,url,source,category,summary,created_at,image_url", {
+      count: "exact",
+    })
     .order("created_at", { ascending: false })
     .limit(25);
 
+  if (filters.q) {
+    const term = `%${filters.q}%`;
+    query = query.or(`title.ilike.${term},summary.ilike.${term}`);
+  }
+  if (filters.category) {
+    query = query.eq("category", filters.category);
+  }
+  if (filters.source) {
+    query = query.ilike("source", `%${filters.source}%`);
+  }
+
+  const { data, error, count } = await query;
   if (error) throw new Error(error.message);
-  return data || [];
+  return { items: data || [], total: count ?? null };
 }
 
-export default async function NewsPage() {
-  const initial = await getInitial();
+export default async function NewsPage({
+  searchParams,
+}: {
+  searchParams?: { q?: string; category?: string; source?: string };
+}) {
+  const filters = {
+    q: (searchParams?.q || "").trim(),
+    category: (searchParams?.category || "").trim(),
+    source: (searchParams?.source || "").trim(),
+  };
+  const initial = await getInitial(filters);
 
   return (
     <main className="min-h-screen">
@@ -34,12 +57,26 @@ export default async function NewsPage() {
             </p>
           </div>
 
-          <form id="filters" className="flex w-full max-w-xl items-center gap-2">
+          <form
+            id="filters"
+            className="flex w-full max-w-2xl items-center gap-2"
+            method="get"
+            action="/news"
+          >
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 opacity-60" />
-              <Input name="q" placeholder="Cerca titoli o contenuti" className="pl-9" />
+              <Input
+                name="q"
+                placeholder="Cerca titoli o contenuti"
+                className="pl-9"
+                defaultValue={filters.q}
+              />
             </div>
-            <select name="category" className="h-10 rounded-md border bg-background px-3 text-sm">
+            <select
+              name="category"
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              defaultValue={filters.category}
+            >
               <option value="">Tutte le categorie</option>
               <option value="production">Production</option>
               <option value="promotion">Promotion</option>
@@ -47,16 +84,25 @@ export default async function NewsPage() {
               <option value="news">News</option>
               <option value="tips">Tips</option>
             </select>
-            <Input name="source" placeholder="Sorgente" className="w-32" />
+            <Input
+              name="source"
+              placeholder="Sorgente"
+              className="w-32"
+              defaultValue={filters.source}
+            />
             <Button type="submit" variant="outline">
-  <Filter className="mr-2 h-4 w-4" />
-  Filtra
-</Button>
+              <Filter className="mr-2 h-4 w-4" />
+              Filtra
+            </Button>
           </form>
         </header>
 
         <Suspense fallback={<div className="h-40 w-full animate-pulse rounded-2xl bg-muted" />}>
-          <NewsGrid initialItems={initial} />
+          <NewsGrid
+            initialItems={initial.items}
+            initialTotal={initial.total}
+            initialParams={filters}
+          />
         </Suspense>
       </section>
     </main>

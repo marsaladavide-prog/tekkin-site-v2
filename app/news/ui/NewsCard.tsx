@@ -16,7 +16,6 @@ function domainFrom(url: string) {
 }
 
 function fallbackImage(item: NewsRow) {
-  // se non hai image_url, disegna un gradiente con sigla della source
   const text = (item.source || domainFrom(item.url) || "Tekkin").slice(0, 2).toUpperCase();
   return `https://dummyimage.com/1200x630/0f0f0f/ffffff&text=${encodeURIComponent(text)}`;
 }
@@ -57,7 +56,7 @@ export function NewsCard({
       <div className="p-4">
         <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate">{source}</span>
-          <span>•</span>
+          <span className="opacity-60">·</span>
           <time dateTime={item.created_at || ""}>
             {item.created_at ? new Date(item.created_at).toLocaleDateString() : ""}
           </time>
@@ -80,7 +79,7 @@ export function NewsCard({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-sm font-medium underline-offset-4 hover:underline"
           >
-            Leggi l’articolo
+            Leggi l'articolo
             <ExternalLink className="h-4 w-4" />
           </Link>
         </div>

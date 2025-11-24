@@ -24,7 +24,8 @@ import ProgressCharts from "./components/ProgressCharts";
 import CalendarSection from "./components/CalendarSection";
 import PressKitCard from "./components/PressKitCard";
 import IntroModal from "./components/IntroModal";
-import SoundCloudLikePlayer from "./components/SoundCloudLikePlayer";
+import TekkinAgentPanel from "./components/TekkinAgentPanel";
+
 
 type Profile = {
   id: string;
@@ -256,9 +257,6 @@ export default function MentoringProPage() {
           {/* Tracce: niente titolo sovrastante, solo la sezione e il player */}
           <div id="tracks" className="space-y-4">
             <TracksSection userId={user.id} />
-            <StudioCard title="Aggiungi traccia">
-              <SoundCloudLikePlayer />
-            </StudioCard>
           </div>
         </section>
         {/* Sidebar destra */}
