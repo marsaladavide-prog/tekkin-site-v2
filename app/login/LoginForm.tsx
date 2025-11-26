@@ -44,8 +44,13 @@ export default function LoginForm() {
           redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
-    } catch (err: any) {
-      setError(err?.message || "Accesso con Google non riuscito");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Accesso con Google non riuscito";
+
+      setError(message);
       setLoading(false);
     }
   }

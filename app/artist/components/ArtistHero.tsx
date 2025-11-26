@@ -1,11 +1,54 @@
 "use client";
 
+import { useMemo } from "react";
+import { useArtistRank } from "../hooks/useArtistRank";
+
 type ArtistHeroProps = {
   isDark: boolean;
   onToggleTheme: () => void;
 };
 
 export function ArtistHero({ isDark, onToggleTheme }: ArtistHeroProps) {
+  const { data } = useArtistRank();
+
+  const artist = data?.artist;
+  const artistName = artist?.artist_name || "Tekkin Artist";
+  const artistPhoto = artist?.artist_photo_url;
+  const artistGenre = artist?.artist_genre || "Artist";
+  const spotifyConnected = Boolean(artist?.spotify_id || artist?.spotify_url);
+  const spotifyLink =
+    artist?.spotify_url ||
+    (artist?.spotify_id
+      ? `https://open.spotify.com/artist/${artist.spotify_id}`
+      : undefined);
+
+console.log("ARTIST HERO:", artist);
+
+  // Social derivati dai campi nuovi del profilo
+  const derivedSocials = {
+    spotify: spotifyLink,
+    beatstats: artist?.beatstats_url,
+    beatport: artist?.beatport_url,
+    instagram: artist?.instagram_url,
+  };
+
+  // Merge con eventuali socials già presenti
+  const socials = {
+    ...(artist?.socials || {}),
+    ...derivedSocials,
+  };
+
+  const initials = useMemo(() => {
+    return (
+      artistName
+        .split(" ")
+        .filter(Boolean)
+        .map((p) => p[0]?.toUpperCase())
+        .join("")
+        .slice(0, 2) || "??"
+    );
+  }, [artistName]);
+
   return (
     <section className="relative px-4 pb-6 pt-2 text-center">
       <div className="absolute right-5 top-5 z-20">
@@ -50,15 +93,23 @@ export function ArtistHero({ isDark, onToggleTheme }: ArtistHeroProps) {
         </div>
 
         <div className="mt-6 flex flex-col items-center gap-4">
-          <div className="flex h-24 w-24 items-center justify-center rounded-full border border-[#1f1f23] bg-[#0f0f10] text-2xl font-bold text-white shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-            DM
+          <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-[#1f1f23] bg-[#0f0f10] text-2xl font-bold text-white shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+            {artistPhoto ? (
+              <img
+                src={artistPhoto}
+                alt={artistName}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initials
+            )}
           </div>
           <div className="space-y-2">
             <h1 className="text-3xl md:text-4xl font-extrabold uppercase tracking-tight text-white">
-              Davide Marsala
+              {artistName}
             </h1>
             <p className="text-xs md:text-sm font-mono uppercase tracking-[0.18em] text-tekkin-muted">
-              Minimal / Deep Tech · Milano
+              {artistGenre}
             </p>
           </div>
         </div>
@@ -133,31 +184,72 @@ export function ArtistHero({ isDark, onToggleTheme }: ArtistHeroProps) {
           </button>
         </div>
 
-        <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] font-mono">
-          <button className="inline-flex items-center gap-2 rounded-full border border-[#1f1f23] bg-transparent px-3 py-1 text-[#dcdcdc] transition-colors hover:border-tekkin-primary">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#1DB954] text-[10px] font-bold text-black">
-              S
-            </span>
-            Spotify
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-full border border-[#1f1f23] bg-transparent px-3 py-1 text-[#dcdcdc] transition-colors hover:border-tekkin-primary">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-lime-300 text-[10px] font-bold text-black">
-              BP
-            </span>
-            Beatport
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-full border border-[#1f1f23] bg-transparent px-3 py-1 text-[#dcdcdc] transition-colors hover:border-tekkin-primary">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-[10px] font-bold text-white">
-              IG
-            </span>
-            Instagram
-          </button>
-          <button className="inline-flex items-center gap-2 rounded-full border border-[#1f1f23] bg-transparent px-3 py-1 text-[#dcdcdc] transition-colors hover:border-tekkin-primary">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-tekkin-primary text-[10px] font-bold text-black">
-              PK
-            </span>
-            Press Kit
-          </button>
+        <div className="mt-4 flex flex-wrap justify-center gap-3 text-[11px] font-mono">
+          {[
+            {
+              key: "spotify",
+              label: "Spotify",
+              value: socials.spotify,
+              badge: "S",
+              color: "bg-[#1DB954]",
+            },
+            {
+              key: "beatstats",
+              label: "Beatstats",
+              value: socials.beatstats,
+              badge: "BS",
+              color: "bg-lime-300",
+            },
+            {
+              key: "beatport",
+              label: "Beatport",
+              value: socials.beatport,
+              badge: "BP",
+              color: "bg-lime-300",
+            },
+            {
+              key: "instagram",
+              label: "Instagram",
+              value: socials.instagram,
+              badge: "IG",
+              color: "bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF]",
+            },
+          ].map((item) => {
+            const active =
+              item.key === "spotify" ? spotifyConnected : Boolean(item.value);
+            const Wrapper: any = active ? "a" : "div";
+            return (
+              <Wrapper
+                key={item.key}
+                href={active ? (item.value as string) : undefined}
+                target={active ? "_blank" : undefined}
+                rel={active ? "noreferrer" : undefined}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 transition-colors ${
+                  active
+                    ? "border-tekkin-primary/80 bg-[#0f0f10] text-white hover:border-tekkin-primary"
+                    : "border-[#1f1f23] bg-transparent text-tekkin-muted"
+                }`}
+              >
+                <span
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${
+                    active ? item.color + " text-black" : "bg-[#1f1f23] text-[#6b6b6b]"
+                  }`}
+                >
+                  {item.badge}
+                </span>
+                <div className="flex flex-col leading-[1.1]">
+                  <span>{item.label}</span>
+                  <span
+                    className={`text-[10px] ${
+                      active ? "text-emerald-400" : "text-tekkin-muted"
+                    }`}
+                  >
+                    {active ? "Attivo" : "Non collegato"}
+                  </span>
+                </div>
+              </Wrapper>
+            );
+          })}
         </div>
       </div>
     </section>

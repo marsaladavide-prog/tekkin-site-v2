@@ -8,6 +8,9 @@ import {
   Send,
   Sparkles,
   Plus,
+  Trash2,
+  Check,
+  X,
 } from "lucide-react";
 
 type AgentTask = {
@@ -84,10 +87,12 @@ type TaskSummary = {
   start_date: string | null;
   due_date: string | null;
   actual_hours: number | null;
+  priority: number | null;
 };
 
 const LOCAL_PROJECTS_KEY = "tekkin_projects_v1";
 const LOCAL_TASKS_KEY = "tekkin_tasks_v1";
+const LOCAL_UNSYNCED_KEY = "tekkin_tasks_unsynced_v1";
 
 const quickPrompts = [
   "Riepiloga le priorita della settimana in 3 bullet",
@@ -138,6 +143,28 @@ function persistTasks(projectId: string, tasks: TaskSummary[]) {
   saveLocal(LOCAL_TASKS_KEY, all);
 }
 
+function removeLocalTasks(projectId: string) {
+  const all = loadAllLocalTasks();
+  if (all[projectId]) {
+    delete all[projectId];
+    saveLocal(LOCAL_TASKS_KEY, all);
+  }
+}
+
+function loadUnsyncedProjects() {
+  return readLocal<Record<string, boolean>>(LOCAL_UNSYNCED_KEY, {});
+}
+
+function markUnsynced(projectId: string, value: boolean) {
+  const all = loadUnsyncedProjects();
+  if (value) {
+    all[projectId] = true;
+  } else {
+    delete all[projectId];
+  }
+  saveLocal(LOCAL_UNSYNCED_KEY, all);
+}
+
 // layout semplificato per il Gantt
 function buildGanttLayout(items: AgentGanttItem[]) {
   if (!items.length) return [];
@@ -178,7 +205,11 @@ function formatDateShort(value?: string | null) {
   });
 }
 
-export default function TekkinAgentPanel() {
+type PanelView = "chat" | "planner" | "calendar";
+
+export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
+  const taskGridClass =
+    "grid grid-cols-[minmax(230px,1.25fr)_minmax(150px,0.9fr)_minmax(110px,0.75fr)_140px_140px_80px]";
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -202,6 +233,37 @@ export default function TekkinAgentPanel() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingTask, setCreatingTask] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
+    null
+  );
+  const [showNewTaskRow, setShowNewTaskRow] = useState(false);
+  const [retryingSync, setRetryingSync] = useState(false);
+
+  const upcomingTasks = useMemo(() => {
+    const withDue = tasks
+      .filter((t) => !!t.due_date)
+      .map((t) => ({
+        ...t,
+        dueNumeric: t.due_date ? new Date(t.due_date).getTime() : Infinity,
+      }))
+      .sort((a, b) => a.dueNumeric - b.dueNumeric)
+      .slice(0, 5);
+    return withDue;
+  }, [tasks]);
+  const [unsyncedProjects, setUnsyncedProjects] = useState<Record<string, boolean>>(
+    loadUnsyncedProjects()
+  );
+
+  const showChat = !view || view === "chat";
+  const showPlanner = !view || view === "planner";
+  const showCalendar = !view || view === "calendar";
+  const showDashboard = !view; // dashboard solo in vista completa
+  const [confirmDelete, setConfirmDelete] = useState<{
+    type: "project" | "task";
+    id: string;
+    label: string;
+  } | null>(null);
 
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState<"artist" | "client">(
@@ -214,6 +276,28 @@ export default function TekkinAgentPanel() {
     "todo"
   );
   const [newTaskDueDate, setNewTaskDueDate] = useState("");
+  const [newTaskPriority, setNewTaskPriority] = useState(5);
+  const resetNewTaskFields = () => {
+    setNewTaskTitle("");
+    setNewTaskStatus("todo");
+    setNewTaskDueDate("");
+    setNewTaskPriority(5);
+  };
+
+  const normalizeTask = (task: any): TaskSummary => ({
+    id: task?.id,
+    title: task?.title,
+    status: task?.status,
+    start_date: task?.start_date ?? null,
+    due_date: task?.due_date ?? null,
+    actual_hours:
+      task?.actual_hours === null || task?.actual_hours === undefined
+        ? null
+        : task.actual_hours,
+    priority: Number.isFinite(Number(task?.priority))
+      ? Number(task.priority)
+      : 5,
+  });
 
   const lastAnswer = useMemo(() => {
     if (agentData) {
@@ -278,23 +362,31 @@ export default function TekkinAgentPanel() {
         if (!res.ok) {
           console.warn("API tasks non disponibile, uso cache locale");
           const local = loadLocalTasks(selectedProjectId);
-          setTasks(local);
+          setTasks(local.map(normalizeTask));
           return;
         }
         const data = await res.json();
-        const list: TaskSummary[] = data.tasks || [];
-        setTasks(list);
-        persistTasks(selectedProjectId, list);
+        const list: TaskSummary[] = (data.tasks || []).map(normalizeTask);
+        // se ci sono modifiche non sincronizzate, teniamo la cache locale
+        const hasUnsynced = unsyncedProjects[selectedProjectId];
+        if (hasUnsynced) {
+          const local = loadLocalTasks(selectedProjectId).map(normalizeTask);
+          setTasks(local);
+          persistTasks(selectedProjectId, local);
+        } else {
+          setTasks(list);
+          persistTasks(selectedProjectId, list);
+        }
       } catch (err) {
         const local = loadLocalTasks(selectedProjectId);
-        setTasks(local);
+        setTasks(local.map(normalizeTask));
         console.warn("Errore caricamento tasks (uso cache locale se presente):", err);
       } finally {
         setLoadingTasks(false);
       }
     };
     fetchTasks();
-  }, [selectedProjectId]);
+  }, [selectedProjectId, unsyncedProjects]);
 
   const send = async (prompt?: string) => {
     const text = (prompt ?? input).trim();
@@ -463,6 +555,7 @@ export default function TekkinAgentPanel() {
           title,
           status: newTaskStatus,
           due_date: newTaskDueDate || null,
+          priority: newTaskPriority,
         }),
       });
       if (!res.ok) {
@@ -471,15 +564,14 @@ export default function TekkinAgentPanel() {
         throw new Error("local-fallback-task");
       }
       const data = await res.json();
-      const created: TaskSummary = data.task;
+      const created: TaskSummary = normalizeTask(data.task);
       setTasks((prev) => {
         const list = [...prev, created];
         persistTasks(selectedProjectId, list);
         return list;
       });
-      setNewTaskTitle("");
-      setNewTaskDueDate("");
-      setNewTaskStatus("todo");
+      resetNewTaskFields();
+      setShowNewTaskRow(false);
     } catch (err) {
       console.warn("Errore creazione task:", err);
       const fallback: TaskSummary = {
@@ -492,15 +584,15 @@ export default function TekkinAgentPanel() {
         start_date: null,
         due_date: newTaskDueDate || null,
         actual_hours: null,
+        priority: newTaskPriority,
       };
       setTasks((prev) => {
         const list = [...prev, fallback];
         persistTasks(selectedProjectId, list);
         return list;
       });
-      setNewTaskTitle("");
-      setNewTaskDueDate("");
-      setNewTaskStatus("todo");
+      resetNewTaskFields();
+      setShowNewTaskRow(false);
     } finally {
       setCreatingTask(false);
     }
@@ -508,7 +600,12 @@ export default function TekkinAgentPanel() {
 
   const handleUpdateTask = async (
     taskId: string,
-    updates: Partial<Pick<TaskSummary, "start_date" | "due_date" | "status">>
+    updates: Partial<
+      Pick<
+        TaskSummary,
+        "start_date" | "due_date" | "status" | "priority" | "title"
+      >
+    >
   ) => {
     if (!selectedProjectId) return;
     setUpdatingTaskId(taskId);
@@ -521,17 +618,17 @@ export default function TekkinAgentPanel() {
     });
 
     try {
+      const payload: Record<string, any> = { id: taskId };
+      if (updates.start_date !== undefined) payload.start_date = updates.start_date;
+      if (updates.due_date !== undefined) payload.due_date = updates.due_date;
+      if (updates.status !== undefined) payload.status = updates.status;
+      if (updates.priority !== undefined) payload.priority = updates.priority;
+      if (updates.title !== undefined) payload.title = updates.title;
+
       const res = await fetch("/api/tekkin-tasks", {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskId,
-          start_date:
-            updates.start_date === undefined ? undefined : updates.start_date,
-          due_date:
-            updates.due_date === undefined ? undefined : updates.due_date,
-          status: updates.status,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -540,7 +637,7 @@ export default function TekkinAgentPanel() {
       }
 
       const data = await res.json();
-      const updated: TaskSummary = data.task;
+      const updated: TaskSummary = normalizeTask(data.task);
       setTasks((prev) => {
         const list = prev.map((t) =>
           t.id === taskId ? { ...t, ...updated } : t
@@ -548,18 +645,137 @@ export default function TekkinAgentPanel() {
         persistTasks(selectedProjectId, list);
         return list;
       });
+      setUnsyncedProjects((prev) => {
+        const next = { ...prev };
+        if (next[selectedProjectId]) {
+          delete next[selectedProjectId];
+          markUnsynced(selectedProjectId, false);
+        }
+        return next;
+      });
     } catch (err) {
       console.warn("Errore update task, resta solo cache locale:", err);
+      setUnsyncedProjects((prev) => {
+        const next = { ...prev, [selectedProjectId]: true };
+        markUnsynced(selectedProjectId, true);
+        return next;
+      });
       // la UI resta sugli aggiornamenti ottimistici
     } finally {
       setUpdatingTaskId(null);
     }
   };
 
+  const retrySync = async () => {
+    if (!selectedProjectId) return;
+    setRetryingSync(true);
+    try {
+      const res = await fetch(
+        `/api/tekkin-tasks?projectId=${encodeURIComponent(selectedProjectId)}`
+      );
+      if (!res.ok) {
+        throw new Error(`API ${res.status}`);
+      }
+      const data = await res.json();
+      const list: TaskSummary[] = (data.tasks || []).map(normalizeTask);
+      setTasks(list);
+      persistTasks(selectedProjectId, list);
+      setUnsyncedProjects((prev) => {
+        const next = { ...prev };
+        if (next[selectedProjectId]) {
+          delete next[selectedProjectId];
+          markUnsynced(selectedProjectId, false);
+        }
+        return next;
+      });
+    } catch (err) {
+      console.warn("Retry sync fallita:", err);
+    } finally {
+      setRetryingSync(false);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!selectedProjectId) return;
+    setConfirmDelete(null);
+    setDeletingTaskId(taskId);
+
+    setTasks((prev) => {
+      const list = prev.filter((t) => t.id !== taskId);
+      persistTasks(selectedProjectId, list);
+      return list;
+    });
+
+    try {
+      const res = await fetch("/api/tekkin-tasks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: taskId }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Errore delete task");
+      }
+    } catch (err) {
+      console.warn("Errore delete task, resta solo cache locale:", err);
+    } finally {
+      setDeletingTaskId(null);
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    setConfirmDelete(null);
+    setDeletingProjectId(projectId);
+
+    const remainingProjects = projects.filter((p) => p.id !== projectId);
+    persistProjects(remainingProjects);
+    setProjects(remainingProjects);
+    removeLocalTasks(projectId);
+
+    if (selectedProjectId === projectId) {
+      const fallbackId = remainingProjects[0]?.id ?? null;
+      setSelectedProjectId(fallbackId);
+      setTasks(
+        fallbackId ? loadLocalTasks(fallbackId).map(normalizeTask) : []
+      );
+    }
+
+    try {
+      const res = await fetch("/api/tekkin-projects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: projectId }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Errore delete progetto");
+      }
+    } catch (err) {
+      console.warn("Errore delete progetto, resta solo cache locale:", err);
+    } finally {
+      setDeletingProjectId(null);
+    }
+  };
+
+  const confirmDeletion = async () => {
+    if (!confirmDelete) return;
+    if (confirmDelete.type === "task") {
+      await handleDeleteTask(confirmDelete.id);
+    } else {
+      await handleDeleteProject(confirmDelete.id);
+    }
+  };
+
   const selectedProject =
     projects.find((p) => p.id === selectedProjectId) || null;
+  const isDeletingTarget =
+    !!confirmDelete &&
+    (confirmDelete.type === "task"
+      ? deletingTaskId === confirmDelete.id
+      : deletingProjectId === confirmDelete.id);
 
   return (
+  <>
     <section className="w-full max-w-6xl mx-auto rounded-3xl border border-[#e4e8f0] bg-white shadow-[0_20px_60px_rgba(0,0,0,0.06)] overflow-hidden">
       {/* HERO */}
       <div className="relative overflow-hidden border-b border-[#e8ecf3] bg-gradient-to-r from-[#0f172a] via-[#0d1c36] to-[#0f172a] px-5 py-5 text-white">
@@ -607,321 +823,584 @@ export default function TekkinAgentPanel() {
 
       {/* MAIN */}
       <div className="p-4 md:p-6 space-y-4">
-        <div className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr] 2xl:grid-cols-[1.35fr_1fr]">
-          {/* Colonna sinistra: chat + scorciatoie */}
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#e8ecf3] bg-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
-              <div className="flex items-center justify-between border-b border-[#eef1f6] px-4 py-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#0f1a2c]">
-                  <MessageSquare className="h-4 w-4 text-[#4ac1ff]" />
-                  Chat operativa
-                </div>
-                {loading && (
-                  <span className="inline-flex items-center gap-1 text-[12px] text-zinc-500">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Sto generando...
-                  </span>
-                )}
-              </div>
-              <div className="px-4 py-3 space-y-3">
-                <div className="rounded-xl border border-[#eef1f4] bg-white/80 p-3 max-h-80 overflow-auto space-y-3">
-                  {messages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`flex gap-2 ${
-                        m.role === "agent"
-                          ? "items-start"
-                          : "items-start justify-end"
-                      }`}
-                    >
-                      {m.role === "agent" && (
-                        <div className="h-8 w-8 rounded-full bg-[#0f1a2c] text-white grid place-items-center text-xs">
-                          TA
-                        </div>
-                      )}
-                      <div
-                        className={`rounded-2xl px-3 py-2 text-sm leading-relaxed max-w-[85%] ${
-                          m.role === "agent"
-                            ? "bg-[#0f1a2c] text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.08)] border border-[#15233a]"
-                            : "bg-white text-zinc-800 border border-[#eef1f4]"
-                        }`}
-                      >
-                        {m.content}
-                      </div>
-                      {m.role === "user" && (
-                        <div className="h-8 w-8 rounded-full bg-[#e7f4ff] text-[#0f1a2c] grid place-items-center text-xs font-semibold">
-                          Tu
-                        </div>
-                      )}
+        {(showChat || showPlanner) && (
+          <div
+            className={`grid gap-4 ${
+              showChat && showPlanner
+                ? "xl:grid-cols-[1.25fr_0.95fr] 2xl:grid-cols-[1.35fr_1fr]"
+                : "grid-cols-1"
+            }`}
+          >
+            {/* Colonna sinistra: chat + scorciatoie */}
+            {showChat && (
+              <div className="space-y-4" id="tekkin-chat">
+                <div className="rounded-2xl border border-[#e8ecf3] bg-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+                  <div className="flex items-center justify-between border-b border-[#eef1f6] px-4 py-3">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[#0f1a2c]">
+                      <MessageSquare className="h-4 w-4 text-[#4ac1ff]" />
+                      Chat operativa
                     </div>
-                  ))}
-                  {messages.length === 0 && (
-                    <div className="text-sm text-zinc-500">
-                      Invia un brief per iniziare la sessione.
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-[#eef1f4] bg-white p-3 space-y-2">
-                  <label className="text-xs uppercase tracking-[0.15em] text-zinc-500">
-                    Brief veloce
-                  </label>
-                  <textarea
-                    className="w-full rounded-lg border border-[#e3e8ef] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0f1a2c] focus:ring-2 focus:ring-[#7ef9c7]/50"
-                    rows={3}
-                    placeholder='Es: "Oggi ho rifinito il player e preparato il press kit. Cosa priorizzare domani?"'
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        send();
-                      }
-                    }}
-                  />
-                  <div className="flex flex-wrap items-center gap-2 justify-between">
-                    <div className="text-xs text-zinc-500">
-                      Tip: invia con Ctrl/Cmd + Invio
-                    </div>
-                    <button
-                      onClick={() => send()}
-                      disabled={loading}
-                      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#7ef9c7] to-[#4ac1ff] px-4 py-2 text-sm font-semibold text-[#0f1a2c] shadow-[0_8px_24px_rgba(74,193,255,0.25)] hover:brightness-110 disabled:opacity-60"
-                    >
-                      {loading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      {loading ? "Invio in corso..." : "Invia a Tekkin Agent"}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-[#eef1f4] bg-[#f8fbff] p-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-[#0f1a2c]">
-                    <ArrowUpRight className="h-4 w-4 text-[#4ac1ff]" />
-                    Scorciatoie
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {quickPrompts.map((p) => (
-                      <button
-                        key={p}
-                        onClick={() => send(p)}
-                        className="rounded-full border border-[#d9e5ff] bg-white px-3 py-1.5 text-xs text-zinc-700 hover:border-[#0f1a2c] hover:text-[#0f1a2c]"
-                        disabled={loading}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Colonna destra: planner */}
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#e8ecf3] bg-white/95 shadow-[0_10px_30px_rgba(0,0,0,0.04)] p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Planner
-                  </div>
-                  <div className="text-sm font-semibold text-[#0f1a2c]">
-                    Progetti e task
-                  </div>
-                </div>
-                {loadingProjects && (
-                  <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <select
-                  className="w-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-2 text-sm text-zinc-800"
-                  value={selectedProjectId ?? ""}
-                  onChange={(e) =>
-                    setSelectedProjectId(e.target.value ? e.target.value : null)
-                  }
-                >
-                  {projects.length === 0 && (
-                    <option value="">Nessun progetto</option>
-                  )}
-                  {projects.length > 0 && !selectedProjectId && (
-                    <option value="">Seleziona un progetto</option>
-                  )}
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ? {p.type} ? prio {p.priority}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="flex gap-2">
-                  <input
-                    className="flex-1 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                    placeholder="Nuovo progetto (es. TEKKIN: Site)"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                  />
-                </div>
-                <div className="flex gap-2 items-center">
-                  <select
-                    className="flex-1 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                    value={newProjectType}
-                    onChange={(e) =>
-                      setNewProjectType(e.target.value as "artist" | "client")
-                    }
-                  >
-                    <option value="artist">Artist</option>
-                    <option value="client">Client</option>
-                  </select>
-                  <input
-                    type="number"
-                    min={0}
-                    max={10}
-                    className="w-20 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                    value={newProjectPriority}
-                    onChange={(e) =>
-                      setNewProjectPriority(Number(e.target.value) || 0)
-                    }
-                  />
-                  <button
-                    onClick={handleCreateProject}
-                    disabled={creatingProject || !newProjectName.trim()}
-                    className="inline-flex items-center gap-1 rounded-full bg-[#0f1a2c] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
-                  >
-                    {creatingProject ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Plus className="h-3 w-3" />
+                    {loading && (
+                      <span className="inline-flex items-center gap-1 text-[12px] text-zinc-500">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Sto generando...
+                      </span>
                     )}
-                    Progetto
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-[#eef1f4] space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs font-semibold text-[#0f1a2c]">
-                    Task del progetto
-                    {selectedProject ? ` ? ${selectedProject.name}` : ""}
                   </div>
-                  {loadingTasks && (
-                    <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
-                  )}
-                </div>
-
-                {selectedProjectId ? (
-                  <>
-                    <div className="max-h-36 overflow-auto space-y-1">
-                      {tasks.length > 0 && (
-                        <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2 px-2 text-[11px] font-semibold text-zinc-500">
-                          <span>Titolo</span>
-                          <span>Inizio</span>
-                          <span>Scadenza</span>
-                        </div>
-                      )}
-                      {tasks.length === 0 && (
-                        <div className="text-xs text-zinc-500">
-                          Nessuna task ancora. Aggiungine una sotto.
-                        </div>
-                      )}
-                      {tasks.map((t) => (
+                  <div className="px-4 py-3 space-y-3">
+                    <div className="rounded-xl border border-[#eef1f4] bg-white/80 p-3 max-h-80 overflow-auto space-y-3">
+                      {messages.map((m) => (
                         <div
-                          key={t.id}
-                          className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-lg border border-[#eef1f4] bg-white px-2 py-1.5 text-xs"
+                          key={m.id}
+                          className={`flex gap-2 ${
+                            m.role === "agent"
+                              ? "items-start"
+                              : "items-start justify-end"
+                          }`}
                         >
-                          <div className="flex flex-col">
-                            <span className="font-medium text-[#0f1a2c]">
-                              {t.title}
-                            </span>
-                            <span className="text-[11px] text-zinc-500">
-                              {t.status} · ore {t.actual_hours ?? 0}
-                            </span>
+                          {m.role === "agent" && (
+                            <div className="h-8 w-8 rounded-full bg-[#0f1a2c] text-white grid place-items-center text-xs">
+                              TA
+                            </div>
+                          )}
+                          <div
+                            className={`rounded-2xl px-3 py-2 text-sm leading-relaxed max-w-[85%] ${
+                              m.role === "agent"
+                                ? "bg-[#0f1a2c] text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.08)] border border-[#15233a]"
+                                : "bg-white text-zinc-800 border border-[#eef1f4]"
+                            }`}
+                          >
+                            {m.content}
                           </div>
-                          <input
-                            type="date"
-                            className="w-28 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
-                            value={t.start_date ?? ""}
-                            onChange={(e) =>
-                              handleUpdateTask(t.id, {
-                                start_date: e.target.value || null,
-                              })
-                            }
-                            disabled={updatingTaskId === t.id}
-                          />
-                          <input
-                            type="date"
-                            className="w-28 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
-                            value={t.due_date ?? ""}
-                            onChange={(e) =>
-                              handleUpdateTask(t.id, {
-                                due_date: e.target.value || null,
-                              })
-                            }
-                            disabled={updatingTaskId === t.id}
-                          />
+                          {m.role === "user" && (
+                            <div className="h-8 w-8 rounded-full bg-[#e7f4ff] text-[#0f1a2c] grid place-items-center text-xs font-semibold">
+                              Tu
+                            </div>
+                          )}
                         </div>
                       ))}
+                      {messages.length === 0 && (
+                        <div className="text-sm text-zinc-500">
+                          Invia un brief per iniziare la sessione.
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-1">
-                      <input
-                        className="w-full rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                        placeholder="Nuova task per questo progetto"
-                        value={newTaskTitle}
-                        onChange={(e) => setNewTaskTitle(e.target.value)}
+                    <div className="rounded-xl border border-[#eef1f4] bg-white p-3 space-y-2">
+                      <label className="text-xs uppercase tracking-[0.15em] text-zinc-500">
+                        Brief veloce
+                      </label>
+                      <textarea
+                        className="w-full rounded-lg border border-[#e3e8ef] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#0f1a2c] focus:ring-2 focus:ring-[#7ef9c7]/50"
+                        rows={3}
+                        placeholder='Es: "Oggi ho rifinito il player e preparato il press kit. Cosa priorizzare domani?"'
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            send();
+                          }
+                        }}
                       />
-                      <div className="flex gap-2 items-center">
-                        <select
-                          className="w-32 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                          value={newTaskStatus}
-                          onChange={(e) =>
-                            setNewTaskStatus(
-                              e.target.value as "todo" | "doing" | "done"
-                            )
-                          }
-                        >
-                          <option value="todo">Todo</option>
-                          <option value="doing">Doing</option>
-                          <option value="done">Done</option>
-                        </select>
-                        <input
-                          type="date"
-                          className="flex-1 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
-                          value={newTaskDueDate}
-                          onChange={(e) => setNewTaskDueDate(e.target.value)}
-                        />
+                      <div className="flex flex-wrap items-center gap-2 justify-between">
+                        <div className="text-xs text-zinc-500">
+                          Tip: invia con Ctrl/Cmd + Invio
+                        </div>
                         <button
-                          onClick={handleCreateTask}
-                          disabled={
-                            creatingTask || !newTaskTitle.trim() || !selectedProjectId
-                          }
-                          className="inline-flex items-center gap-1 rounded-full bg-[#0f1a2c] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                          onClick={() => send()}
+                          disabled={loading}
+                          className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#7ef9c7] to-[#4ac1ff] px-4 py-2 text-sm font-semibold text-[#0f1a2c] shadow-[0_8px_24px_rgba(74,193,255,0.25)] hover:brightness-110 disabled:opacity-60"
                         >
-                          {creatingTask ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                          {loading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
-                            <Plus className="h-3 w-3" />
+                            <Send className="h-4 w-4" />
                           )}
-                          Task
+                          {loading ? "Invio in corso..." : "Invia a Tekkin Agent"}
                         </button>
                       </div>
                     </div>
-                  </>
-                ) : (
-                  <div className="text-xs text-zinc-500">
-                    Seleziona un progetto per vedere o aggiungere task.
+
+                    <div className="rounded-xl border border-[#eef1f4] bg-[#f8fbff] p-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-[#0f1a2c]">
+                        <ArrowUpRight className="h-4 w-4 text-[#4ac1ff]" />
+                        Scorciatoie
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {quickPrompts.map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => send(p)}
+                            className="rounded-full border border-[#d9e5ff] bg-white px-3 py-1.5 text-xs text-zinc-700 hover:border-[#0f1a2c] hover:text-[#0f1a2c]"
+                            disabled={loading}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
+              </div>
+            )}
+
+            {/* Colonna destra: planner */}
+            {showPlanner && (
+              <div className="space-y-4" id="tekkin-planner">
+                <div className="rounded-2xl border border-[#e8ecf3] bg-white/95 shadow-[0_10px_30px_rgba(0,0,0,0.04)] p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Planner
+                      </div>
+                      <div className="text-sm font-semibold text-[#0f1a2c]">
+                        Progetti e task
+                      </div>
+                    </div>
+                    {loadingProjects && (
+                      <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <select
+                        className="w-full flex-1 rounded-lg border border-[#e3e8ef] bg-white px-2 py-2 text-sm text-zinc-800"
+                        value={selectedProjectId ?? ""}
+                        onChange={(e) =>
+                          setSelectedProjectId(
+                            e.target.value ? e.target.value : null
+                          )
+                        }
+                      >
+                        {projects.length === 0 && (
+                          <option value="">Nessun progetto</option>
+                        )}
+                        {projects.length > 0 && !selectedProjectId && (
+                          <option value="">Seleziona un progetto</option>
+                        )}
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} - {p.type} - prio {p.priority}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() =>
+                          selectedProject &&
+                          setConfirmDelete({
+                            type: "project",
+                            id: selectedProject.id,
+                            label: selectedProject.name,
+                          })
+                        }
+                        disabled={
+                          !selectedProjectId ||
+                          deletingProjectId === selectedProjectId
+                        }
+                        className="inline-flex items-center justify-center rounded-lg border border-[#e3e8ef] bg-white px-2 text-zinc-700 hover:text-red-600 disabled:opacity-50"
+                        title="Elimina progetto"
+                      >
+                        {deletingProjectId === selectedProjectId ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        className="flex-1 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm"
+                        placeholder="Nuovo progetto (es. TEKKIN: Site)"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-[1.1fr_0.6fr_auto] gap-2 items-center">
+                      <label className="flex items-center gap-2 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm">
+                        <span className="text-xs text-zinc-500">Tipo</span>
+                        <select
+                          className="flex-1 bg-transparent text-sm outline-none"
+                          value={newProjectType}
+                          onChange={(e) =>
+                            setNewProjectType(
+                              e.target.value as "artist" | "client"
+                            )
+                          }
+                        >
+                          <option value="artist">Artist</option>
+                          <option value="client">Client</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-[#e3e8ef] bg-white px-3 py-2 text-sm">
+                        <span className="text-xs text-zinc-500">Priorità</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={10}
+                          className="w-16 bg-transparent text-sm outline-none"
+                          value={newProjectPriority}
+                          onChange={(e) =>
+                            setNewProjectPriority(Number(e.target.value) || 0)
+                          }
+                        />
+                      </label>
+                      <button
+                        onClick={handleCreateProject}
+                        disabled={creatingProject || !newProjectName.trim()}
+                        className="inline-flex items-center gap-1 rounded-full bg-[#0f1a2c] px-3 py-2 text-xs font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                      >
+                        {creatingProject ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Plus className="h-3 w-3" />
+                        )}
+                        Progetto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-[#eef1f4] space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-[#0f1a2c]">
+                        Task del progetto
+                        {selectedProject ? ` ? ${selectedProject.name}` : ""}
+                      </div>
+                      {loadingTasks && (
+                        <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+                      )}
+                      <button
+                        onClick={() => {
+                          resetNewTaskFields();
+                          setShowNewTaskRow(true);
+                        }}
+                        disabled={creatingTask || !selectedProjectId}
+                        className="inline-flex items-center gap-2 rounded-full border border-[#e3e8ef] bg-white px-3 py-1.5 text-xs font-semibold text-[#0f1a2c] hover:border-[#0f1a2c] disabled:opacity-50"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Task
+                      </button>
+                    </div>
+
+                    {selectedProjectId ? (
+                      <>
+                        {unsyncedProjects[selectedProjectId] && (
+                          <div className="flex flex-col gap-1 text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                            <span>
+                              Sync col server non riuscita: stai vedendo la cache locale.
+                              Riprova piu' tardi, i dati restano salvati qui.
+                            </span>
+                            <button
+                              onClick={retrySync}
+                              disabled={retryingSync}
+                              className="self-start inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+                            >
+                              {retryingSync && (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              )}
+                              Riprova sync ora
+                            </button>
+                          </div>
+                        )}
+                        <div className="relative max-h-64 overflow-y-auto overflow-x-auto">
+                          <div className="space-y-1 min-w-[880px]">
+                          {tasks.length > 0 && (
+                            <div
+                              className={`${taskGridClass} items-center gap-2 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-semibold text-zinc-600 border border-[#e8ecf3]`}
+                            >
+                              <span>Titolo</span>
+                              <span>Status</span>
+                              <span>Priorità</span>
+                              <span>Inizio</span>
+                              <span>Scadenza</span>
+                              <span>Azioni</span>
+                            </div>
+                          )}
+                          {tasks.length === 0 && (
+                            <div className="text-xs text-zinc-500">
+                              Nessuna task ancora. Aggiungine una sotto.
+                            </div>
+                          )}
+                          {showNewTaskRow && (
+                            <div
+                              className={`${taskGridClass} items-center gap-2 rounded-lg border border-[#eef1f4] bg-white px-2 py-1.5 text-xs min-h-[56px]`}
+                            >
+                              <div className="flex flex-col gap-1">
+                                <input
+                                  type="text"
+                                  className="w-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-1.5 text-[12px] text-[#0f1a2c] placeholder:text-zinc-400 outline-none"
+                                  placeholder="Titolo task (obbligatorio)"
+                                  value={newTaskTitle}
+                                  onChange={(e) =>
+                                    setNewTaskTitle(e.target.value)
+                                  }
+                                />
+                                <span className="text-[11px] text-transparent">
+                                  spacer
+                                </span>
+                              </div>
+                              <select
+                                className="w-full h-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
+                                value={newTaskStatus}
+                                onChange={(e) =>
+                                  setNewTaskStatus(
+                                    e.target.value as
+                                      | "todo"
+                                      | "doing"
+                                      | "done"
+                                  )
+                                }
+                                disabled={creatingTask}
+                              >
+                                <option value="todo">
+                                  Todo (Da fare)
+                                </option>
+                                <option value="doing">
+                                  Doing (In corso)
+                                </option>
+                                <option value="done">
+                                  Done (Fatto)
+                                </option>
+                              </select>
+                              <label className="flex h-full items-center gap-1 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700">
+                                <span className="text-[10px] text-zinc-500">
+                                  Prio
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={10}
+                                  className="w-full bg-transparent outline-none"
+                                  value={newTaskPriority}
+                                  onChange={(e) =>
+                                    setNewTaskPriority(
+                                      Number(e.target.value) || 0
+                                    )
+                                  }
+                                  disabled={creatingTask}
+                                />
+                              </label>
+                              <input
+                                type="text"
+                                readOnly
+                                value="Auto"
+                                className="w-28 h-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-500 text-center"
+                              />
+                              <input
+                                type="date"
+                                className="w-28 h-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
+                                value={newTaskDueDate}
+                                onChange={(e) =>
+                                  setNewTaskDueDate(e.target.value)
+                                }
+                                aria-label="Data di scadenza (opzionale)"
+                                disabled={creatingTask}
+                                placeholder="gg/mm/aaaa"
+                              />
+                              <div className="flex h-full items-center justify-end gap-1">
+                                <button
+                                  onClick={() => {
+                                    resetNewTaskFields();
+                                    setShowNewTaskRow(false);
+                                  }}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#e3e8ef] bg-white text-[11px] text-zinc-700 hover:bg-slate-100"
+                                  disabled={creatingTask}
+                                  title="Annulla"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={handleCreateTask}
+                                  disabled={
+                                    creatingTask ||
+                                    !newTaskTitle.trim() ||
+                                    !selectedProjectId
+                                  }
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0f1a2c] text-[11px] font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                                  title="Salva task"
+                                >
+                                  {creatingTask ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Check className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {tasks.map((t) => (
+                            <div
+                              key={t.id}
+                              className={`${taskGridClass} items-center gap-2 rounded-lg border border-[#eef1f4] bg-white px-2 py-1.5 text-xs`}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium text-[#0f1a2c]">
+                                  {t.title}
+                                </span>
+                                <span className="text-[11px] text-zinc-500">
+                                  ore {t.actual_hours ?? 0} - prio{" "}
+                                  {t.priority ?? "-"}
+                                </span>
+                              </div>
+                              <select
+                                className="w-full rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
+                                value={t.status}
+                                onChange={(e) =>
+                                  handleUpdateTask(t.id, {
+                                    status: e.target.value as
+                                      | "todo"
+                                      | "doing"
+                                      | "done",
+                                  })
+                                }
+                                disabled={
+                                  updatingTaskId === t.id ||
+                                  deletingTaskId === t.id
+                                }
+                              >
+                                <option value="todo">
+                                  Todo (Da fare)
+                                </option>
+                                <option value="doing">
+                                  Doing (In corso)
+                                </option>
+                                <option value="done">
+                                  Done (Fatto)
+                                </option>
+                              </select>
+                              <label className="flex items-center gap-1 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700">
+                                <span className="text-[10px] text-zinc-500">
+                                  Prio
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={10}
+                                  className="w-full bg-transparent outline-none"
+                                  value={t.priority ?? 5}
+                                  onChange={(e) =>
+                                    handleUpdateTask(t.id, {
+                                      priority: Number(e.target.value) || 0,
+                                    })
+                                  }
+                                  disabled={
+                                    updatingTaskId === t.id ||
+                                    deletingTaskId === t.id
+                                  }
+                                />
+                              </label>
+                              <input
+                                type="date"
+                                className="w-28 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
+                                value={t.start_date ?? ""}
+                                onChange={(e) =>
+                                  handleUpdateTask(t.id, {
+                                    start_date: e.target.value || null,
+                                  })
+                                }
+                                disabled={
+                                  updatingTaskId === t.id ||
+                                  deletingTaskId === t.id
+                                }
+                              />
+                              <input
+                                type="date"
+                                className="w-28 rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-zinc-700"
+                                value={t.due_date ?? ""}
+                                onChange={(e) =>
+                                  handleUpdateTask(t.id, {
+                                    due_date: e.target.value || null,
+                                  })
+                                }
+                                disabled={
+                                  updatingTaskId === t.id ||
+                                  deletingTaskId === t.id
+                                }
+                              />
+                              <button
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    type: "task",
+                                    id: t.id,
+                                    label: t.title,
+                                  })
+                                }
+                                disabled={deletingTaskId === t.id}
+                                className="inline-flex items-center justify-center rounded-lg border border-[#e3e8ef] bg-white px-2 py-1 text-[11px] text-red-600 hover:bg-red-50 disabled:opacity-50"
+                              >
+                                {deletingTaskId === t.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        </div>
+
+                        <div className="space-y-1" />
+                      </>
+                    ) : (
+                      <div className="text-xs text-zinc-500">
+                        Seleziona un progetto per vedere o aggiungere task.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {showCalendar && (
+          <div
+            id="tekkin-calendar"
+            className="rounded-2xl border border-[#e8ecf3] bg-white p-4 md:p-5 space-y-3 shadow-[0_10px_30px_rgba(0,0,0,0.04)]"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  Calendar
+                </div>
+                <div className="text-sm font-semibold text-[#0f1a2c]">
+                  Scadenze imminenti{" "}
+                  {selectedProject ? `· ${selectedProject.name}` : ""}
+                </div>
               </div>
             </div>
+            <div className="space-y-2">
+              {upcomingTasks.length === 0 && (
+                <div className="text-sm text-zinc-500">
+                  Nessuna scadenza per questo progetto. Imposta una data nelle
+                  task.
+                </div>
+              )}
+              {upcomingTasks.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between rounded-lg border border-[#eef1f4] bg-white px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-[#0f1a2c]">
+                      {t.title}
+                    </span>
+                    <span className="text-[11px] text-zinc-500">
+                      Status: {t.status} · Prio {t.priority ?? "-"}
+                    </span>
+                  </div>
+                  <div className="text-xs font-semibold text-[#0f1a2c] bg-slate-100 px-2 py-1 rounded-lg">
+                    {formatDateShort(t.due_date)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* DASHBOARD VISIVA DELL'AGENTE */}
-        {agentData && (
+        {showDashboard && agentData && (
           <div className="rounded-2xl border border-[#e8ecf3] bg-[#f7f9fc] p-4 md:p-5 space-y-4 shadow-[0_12px_34px_rgba(0,0,0,0.05)]">
             <div className="flex items-center justify-between">
               <div>
@@ -1088,15 +1567,15 @@ export default function TekkinAgentPanel() {
                           )}
                         </div>
                         <div
-                        className={`font-semibold ${
-                          e.type === "income"
-                            ? "text-emerald-500"
-                            : "text-red-500"
-                        }`}
-                      >
-                        {e.type === "income" ? "+" : "-"}
-                        {e.amount} €
-                      </div>
+                          className={`font-semibold ${
+                            e.type === "income"
+                              ? "text-emerald-500"
+                              : "text-red-500"
+                          }`}
+                        >
+                          {e.type === "income" ? "+" : "-"}
+                          {e.amount} €
+                        </div>
                       </div>
                     ))}
                     {agentData.finance.entries.length === 0 && (
@@ -1112,5 +1591,38 @@ export default function TekkinAgentPanel() {
         )}
       </div>
     </section>
-  );
-}
+
+    {confirmDelete && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="w-full max-w-md space-y-3 rounded-2xl bg-white p-4 shadow-2xl">
+          <div className="text-sm font-semibold text-[#0f1a2c]">
+            Confermi eliminazione?
+          </div>
+          <p className="text-sm text-zinc-600">
+            Stai per eliminare{" "}
+            {confirmDelete.type === "project" ? "il progetto" : "la task"} "
+            {confirmDelete.label}".
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setConfirmDelete(null)}
+              className="rounded-lg border border-[#e3e8ef] bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-slate-50"
+            >
+              Annulla
+            </button>
+            <button
+              onClick={confirmDeletion}
+              disabled={isDeletingTarget}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
+            >
+              {isDeletingTarget && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              Elimina
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
+);

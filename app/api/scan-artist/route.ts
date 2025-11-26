@@ -1,217 +1,298 @@
+export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 
 type ScanBody = {
   url?: string;
 };
 
-type PlatformGuesses = {
-  instagram?: string;
-  beatport?: string;
-  traxsource?: string;
-  soundcloud?: string;
-  songstats?: string;
-  residentAdvisor?: string;
-  songkick?: string;
-  appleMusic?: string;
-  tidal?: string;
+type SpotifyArtist = {
+  id: string;
+  name: string;
+  genres: string[];
+  followers?: { total?: number };
+  popularity?: number;
+  images?: { url: string; height?: number; width?: number }[];
 };
 
-function makePrettyNameFromSlug(slug: string): string {
-  const pretty =
-    slug
-      .replace(/[-_]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/^./, (c) => c.toUpperCase()) || "Artist";
-  return pretty;
-}
+type BeatstatsSummary = {
+  url: string;
+  currentPositionsText?: string;
+};
 
-function inferHandleFromUrl(url: string) {
+type ArtistData = {
+  name: string;
+  genre: string;
+  imageUrl: string;
+  instagram: string;
+  beatport: string | null;
+  soundcloud: string;
+  traxsource?: string | null;
+  songstats?: string | null;
+  residentAdvisor?: string | null;
+  songkick?: string | null;
+  appleMusic?: string | null;
+  tidal?: string | null;
+  spotifyId?: string | null;
+  spotifyFollowers?: number | null;
+  spotifyPopularity?: number | null;
+  spotify_url?: string | null;
+  spotify_id?: string | null;
+  beatstatsUrl?: string | null;
+  beatstatsCurrentPositions?: string | null;
+};
+
+async function findBeatstatsUrlByName(
+  artistName: string
+): Promise<string | null> {
   try {
-    const u = new URL(url);
-    const host = u.hostname.toLowerCase();
-    const parts = u.pathname.split("/").filter(Boolean);
-    const last = parts[parts.length - 1] || "artist";
+    const searchUrl = `https://www.beatstats.com/search/search/index?q=${encodeURIComponent(
+      artistName
+    )}`;
 
-    return {
-      host,
-      slug: last.toLowerCase(),
-      pathParts: parts,
-    };
-  } catch {
-    return {
-      host: "",
-      slug: "artist",
-      pathParts: [] as string[],
-    };
+    const res = await fetch(searchUrl, {
+      cache: "no-store",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+      },
+    });
+
+    if (!res.ok) {
+      console.error("[Beatstats] search request failed", res.status);
+      return null;
+    }
+
+    const html = await res.text();
+
+    const patterns: RegExp[] = [
+      /href=['"](\/artist\/[^'"]*?\/\d+)['"]/i,
+      /(\/artist\/[a-z0-9-]+\/\d+)/i,
+    ];
+
+    for (const regex of patterns) {
+      const match = html.match(regex);
+      if (match && match[1]) {
+        const relative = match[1];
+        return `https://www.beatstats.com${relative}`;
+      }
+    }
+
+    console.warn(
+      "[Beatstats] Nessun link artista trovato nella pagina di ricerca"
+    );
+    return null;
+  } catch (err) {
+    console.error("[Beatstats] errore findBeatstatsUrlByName", err);
+    return null;
   }
 }
 
-function buildPlatformGuesses(slug: string): PlatformGuesses {
-  const handle = slug.toLowerCase();
+async function fetchBeatstatsSummary(
+  beatstatsUrl: string
+): Promise<BeatstatsSummary | null> {
+  try {
+    const res = await fetch(beatstatsUrl, {
+      cache: "no-store",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+      },
+    });
 
-  return {
-    instagram: `https://instagram.com/${handle}`,
-    beatport: `https://www.beatport.com/artist/${handle}/00000`,
-    traxsource: `https://www.traxsource.com/artist/000000/${handle}`,
-    soundcloud: `https://soundcloud.com/${handle}`,
-    songstats: `https://app.songstats.com/artist/${handle}`,
-    residentAdvisor: `https://ra.co/dj/${handle}`,
-    songkick: `https://www.songkick.com/artists/${handle}`,
-    appleMusic: `https://music.apple.com/artist/${handle}`,
-    tidal: `https://listen.tidal.com/artist/${handle}`,
-  };
+    if (!res.ok) {
+      console.error("[Beatstats] fetch artist page failed", res.status);
+      return null;
+    }
+
+    const html = await res.text();
+
+    let currentPositionsText: string | undefined;
+    const idx = html.indexOf("CURRENT ARTIST CHART POSITIONS");
+    if (idx !== -1) {
+      const snippet = html.slice(idx, idx + 600);
+      currentPositionsText = snippet
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    return {
+      url: beatstatsUrl,
+      currentPositionsText,
+    };
+  } catch (err) {
+    console.error("[Beatstats] errore fetchBeatstatsSummary", err);
+    return null;
+  }
 }
 
-/**
- * Client Credentials flow per prendere un token app-level Spotify
- */
-async function getSpotifyToken() {
+function extractSpotifyId(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes("spotify.com")) return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const idx = parts.indexOf("artist");
+    if (idx === -1 || !parts[idx + 1]) return null;
+    const rawId = parts[idx + 1];
+    return rawId.split("?")[0];
+  } catch {
+    return null;
+  }
+}
+
+async function getSpotifyAccessToken(): Promise<string> {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    console.warn("SPOTIFY_CLIENT_ID/SECRET mancanti nelle env");
-    return null;
+    throw new Error("Spotify client id/secret mancanti");
   }
 
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-
-  const res = await fetch("https://accounts.spotify.com/api/token", {
+  const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
     method: "POST",
     headers: {
-      Authorization: `Basic ${basic}`,
+      Authorization:
+        "Basic " + Buffer.from(clientId + ":" + clientSecret).toString("base64"),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: "grant_type=client_credentials",
   });
 
-  if (!res.ok) {
-    console.error("Spotify token error", await res.text());
-    return null;
+  if (!tokenRes.ok) {
+    const text = await tokenRes.text();
+    throw new Error("Errore Spotify token: " + text);
   }
 
-  const json = (await res.json()) as { access_token: string };
+  const json = (await tokenRes.json()) as {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+  };
+
   return json.access_token;
 }
 
-/**
- * Se l’URL è un profilo artista Spotify, recupera info reali
- */
-async function fetchSpotifyArtist(url: string) {
-  const { host, pathParts } = inferHandleFromUrl(url);
-
-  const isSpotifyArtist =
-    host.includes("spotify.com") && pathParts[0] === "artist";
-
-  if (!isSpotifyArtist) return null;
-
-  const artistId = pathParts[1];
-  if (!artistId) return null;
-
-  const token = await getSpotifyToken();
-  if (!token) return null;
-
+async function fetchSpotifyArtist(
+  artistId: string,
+  accessToken: string
+): Promise<SpotifyArtist> {
   const res = await fetch(`https://api.spotify.com/v1/artists/${artistId}`, {
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken}`,
     },
   });
 
   if (!res.ok) {
-    console.error("Spotify artist fetch error", await res.text());
-    return null;
+    const text = await res.text();
+    throw new Error("Errore Spotify artist: " + text);
   }
 
-  const data = await res.json();
-
-  return {
-    id: data.id as string,
-    name: data.name as string,
-    genres: (data.genres as string[]) ?? [],
-    imageUrl:
-      (data.images?.[0]?.url as string | undefined) ??
-      `https://ui-avatars.com/api/?name=${encodeURIComponent(
-        data.name
-      )}&background=050505&color=ffffff`,
-    followers: data.followers?.total as number | undefined,
-    popularity: data.popularity as number | undefined,
-    externalUrls: data.external_urls as Record<string, string> | undefined,
-  };
+  return (await res.json()) as SpotifyArtist;
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
+  const body = (await request.json()) as ScanBody;
+
+  if (!body.url || !body.url.trim()) {
+    return NextResponse.json({ error: "Nessun URL fornito" }, { status: 400 });
+  }
+
+  const url = body.url.trim();
+  const spotifyId = extractSpotifyId(url);
+
+  if (!spotifyId) {
+    return NextResponse.json(
+      {
+        error: "Per ora supportiamo solo link artista Spotify",
+        logs: [
+          "> Avvio scansione profilo...",
+          `> URL sorgente: ${body.url}`,
+          "> Formato non supportato. Usa un link artista Spotify.",
+        ],
+      },
+      { status: 400 }
+    );
+  }
+
   try {
-    const body = (await req.json()) as ScanBody;
-    const url = body?.url?.trim();
+    const accessToken = await getSpotifyAccessToken();
+    const spotifyArtist = await fetchSpotifyArtist(spotifyId, accessToken);
 
-    if (!url) {
-      return NextResponse.json({ error: "Missing url" }, { status: 400 });
-    }
+    const primaryGenre =
+      spotifyArtist.genres && spotifyArtist.genres.length > 0
+        ? spotifyArtist.genres[0]
+        : "Artist";
 
-    const { host, slug } = inferHandleFromUrl(url);
-
-    let spotifyArtist: Awaited<ReturnType<typeof fetchSpotifyArtist>> | null =
-      null;
-    let prettyName = makePrettyNameFromSlug(slug);
-    let genreLabel = "Minimal / Deep Tech";
-
-    // 1) PROVA ad usare Spotify se l’URL è un artista Spotify
-    try {
-      spotifyArtist = await fetchSpotifyArtist(url);
-      if (spotifyArtist) {
-        prettyName = spotifyArtist.name;
-        if (spotifyArtist.genres && spotifyArtist.genres.length > 0) {
-          genreLabel = spotifyArtist.genres.slice(0, 2).join(" / ");
-        }
-      }
-    } catch (e) {
-      console.error("Errore fetchSpotifyArtist", e);
-    }
-
-    const guesses = buildPlatformGuesses(slug);
-
-    const logs = [
-      "> Connessione al gateway musicale...",
-      `> URL rilevato: ${url}`,
-      `> Host sorgente: ${host || "sconosciuto"}`,
-      spotifyArtist
-        ? `> [SPOTIFY API] Artista trovato: ${spotifyArtist.name}`
-        : "> [SPOTIFY API] Non disponibile / fallback su handle",
-      "> Analisi handle social e piattaforme correlate...",
-      "> Generazione link (Instagram, Beatport, Soundcloud, ecc)...",
-      "> Inizializzazione profilo artista...",
-      "> IDENTITA' PREPARATA. Verifica i dati prima di procedere.",
-    ];
+    const imageUrl =
+      spotifyArtist.images && spotifyArtist.images.length > 0
+        ? spotifyArtist.images[0].url
+        : "/images/default-artist.png";
 
     const artist = {
-      name: prettyName,
-      genre: genreLabel,
-      imageUrl:
-        spotifyArtist?.imageUrl ??
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(
-          prettyName
-        )}&background=050505&color=ffffff`,
-      spotifyId: spotifyArtist?.id ?? null,
-      spotifyFollowers: spotifyArtist?.followers ?? null,
-      spotifyPopularity: spotifyArtist?.popularity ?? null,
-
-      instagram: guesses.instagram!,
-      beatport: guesses.beatport!,
-      soundcloud: guesses.soundcloud!,
-
-      traxsource: guesses.traxsource,
-      songstats: guesses.songstats,
-      residentAdvisor: guesses.residentAdvisor,
-      songkick: guesses.songkick,
-      appleMusic: guesses.appleMusic,
-      tidal: guesses.tidal,
-      platforms: guesses,
+      name: spotifyArtist.name,
+      genre: primaryGenre,
+      imageUrl,
+      instagram: "",
+      beatport: "",
+      soundcloud: "",
+      traxsource: null,
+      songstats: null,
+      residentAdvisor: null,
+      songkick: null,
+      appleMusic: null,
+      tidal: null,
+      spotifyId: spotifyArtist.id,
+      spotify_url: url,
+      spotify_id: spotifyId,
+      spotifyFollowers: spotifyArtist.followers?.total ?? null,
+      spotifyPopularity: spotifyArtist.popularity ?? null,
+      beatstatsUrl: null,
+      beatstatsCurrentPositions: null,
     };
+
+    let beatstatsSummary: BeatstatsSummary | null = null;
+    try {
+      console.log("[scan-artist] starting Beatstats search for", spotifyArtist.name);
+      const beatstatsUrl = await findBeatstatsUrlByName(spotifyArtist.name);
+      if (beatstatsUrl) {
+        beatstatsSummary = await fetchBeatstatsSummary(beatstatsUrl);
+      }
+    } catch (err) {
+      console.error("[scan-artist] errore Beatstats integration", err);
+    }
+
+    const extraLogs: string[] = [];
+
+    if (beatstatsSummary) {
+      artist.beatstatsUrl = beatstatsSummary.url;
+      artist.beatstatsCurrentPositions = beatstatsSummary.currentPositionsText ?? null;
+      extraLogs.push("> [BEATSTATS] Profilo artista trovato.");
+    } else {
+      extraLogs.push("> [BEATSTATS] Nessun profilo artista trovato.");
+    }
+
+    const logs = [
+      "> Avvio scansione profilo...",
+      `> URL sorgente: ${body.url}`,
+      "> [SPOTIFY API] Richiesta dettagli artista...",
+      "> [SPOTIFY API] Dati artista ricevuti.",
+      "> Mapping dati al formato Tekkin...",
+      ...extraLogs,
+    ];
 
     return NextResponse.json({ logs, artist });
   } catch (err) {
-    console.error("scan-artist error", err);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    console.error("[scan-artist] error", err);
+    return NextResponse.json(
+      {
+        error: "Errore durante la scansione artista",
+        logs: [
+          "> Avvio scansione profilo...",
+          `> URL sorgente: ${body.url}`,
+          "> Errore durante la chiamata a Spotify. Riprova piu tardi.",
+        ],
+      },
+      { status: 500 }
+    );
   }
 }

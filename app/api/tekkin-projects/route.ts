@@ -83,3 +83,89 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export async function PUT(req: NextRequest) {
+  try {
+    const supabase = requireSupabase();
+    const body = await req.json();
+    const id = String(body?.id || body?.projectId || "").trim();
+
+    const updates: Record<string, any> = {};
+    if (typeof body?.name === "string") {
+      const name = body.name.trim();
+      if (name) updates.name = name;
+    }
+    if (body?.type === "artist" || body?.type === "client") {
+      updates.type = body.type;
+    }
+    if (typeof body?.status === "string" && body.status.length > 0) {
+      updates.status = body.status;
+    }
+    if (body?.priority !== undefined) {
+      const prio = Number(body.priority);
+      updates.priority = Number.isFinite(prio) ? prio : null;
+    }
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id richiesto" },
+        { status: 400 }
+      );
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json(
+        { error: "Nessun campo da aggiornare" },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("projects")
+      .update(updates)
+      .eq("id", id)
+      .select("id, name, type, status, priority")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return NextResponse.json(
+        { error: "Progetto non trovato" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ project: data }, { status: 200 });
+  } catch (err) {
+    console.error("tekkin-projects PUT error", err);
+    return NextResponse.json(
+      { error: "Errore aggiornamento progetto" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const supabase = requireSupabase();
+    const body = await req.json();
+    const id = String(body?.id || body?.projectId || "").trim();
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id richiesto" },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await supabase.from("projects").delete().eq("id", id);
+    if (error) throw error;
+
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (err) {
+    console.error("tekkin-projects DELETE error", err);
+    return NextResponse.json(
+      { error: "Errore eliminazione progetto" },
+      { status: 500 }
+    );
+  }
+}
