@@ -5,7 +5,7 @@ import { ensureProfileAndArtist } from "@/utils/profile/ensureProfile";
 
 export async function POST() {
   try {
-    const supabase = supabaseServer();
+    const supabase = await supabaseServer();
     const {
       data: { user },
       error: userErr,

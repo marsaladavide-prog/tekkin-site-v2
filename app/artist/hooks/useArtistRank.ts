@@ -72,16 +72,25 @@ const baseFallbackRank: ArtistRank = {
   activity_score: 64,
 };
 
+function toNumber(value: any): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function useArtistRank() {
   const [data, setData] = useState<ArtistRankView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [localProfile] = useState<Partial<Artist>>(() => {
+  // profilo salvato da /register in localStorage
+  const [localProfile] = useState<Record<string, any>>(() => {
     if (typeof window === "undefined") return {};
     try {
       const raw = localStorage.getItem("tekkin_artist_profile");
-      return raw ? (JSON.parse(raw) as Partial<Artist>) : {};
+      const parsed = raw ? JSON.parse(raw) : {};
+      // per debug, se serve
+      // console.log("localProfile tekkin_artist_profile:", parsed);
+      return parsed;
     } catch {
       return {};
     }
@@ -107,7 +116,7 @@ export function useArtistRank() {
           return;
         }
 
-        // 1) utente loggato
+        // utente loggato
         const {
           data: { user },
           error: userErr,
@@ -131,70 +140,64 @@ export function useArtistRank() {
           (meta.avatar_url as string) ||
           null;
         const metaGenre = (meta.artist_genre as string) || null;
+
         const metaSpotifyFromLink =
           typeof meta.artist_link_source === "string" &&
           meta.artist_link_source.includes("spotify.com/artist")
             ? meta.artist_link_source
             : null;
 
-        // 2) artista collegato: USA SOLO COLONNE CHE ESISTONO DAVVERO
+        // artista collegato da tabella artists
         const { data: artistRow, error: artistErr } = await supabase
           .from("artists")
           .select(
-            "id,user_id,artist_name,genres,source_link,spotify_id,spotify_url,beatport_url,beatstats_url,instagram_url,soundcloud_url"
+            "id,user_id,artist_name,artist_photo_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
           )
           .eq("user_id", user.id)
           .maybeSingle();
 
-        if (artistErr) {
-          console.error("useArtistRank artists error", artistErr);
-        }
+        // Se la query non restituisce righe potremmo avere un errore vuoto; non logghiamo per evitare rumore in console
 
-        // genere dal campo genres (array) se presente
         const genreFromTable =
-          artistRow &&
-          Array.isArray((artistRow as any).genres) &&
-          (artistRow as any).genres.length > 0
-            ? (artistRow as any).genres[0]
+          artistRow && typeof (artistRow as any).artist_genre === "string"
+            ? ((artistRow as any).artist_genre as string)
             : null;
 
-        // spotify
         const spotifyId =
           (artistRow?.spotify_id as string) ||
           (meta.spotify_id as string) ||
-          ((localProfile as any).spotify_id as string | undefined) ||
+          (localProfile.spotify_id as string | undefined) ||
           null;
 
         const spotifyUrl =
           (artistRow?.spotify_url as string) ||
           metaSpotifyFromLink ||
           (meta.spotify_url as string) ||
-          ((localProfile as any).spotify_url as string | undefined) ||
+          (localProfile.spotify_url as string | undefined) ||
           null;
 
-        // altri social
         const beatportUrl =
           (artistRow?.beatport_url as string) ||
           (meta.beatport_url as string) ||
-          ((localProfile as any).beatport_url as string | undefined) ||
+          (localProfile.beatport_url as string | undefined) ||
           null;
 
         const beatstatsUrl =
           (artistRow?.beatstats_url as string) ||
           (meta.beatstats_url as string) ||
-          ((localProfile as any).beatstats_url as string | undefined) ||
+          (localProfile.beatstats_url as string | undefined) ||
           null;
 
         const instagramUrl =
           (artistRow?.instagram_url as string) ||
           (meta.instagram_url as string) ||
-          ((localProfile as any).instagram_url as string | undefined) ||
+          (localProfile.instagram_url as string | undefined) ||
           null;
 
         const soundcloudUrl =
           (artistRow?.soundcloud_url as string) ||
           (meta.soundcloud_url as string) ||
-          ((localProfile as any).soundcloud_url as string | undefined) ||
+          (localProfile.soundcloud_url as string | undefined) ||
           null;
 
         const artistProfile: Artist = {
@@ -204,29 +207,26 @@ export function useArtistRank() {
           artist_name:
             artistRow?.artist_name ||
             metaName ||
-            localProfile.artist_name ||
+            (localProfile.artist_name as string | undefined) ||
             "Tekkin Artist",
 
-          // foto solo da meta / local
           artist_photo_url:
+            (artistRow?.artist_photo_url as string | undefined) ||
             metaPhoto ||
-            localProfile.artist_photo_url ||
+            (localProfile.artist_photo_url as string | undefined) ||
             "/images/default-artist.png",
 
-          // genere: meta → tabella (genres[0]) → local → default
           artist_genre:
-            metaGenre ||
             genreFromTable ||
-            localProfile.artist_genre ||
+            metaGenre ||
+            (localProfile.artist_genre as string | undefined) ||
             "Artist",
 
-          // link sorgente: artists.source_link oppure meta.artist_link_source
           artist_link_source:
-            (artistRow?.source_link as string | undefined) ||
+            (artistRow?.artist_link_source as string | undefined) ||
             (meta.artist_link_source as string) ||
             null,
 
-          // raw socials “ufficiali”
           spotify_id: spotifyId,
           spotify_url: spotifyUrl,
           beatport_url: beatportUrl,
@@ -234,33 +234,31 @@ export function useArtistRank() {
           instagram_url: instagramUrl,
           soundcloud_url: soundcloudUrl,
 
-          // questi li teniamo solo lato meta/local per ora
           traxsource_url:
             (meta.traxsource_url as string) ||
-            ((localProfile as any).traxsource_url as string | null) ||
+            (localProfile.traxsource_url as string | null) ||
             null,
           songstats_url:
             (meta.songstats_url as string) ||
-            ((localProfile as any).songstats_url as string | null) ||
+            (localProfile.songstats_url as string | null) ||
             null,
           resident_advisor_url:
             (meta.resident_advisor_url as string) ||
-            ((localProfile as any).resident_advisor_url as string | null) ||
+            (localProfile.resident_advisor_url as string | null) ||
             null,
           songkick_url:
             (meta.songkick_url as string) ||
-            ((localProfile as any).songkick_url as string | null) ||
+            (localProfile.songkick_url as string | null) ||
             null,
           apple_music_url:
             (meta.apple_music_url as string) ||
-            ((localProfile as any).apple_music_url as string | null) ||
+            (localProfile.apple_music_url as string | null) ||
             null,
           tidal_url:
             (meta.tidal_url as string) ||
-            ((localProfile as any).tidal_url as string | null) ||
+            (localProfile.tidal_url as string | null) ||
             null,
 
-          // socials che legge ArtistHero
           socials: {
             spotify: spotifyUrl,
             beatport: beatportUrl,
@@ -270,34 +268,57 @@ export function useArtistRank() {
           },
         };
 
-      // metriche base (fake) per far vivere il componente TekkinRankSection
-        const metricsFromMeta: ArtistMetrics = {
+        // qui leggiamo i numeri dallo scan Spotify salvato in localStorage
+        const metricsFromProfile: ArtistMetrics = {
           spotify_monthly_listeners:
-            (meta.spotify_monthly_listeners as number | undefined) ?? null,
+            toNumber(localProfile.spotify_monthly_listeners) ??
+            toNumber(meta.spotify_monthly_listeners) ??
+            null,
           spotify_streams_total:
-            (meta.spotify_streams_total as number | undefined) ?? null,
+            toNumber(localProfile.spotify_streams_total) ??
+            toNumber(meta.spotify_streams_total) ??
+            null,
           spotify_streams_change:
-            (meta.spotify_streams_change as number | undefined) ?? null,
+            toNumber(localProfile.spotify_streams_change) ??
+            toNumber(meta.spotify_streams_change) ??
+            null,
           spotify_followers:
-            (meta.spotify_followers as number | undefined) ?? null,
+            toNumber(localProfile.spotify_followers) ??
+            toNumber(localProfile.followers) ??
+            toNumber(meta.spotify_followers) ??
+            null,
           spotify_popularity:
-            (meta.spotify_popularity as number | undefined) ?? null,
+            toNumber(localProfile.spotify_popularity) ??
+            toNumber(localProfile.popularity) ??
+            toNumber(meta.spotify_popularity) ??
+            null,
           beatport_charts:
-            (meta.beatport_charts as number | undefined) ?? null,
+            toNumber(localProfile.beatport_charts) ??
+            toNumber(meta.beatport_charts) ??
+            null,
           beatport_hype_charts:
-            (meta.beatport_hype_charts as number | undefined) ?? null,
+            toNumber(localProfile.beatport_hype_charts) ??
+            toNumber(meta.beatport_hype_charts) ??
+            null,
           shows_last_90_days:
-            (meta.shows_last_90_days as number | undefined) ?? null,
+            toNumber(localProfile.shows_last_90_days) ??
+            toNumber(meta.shows_last_90_days) ??
+            null,
           shows_total:
-            (meta.shows_total as number | undefined) ?? null,
+            toNumber(localProfile.shows_total) ??
+            toNumber(meta.shows_total) ??
+            null,
           collected_at: new Date().toISOString(),
         };
+
+        console.log("tekkin_artist_profile local:", localProfile);
+        console.log("metricsFromProfile:", metricsFromProfile);
 
         if (isMounted) {
           setData({
             artist: artistProfile,
-            rank: baseFallbackRank, // per ora fake
-            metrics: metricsFromMeta, // mai null, al massimo pieno di null
+            rank: baseFallbackRank,
+            metrics: metricsFromProfile,
           });
         }
       } catch (err: any) {

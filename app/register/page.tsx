@@ -192,6 +192,8 @@ export default function TekkinIdentitySyncPage() {
             songkick_url: a.songkick ?? "",
             apple_music_url: a.appleMusic ?? "",
             tidal_url: a.tidal ?? "",
+             // QUI: lista brani / release presa dallo scan Spotify
+            spotify_releases: a.spotifyReleases ?? [],
           })
         );
       } catch {
@@ -246,6 +248,8 @@ function extractSpotifyId(url: string): string | null {
             artist_photo_url: artistImage,
             spotify_url: spotifyUrlTrimmed,
             spotify_id: artistSpotifyIdDerived,
+            spotify_followers: scannedSpotifyFollowers,
+            spotify_popularity: scannedSpotifyPopularity,
             instagram_url: instagramUrl,
             beatport_url: beatportUrl,
             traxsource_url: traxsourceUrl,

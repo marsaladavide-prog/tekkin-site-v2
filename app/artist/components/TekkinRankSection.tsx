@@ -35,7 +35,12 @@ function getInitials(name?: string | null): string {
 }
 
 export function TekkinRankSection() {
-  const { data: view, loading } = useArtistRank();
+  const { data: view, loading, error } = useArtistRank();
+  const artistRank = view?.metrics;
+
+  if (error) {
+    console.error("TekkinRankSection useArtistRank error:", error);
+  }
 
   if (loading) {
     return (
@@ -104,19 +109,34 @@ export function TekkinRankSection() {
       : "Spotify";
 
   const spotifyChange = formatChange(safeMetrics.spotify_streams_change);
-  const spotifyMonthly = safeMetrics.spotify_monthly_listeners ?? null;
-
-  const collectedAt = safeMetrics.collected_at
-    ? new Date(safeMetrics.collected_at).toLocaleString("it-IT")
-    : "n.d.";
-
-  const spotifyStreams = safeMetrics.spotify_streams_total;
-  const spotifyFollowers = safeMetrics.spotify_followers;
-  const spotifyPopularity = safeMetrics.spotify_popularity;
   const beatportCharts = safeMetrics.beatport_charts ?? 0;
   const beatportHype = safeMetrics.beatport_hype_charts ?? 0;
   const showsLast90 = safeMetrics.shows_last_90_days ?? 0;
   const showsTotal = safeMetrics.shows_total ?? 0;
+
+  const spotifyDetails = [
+    {
+      label: "Follower",
+      value:
+        artistRank?.spotify_followers != null
+          ? artistRank.spotify_followers.toLocaleString("it-IT")
+          : "n.a.",
+    },
+    {
+      label: "Popularity",
+      value:
+        artistRank?.spotify_popularity != null ? artistRank.spotify_popularity : "n.a.",
+    },
+  ];
+
+  console.log("Spotify details dashboard", {
+    followers: artistRank?.spotify_followers,
+    popularity: artistRank?.spotify_popularity,
+  });
+
+  const collectedAt = safeMetrics.collected_at
+    ? new Date(safeMetrics.collected_at).toLocaleString("it-IT")
+    : "n.d.";
 
   return (
     <section className="mt-6 w-full">
@@ -217,33 +237,18 @@ export function TekkinRankSection() {
                   <div className="mb-1 text-[11px] font-semibold text-white">
                     Dettagli Spotify
                   </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>Monthly listeners</span>
-                    <span className="text-white">{formatNumber(spotifyMonthly)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>Streams totali</span>
-                    <span className="text-white">
-                      {formatNumber(spotifyStreams ?? primaryValueRaw)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>Follower</span>
-                    <span className="text-white">{formatNumber(spotifyFollowers)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>Popularity</span>
-                    <span className="text-white">{formatNumber(spotifyPopularity)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span>Variazione</span>
-                    <span className={spotifyChange.positive ? "text-emerald-400" : "text-red-400"}>
-                      {spotifyChange.label}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[10px] text-tekkin-muted">
-                    Snapshot: {collectedAt}
-                  </div>
+                  {loading ? (
+                    <div className="text-xs text-white/60">Caricamento Spotify...</div>
+                  ) : (
+                    <ul className="space-y-1 text-xs">
+                      {spotifyDetails.map((item) => (
+                        <li key={item.label} className="flex justify-between gap-4">
+                          <span className="text-white/60">{item.label}</span>
+                          <span className="font-medium">{item.value}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </div>
 

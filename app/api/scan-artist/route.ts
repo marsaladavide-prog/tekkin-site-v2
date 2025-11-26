@@ -228,6 +228,50 @@ export async function POST(request: Request) {
         ? spotifyArtist.images[0].url
         : "/images/default-artist.png";
 
+    // ===========================
+    // NEW: fetch release da Spotify
+    // ===========================
+    let spotifyReleases: {
+      id: string;
+      title: string;
+      releaseDate: string;
+      coverUrl: string | null;
+      spotifyUrl: string | null;
+      albumType: string | null;
+    }[] = [];
+
+    try {
+      const releasesRes = await fetch(
+        `https://api.spotify.com/v1/artists/${spotifyArtist.id}/albums?include_groups=album,single,compilation,appears_on&market=US&limit=50`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      if (!releasesRes.ok) {
+        console.error(
+          "[scan-artist] Spotify releases fetch error",
+          releasesRes.status,
+          await releasesRes.text()
+        );
+      } else {
+        const releasesJson = await releasesRes.json();
+
+        spotifyReleases = (releasesJson.items || []).map((alb: any) => ({
+          id: alb.id,
+          title: alb.name,
+          releaseDate: alb.release_date,
+          coverUrl: alb.images?.[0]?.url || null,
+          spotifyUrl: alb.external_urls?.spotify || null,
+          albumType: alb.album_type || null, // "single", "album", "compilation"
+        }));
+      }
+    } catch (err) {
+      console.error("[scan-artist] errore fetch releases Spotify", err);
+    }
+
     const artist = {
       name: spotifyArtist.name,
       genre: primaryGenre,
@@ -248,6 +292,9 @@ export async function POST(request: Request) {
       spotifyPopularity: spotifyArtist.popularity ?? null,
       beatstatsUrl: null,
       beatstatsCurrentPositions: null,
+
+      // NEW: lista release per la sezione Main Releases & Highlights
+      spotifyReleases,
     };
 
     let beatstatsSummary: BeatstatsSummary | null = null;
@@ -269,6 +316,14 @@ export async function POST(request: Request) {
       extraLogs.push("> [BEATSTATS] Profilo artista trovato.");
     } else {
       extraLogs.push("> [BEATSTATS] Nessun profilo artista trovato.");
+    }
+
+    if (spotifyReleases.length > 0) {
+      extraLogs.push(
+        `> [SPOTIFY] Trovate ${spotifyReleases.length} release collegate al profilo.`
+      );
+    } else {
+      extraLogs.push("> [SPOTIFY] Nessuna release trovata o errore nel fetch.");
     }
 
     const logs = [
