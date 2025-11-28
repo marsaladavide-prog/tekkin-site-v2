@@ -3,6 +3,8 @@ import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -16,13 +18,26 @@ export async function POST(req: NextRequest) {
     }
 
     const projectId = String(formData.get("project_id") ?? "").trim();
-    const versionName = String(formData.get("version_name") ?? "").trim() || "v2";
-    const audioFile = formData.get("audio");
+    const versionName =
+      String(formData.get("version_name") ?? "").trim() || "v2";
+    const audioFile = formData.get("file"); // IMPORTANTE: "file", non "audio"
 
     if (!projectId || !audioFile || !(audioFile instanceof File)) {
       return NextResponse.json(
         { error: "project_id o file audio mancanti" },
         { status: 400 }
+      );
+    }
+
+    // limite dimensione file lato server
+    if (audioFile.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        {
+          error:
+            "File troppo grande. Limite massimo server: 50 MB per file. " +
+            "Usa un MP3 320 kbps per ridurre la dimensione.",
+        },
+        { status: 413 }
       );
     }
 
@@ -57,7 +72,7 @@ export async function POST(req: NextRequest) {
     const filePath = `${projectId}/${uniqueId}.${ext}`;
 
     const { data: storageData, error: uploadError } = await supabase.storage
-      .from("tracks")
+      .from("tracks") // controlla che il bucket sia quello giusto
       .upload(filePath, buffer, {
         contentType: audioFile.type || "audio/wav",
       });
@@ -72,7 +87,6 @@ export async function POST(req: NextRequest) {
 
     const audioUrl = storageData?.path ?? filePath;
 
-    // inserisco nuova versione, campi analisi null
     const { data: newVersion, error: versionError } = await supabase
       .from("project_versions")
       .insert({

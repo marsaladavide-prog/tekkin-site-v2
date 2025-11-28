@@ -9,6 +9,9 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
+// MAX FILE SIZE (Supabase hard limit)
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
 type VersionRow = {
   id: string;
   version_name: string;
@@ -174,14 +177,29 @@ export default function ProjectDetailPage() {
     e.preventDefault();
     if (!projectId) return;
 
+    setUploadError(null);
+
     const form = e.currentTarget;
     const formData = new FormData(form);
+    const file = formData.get("file") as File | null;
+
+    if (!file) {
+      setUploadError("Seleziona un file audio.");
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setUploadError(
+        "File troppo grande. Limite massimo server: 50 MB per file. " +
+          "Ti consigliamo di usare MP3 320 kbps per versioni più leggere."
+      );
+      return;
+    }
 
     formData.append("project_id", projectId);
 
     try {
       setUploading(true);
-      setUploadError(null);
 
       const res = await fetch("/api/projects/add-version", {
         method: "POST",
@@ -189,17 +207,18 @@ export default function ProjectDetailPage() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Errore upload nuova versione");
+        const data = await res.json().catch(() => null);
+        setUploadError(
+          data?.error ?? "Errore durante upload nuova versione."
+        );
+        return;
       }
 
       form.reset();
-
-      // ricarico il project (versions + audio latest)
       await loadProject();
     } catch (err) {
       console.error("Upload new version error:", err);
-      setUploadError("Errore durante upload nuova versione.");
+      setUploadError("Errore imprevisto durante upload nuova versione.");
     } finally {
       setUploading(false);
     }
@@ -286,13 +305,25 @@ export default function ProjectDetailPage() {
                 placeholder="Version name (es. v2, Master, Alt mix)"
                 className="flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm"
               />
-              <input
-                name="audio"
-                type="file"
-                accept="audio/*"
-                required
-                className="text-xs text-white/70"
-              />
+
+              {/* UPDATED: file input with label and helper text */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-white/80">
+                  Carica nuova versione
+                </label>
+                <input
+                  type="file"
+                  name="file"
+                  accept=".mp3,.wav,.aiff,.flac"
+                  required
+                  className="block w-full text-sm text-white/70"
+                />
+                <p className="text-xs text-white/60">
+                  Formati consigliati: MP3 320 kbps. Limite massimo server: 50 MB
+                  per file.
+                </p>
+              </div>
+
               <button
                 type="submit"
                 disabled={uploading}
