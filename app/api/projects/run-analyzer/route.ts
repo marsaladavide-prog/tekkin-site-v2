@@ -5,10 +5,24 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient(); // <<<<< QUI
+    const supabase = await createClient();
 
-    const body = await req.json().catch(() => null);
-    const versionId = body?.version_id as string | undefined;
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error("[run-analyzer] Auth error:", authError);
+      return NextResponse.json(
+        { error: "Non autenticato" },
+        { status: 401 }
+      );
+    }
+
+    // corpo della richiesta dal client
+    const requestBody = await req.json().catch(() => null);
+    const versionId = requestBody?.version_id as string | undefined;
 
     if (!versionId) {
       return NextResponse.json(
@@ -17,138 +31,139 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1) prendo la versione (senza auth check, per ora)
+    // 1. recupero la versione
     const { data: version, error: versionError } = await supabase
       .from("project_versions")
-      .select(
-        `
-        id,
-        audio_url,
-        project_id
-      `
-      )
+      .select("id, project_id, audio_url, version_name")
       .eq("id", versionId)
       .single();
 
     if (versionError || !version) {
-      console.error("Version error:", versionError);
+      console.error("[run-analyzer] Version not found:", versionError);
       return NextResponse.json(
-        { error: "Versione non trovata" },
+        { error: "Version non trovata" },
         { status: 404 }
       );
     }
 
-    const audioPath = version.audio_url as string;
+    const analyzerUrl =
+      process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
 
-    // 2) creo Signed URL per far leggere il file all analyzer
-    const { data: signed, error: signedError } = await supabase.storage
-      .from("tracks")
-      .createSignedUrl(audioPath, 60 * 60); // 1 ora
-
-    if (signedError || !signed?.signedUrl) {
-      console.error("Signed URL error:", signedError);
+    if (!analyzerUrl) {
+      console.error("[run-analyzer] TEKKIN_ANALYZER_URL mancante");
       return NextResponse.json(
-        { error: "Errore creazione Signed URL audio" },
+        { error: "Analyzer non configurato sul server" },
         { status: 500 }
       );
     }
 
-    const audioUrl = signed.signedUrl;
-
-    // 3) chiamo il Tekkin Analyzer Python
-    const analyzerUrl = process.env.TEKKIN_ANALYZER_URL;
-    const analyzerSecret = process.env.TEKKIN_ANALYZER_SECRET;
-
-    if (!analyzerUrl || !analyzerSecret) {
-      console.error(
-        "[Analyzer] Missing TEKKIN_ANALYZER_URL or TEKKIN_ANALYZER_SECRET"
-      );
+    const audioPath = version.audio_url;
+    if (!audioPath) {
       return NextResponse.json(
-        { error: "Analyzer config missing" },
-        { status: 500 }
+        { error: "Nessun audio_url per questa versione" },
+        { status: 400 }
       );
     }
+
+    // 2. Se è già una URL completa, usala; altrimenti crea una signed URL dal bucket "tracks"
+    let audioUrl = audioPath;
+
+    if (!audioPath.startsWith("http")) {
+      const { data: signed, error: signedError } = await supabase.storage
+        .from("tracks")
+        .createSignedUrl(audioPath, 60 * 30); // 30 minuti
+
+      if (signedError || !signed?.signedUrl) {
+        console.error("[run-analyzer] Signed URL error:", signedError);
+        return NextResponse.json(
+          { error: "Impossibile generare URL audio firmata" },
+          { status: 500 }
+        );
+      }
+
+      audioUrl = signed.signedUrl;
+    }
+
+    const payload = {
+      version_id: version.id,
+      project_id: version.project_id,
+      audio_url: audioUrl,
+    };
+
+    console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl, payload);
 
     const analyzerRes = await fetch(analyzerUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-analyzer-secret": analyzerSecret,
+        "x-analyzer-secret": process.env.TEKKIN_ANALYZER_SECRET ?? "",
       },
-      body: JSON.stringify({
-        audio_url: audioUrl,
-        version_id: versionId,
-        project_id: version.project_id,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!analyzerRes.ok) {
       const text = await analyzerRes.text().catch(() => "");
       console.error(
-        "[Analyzer] Python service error:",
+        "[run-analyzer] Analyzer error response:",
         analyzerRes.status,
         text
       );
       return NextResponse.json(
-        { error: "Analyzer service failed" },
+        { error: "Errore dall'Analyzer", detail: text || null },
         { status: 502 }
       );
     }
 
-    // risultato che arriva dal Python
-    const analysis: any = await analyzerRes.json();
+    const result = await analyzerRes.json().catch(() => null);
 
-    // 4) aggiorno project_versions con i dati dell Analyzer
-    const { error: updateError } = await supabase
-      .from("project_versions")
-      .update({
-        lufs:
-          typeof analysis.lufs === "number" ? analysis.lufs : null,
-        sub_clarity:
-          typeof analysis.sub_clarity === "number"
-            ? analysis.sub_clarity
-            : null,
-        hi_end:
-          typeof analysis.hi_end === "number" ? analysis.hi_end : null,
-        dynamics:
-          typeof analysis.dynamics === "number"
-            ? analysis.dynamics
-            : null,
-        stereo_image:
-          typeof analysis.stereo_image === "number"
-            ? analysis.stereo_image
-            : null,
-        tonality:
-          typeof analysis.tonality === "string"
-            ? analysis.tonality
-            : null,
-        overall_score:
-          typeof analysis.overall_score === "number"
-            ? analysis.overall_score
-            : null,
-        feedback:
-          typeof analysis.feedback === "string"
-            ? analysis.feedback
-            : null,
-      })
-      .eq("id", versionId);
+    console.log("[run-analyzer] Analyzer result JSON:", result);
 
-    if (updateError) {
-      console.error("Update version error:", updateError);
+    if (!result) {
       return NextResponse.json(
-        { error: "Errore salvataggio analisi" },
+        { error: "Risposta Analyzer non valida" },
         { status: 500 }
       );
     }
 
-    // 5) rispondo al frontend con lo score
+    // 3. aggiorno la versione con i dati dell'analisi
+    const { data: updatedVersion, error: updateError } = await supabase
+      .from("project_versions")
+      .update({
+        lufs: result.lufs,
+        sub_clarity: result.sub_clarity,
+        hi_end: result.hi_end,
+        dynamics: result.dynamics,
+        stereo_image: result.stereo_image,
+        tonality: result.tonality,
+        overall_score: result.overall_score,
+        feedback: result.feedback,
+
+        analyzer_bpm: result.bpm ?? null,
+        analyzer_spectral_centroid_hz: result.spectral_centroid_hz ?? null,
+        analyzer_spectral_rolloff_hz: result.spectral_rolloff_hz ?? null,
+        analyzer_spectral_bandwidth_hz: result.spectral_bandwidth_hz ?? null,
+        analyzer_spectral_flatness: result.spectral_flatness ?? null,
+        analyzer_zero_crossing_rate: result.zero_crossing_rate ?? null,
+      })
+      .eq("id", version.id)
+      .select(
+        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate"
+      )
+      .single();
+
+    if (updateError || !updatedVersion) {
+      console.error("[run-analyzer] Update version error:", updateError);
+      return NextResponse.json(
+        { error: "Errore aggiornando i dati di analisi" },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
       {
         ok: true,
-        overall_score:
-          typeof analysis.overall_score === "number"
-            ? analysis.overall_score
-            : null,
+        version: updatedVersion,
+        analyzer_result: result,
       },
       { status: 200 }
     );

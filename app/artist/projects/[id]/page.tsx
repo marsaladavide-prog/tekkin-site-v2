@@ -8,23 +8,31 @@ import {
 } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { AnalyzerProPanel } from "@/app/artist/components/AnalyzerProPanel";
+
 
 // MAX FILE SIZE (Supabase hard limit)
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
 type VersionRow = {
-  id: string;
-  version_name: string;
-  created_at: string;
-  audio_url: string | null;
-  lufs: number | null;
-  sub_clarity: number | null;
-  hi_end: number | null;
-  dynamics: number | null;
-  stereo_image: number | null;
-  tonality: string | null;
-  overall_score: number | null;
-  feedback: string | null;
+	id: string;
+	version_name: string;
+	created_at: string;
+	audio_url: string | null;
+	lufs: number | null;
+	sub_clarity: number | null;
+	hi_end: number | null;
+	dynamics: number | null;
+	stereo_image: number | null;
+	tonality: string | null;
+	overall_score: number | null;
+	feedback: string | null;
+	analyzer_bpm?: number | null;
+	analyzer_spectral_centroid_hz?: number | null;
+	analyzer_spectral_rolloff_hz?: number | null;
+	analyzer_spectral_bandwidth_hz?: number | null;
+	analyzer_spectral_flatness?: number | null;
+	analyzer_zero_crossing_rate?: number | null;
 };
 
 type ProjectDetail = {
@@ -84,7 +92,13 @@ export default function ProjectDetailPage() {
             stereo_image,
             tonality,
             overall_score,
-            feedback
+            feedback,
+            analyzer_bpm,
+            analyzer_spectral_centroid_hz,
+            analyzer_spectral_rolloff_hz,
+            analyzer_spectral_bandwidth_hz,
+            analyzer_spectral_flatness,
+            analyzer_zero_crossing_rate
           )
         `
         )
@@ -117,6 +131,12 @@ export default function ProjectDetailPage() {
           tonality: v.tonality ?? null,
           overall_score: v.overall_score ?? null,
           feedback: v.feedback ?? null,
+          analyzer_bpm: v.analyzer_bpm ?? null,
+          analyzer_spectral_centroid_hz: v.analyzer_spectral_centroid_hz ?? null,
+          analyzer_spectral_rolloff_hz: v.analyzer_spectral_rolloff_hz ?? null,
+          analyzer_spectral_bandwidth_hz: v.analyzer_spectral_bandwidth_hz ?? null,
+          analyzer_spectral_flatness: v.analyzer_spectral_flatness ?? null,
+          analyzer_zero_crossing_rate: v.analyzer_zero_crossing_rate ?? null,
         }))
         .sort(
           (a: VersionRow, b: VersionRow) =>
@@ -256,7 +276,7 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const latest = project?.versions[0] ?? null;
+  const latestVersion = project?.versions[0] ?? null;
 
   return (
     <div className="w-full max-w-5xl mx-auto py-8">
@@ -338,7 +358,7 @@ export default function ProjectDetailPage() {
           </div>
 
           {/* Scheda tecnica ultima versione */}
-          {latest && (
+          {latestVersion && (
             <div className="mb-8 rounded-2xl border border-white/8 bg-black/40 p-5">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -346,8 +366,8 @@ export default function ProjectDetailPage() {
                     Latest version
                   </p>
                   <p className="text-sm font-semibold">
-                    {latest.version_name} ·{" "}
-                    {new Date(latest.created_at).toLocaleString()}
+                    {latestVersion.version_name} ·{" "}
+                    {new Date(latestVersion.created_at).toLocaleString()}
                   </p>
                 </div>
                 <div className="text-right">
@@ -355,8 +375,8 @@ export default function ProjectDetailPage() {
                     Tekkin Score
                   </p>
                   <p className="text-2xl font-semibold">
-                    {latest.overall_score != null
-                      ? latest.overall_score
+                    {latestVersion.overall_score != null
+                      ? latestVersion.overall_score
                       : "n.a."}
                   </p>
                 </div>
@@ -381,63 +401,7 @@ export default function ProjectDetailPage() {
                 <p className="mb-2 text-xs text-red-400">{audioError}</p>
               )}
 
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                  <p className="text-white/40">LUFS</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.lufs != null ? latest.lufs.toFixed(1) : "n.a."}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                  <p className="text-white/40">Dynamics</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.dynamics != null
-                      ? latest.dynamics.toFixed(2)
-                      : "n.a."}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                  <p className="text-white/40">Sub clarity</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.sub_clarity != null
-                      ? latest.sub_clarity.toFixed(2)
-                      : "n.a."}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                  <p className="text-white/40">Hi end</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.hi_end != null
-                      ? latest.hi_end.toFixed(2)
-                      : "n.a."}
-                  </p>
-                </div>
-                <div className="rounded-xl border borderWHITE/10 bg-black/40 p-3">
-                  <p className="textWHITE/40">Stereo image</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.stereo_image != null
-                      ? latest.stereo_image.toFixed(2)
-                      : "n.a."}
-                  </p>
-                </div>
-                <div className="rounded-xl border borderWHITE/10 bg-black/40 p-3">
-                  <p className="textWHITE/40">Tonality</p>
-                  <p className="mt-1 text-sm font-semibold">
-                    {latest.tonality ?? "n.a."}
-                  </p>
-                </div>
-              </div>
-
-              {latest.feedback && (
-                <div className="mt-5 rounded-xl border borderWHITE/10 bg-black/60 p-4 text-sm">
-                  <p className="text-xs text-[var(--accent)] mb-1">
-                    Tekkin Feedback
-                  </p>
-                  <p className="textWHITE/80 whitespace-pre-line">
-                    {latest.feedback}
-                  </p>
-                </div>
-              )}
+              <AnalyzerProPanel version={latestVersion} />
             </div>
           )}
 

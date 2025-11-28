@@ -1,103 +1,114 @@
+import os
 import tempfile
-import re
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
 
-from analyze_master_web import analyze_to_text, ANALYZER_SECRET
+# Importiamo il motore v3.6
+from analyze_master_web import analyze_to_text, extract_metrics_from_report
+from tekkin_analyzer_v4_extras import analyze_v4_extras
+
+ANALYZER_SECRET = os.environ.get("TEKKIN_ANALYZER_SECRET")
+
+if not ANALYZER_SECRET:
+  raise RuntimeError("TEKKIN_ANALYZER_SECRET non impostata nell'ambiente")
 
 app = FastAPI()
 
-# Regex per estrarre numeri dal report
-_lufs_it_re = re.compile(r"LUFS integrato:\s*(-?\d+(?:\.\d+)?)")
-_lufs_en_re = re.compile(r"Integrated LUFS:\s*(-?\d+(?:\.\d+)?)")
 
-_overall_it_re = re.compile(r"Valutazione finale:\s*([0-9.]+)/10")
-_overall_en_re = re.compile(r"Overall rating:\s*([0-9.]+)/10")
+class AnalyzePayload(BaseModel):
+  version_id: str
+  project_id: str
+  audio_url: str
 
-
-def extract_metrics_from_report(report: str, lang: str):
-    """Estrae lufs e overall_score dal report testuale."""
-    lufs = None
-    overall = None
-
-    if lang == "it":
-        m_lufs = _lufs_it_re.search(report)
-        if m_lufs:
-            lufs = float(m_lufs.group(1))
-
-        m_overall = _overall_it_re.search(report)
-        if m_overall:
-            overall = float(m_overall.group(1))
-    else:
-        m_lufs = _lufs_en_re.search(report)
-        if m_lufs:
-            lufs = float(m_lufs.group(1))
-
-        m_overall = _overall_en_re.search(report)
-        if m_overall:
-            overall = float(m_overall.group(1))
-
-    return lufs, overall
+  # opzionali, con default coerenti con il tuo uso attuale
+  lang: str = "it"
+  profile_key: str = "minimal_deep_tech"
+  mode: str = "master"
 
 
 @app.post("/analyze")
-async def analyze_endpoint(request: Request):
-    # 1) Controllo secret
-    header_secret = request.headers.get("x-analyzer-secret")
-    if header_secret != ANALYZER_SECRET:
-        raise HTTPException(status_code=403, detail="Forbidden")
+async def analyze(request: Request, payload: AnalyzePayload):
+  # 1. controllo secret
+  header_secret = request.headers.get("x-analyzer-secret")
+  if header_secret != ANALYZER_SECRET:
+    raise HTTPException(status_code=401, detail="Analyzer unauthorized")
 
-    # 2) Body JSON
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+  # 2. scarico il file audio dalla signed URL
+  try:
+    async with httpx.AsyncClient(timeout=60.0) as client:
+      resp = await client.get(payload.audio_url)
+    if resp.status_code != 200:
+      raise HTTPException(
+        status_code=400,
+        detail=f"Impossibile scaricare audio: HTTP {resp.status_code}",
+      )
+  except Exception as e:
+    print("[analyzer] Errore scaricando audio:", repr(e))
+    raise HTTPException(status_code=400, detail="Errore scaricando il file audio")
 
-    audio_url = payload.get("audio_url")
-    lang = payload.get("lang", "it")
-    profile_key = payload.get("profile_key", "minimal_deep_tech")
-    mode = payload.get("mode", "master")
+  # salvo in file temporaneo
+  tmp_path = None
+  try:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+      tmp.write(resp.content)
+      tmp_path = tmp.name
 
-    if not audio_url:
-        raise HTTPException(status_code=400, detail="Missing audio_url")
+    print(
+      "Analisi v2 per versione",
+      payload.version_id,
+      "file temporaneo:",
+      tmp_path,
+    )
 
-    # 3) Scarico il file in una temp
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(audio_url)
-            resp.raise_for_status()
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp.write(resp.content)
-                tmp_path = tmp.name
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Download error: {e}")
+    # 3. uso il motore v3.6 per generare il report testuale
+    report = analyze_to_text(
+      lang=payload.lang,
+      profile_key=payload.profile_key,
+      mode=payload.mode,
+      file_path=tmp_path,
+      enable_plots=False,
+      plots_dir="plots",
+      emoji=False,
+    )
 
-    # 4) Chiamo l'Analyzer esistente
-    try:
-        report = analyze_to_text(
-            lang=lang,
-            profile_key=profile_key,
-            mode=mode,
-            file_path=tmp_path,
-            enable_plots=False,
-            plots_dir="plots",
-            emoji=False,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analyzer crashed: {e}")
+    # 4. estraggo i numeri principali dal report
+    lufs, overall = extract_metrics_from_report(report, payload.lang)
 
-    # 5) Estraggo lufs e overall_score dal report
-    lufs, overall = extract_metrics_from_report(report, lang)
+    # 5. analisi v4 extras
+    extras = analyze_v4_extras(tmp_path)
+    print("[analyzer] v4 extras:", extras)
 
-    # 6) Risposta JSON per il sito
+    if lufs is None or overall is None:
+      print("[analyzer] Impossibile estrarre LUFS / overall dal report")
+      raise HTTPException(status_code=500, detail="Report non parsabile")
+
+    # 5. rispondo in JSON nel formato che il sito si aspetta
+    # ATTENZIONE: per ora sub_clarity / hi_end / dynamics / stereo_image / tonality
+    # non vengono calcolati dal motore v3.6 in modo diretto, quindi li lasciamo null.
     return {
-        "lufs": lufs,
-        "sub_clarity": None,
-        "hi_end": None,
-        "dynamics": None,
-        "stereo_image": None,
-        "tonality": None,
-        "overall_score": overall,
-        "feedback": report,
+      "version_id": payload.version_id,
+      "project_id": payload.project_id,
+      "lufs": lufs,
+      "sub_clarity": None,
+      "hi_end": None,
+      "dynamics": None,
+      "stereo_image": None,
+      "tonality": None,
+      "overall_score": overall,
+      "feedback": report,
+      "bpm": extras.get("bpm"),
+      "spectral_centroid_hz": extras.get("spectral_centroid_hz"),
+      "spectral_rolloff_hz": extras.get("spectral_rolloff_hz"),
+      "spectral_bandwidth_hz": extras.get("spectral_bandwidth_hz"),
+      "spectral_flatness": extras.get("spectral_flatness"),
+      "zero_crossing_rate": extras.get("zero_crossing_rate"),
     }
+
+  finally:
+    if tmp_path and os.path.exists(tmp_path):
+      try:
+        os.remove(tmp_path)
+      except Exception:
+        pass
