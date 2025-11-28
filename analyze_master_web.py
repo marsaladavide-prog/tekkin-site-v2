@@ -14,6 +14,10 @@ import json
 import math
 import argparse
 import numpy as np
+import re
+import tempfile
+import httpx
+
 
 # Matplotlib in headless
 import matplotlib
@@ -23,6 +27,10 @@ import matplotlib.pyplot as plt
 import soundfile as sf
 import pyloudnorm as pyln
 from scipy.signal import butter, sosfiltfilt, resample_poly
+from fastapi import Request, HTTPException
+
+
+ANALYZER_SECRET = os.environ["TEKKIN_ANALYZER_SECRET"]
 
 # Forza UTF-8 anche su Windows e quando avviato da Node
 try:
@@ -368,6 +376,37 @@ def compute_scores(prof, band_norm, integrated_lufs, crest, true_peak_dbfs, mode
             verdict = "Needs Work"
 
     return band_status, tech_score, artistic_score, overall, verdict, out_of_target_count
+    # ---------- Parser del report per estrarre numeri ----------
+_lufs_it_re = re.compile(r"LUFS integrato:\s*(-?\d+(?:\.\d+)?)")
+_lufs_en_re = re.compile(r"Integrated LUFS:\s*(-?\d+(?:\.\d+)?)")
+
+_overall_it_re = re.compile(r"Valutazione finale:\s*([0-9.]+)/10")
+_overall_en_re = re.compile(r"Overall rating:\s*([0-9.]+)/10")
+
+
+def extract_metrics_from_report(report: str, lang: str):
+    """Estrae lufs e overall_score dal report testuale."""
+    lufs = None
+    overall = None
+
+    if lang == "it":
+        m_lufs = _lufs_it_re.search(report)
+        if m_lufs:
+            lufs = float(m_lufs.group(1))
+
+        m_overall = _overall_it_re.search(report)
+        if m_overall:
+            overall = float(m_overall.group(1))
+    else:
+        m_lufs = _lufs_en_re.search(report)
+        if m_lufs:
+            lufs = float(m_lufs.group(1))
+
+        m_overall = _overall_en_re.search(report)
+        if m_overall:
+            overall = float(m_overall.group(1))
+
+    return lufs, overall
 
 # ---------- Analisi ----------
 def analyze_to_text(lang, profile_key, mode, file_path, enable_plots=False, plots_dir="plots", emoji=True):
@@ -629,11 +668,12 @@ def analyze_to_text(lang, profile_key, mode, file_path, enable_plots=False, plot
     return "\n".join(out_lines)
 
 # ---------- CLI ----------
+
 def parse_args():
     p = argparse.ArgumentParser(description="Tekkin Analyzer PRO v3.6 - Full Web Edition")
-    p.add_argument("lang", choices=["it","en"])
+    p.add_argument("lang", choices=["it", "en"])
     p.add_argument("profile_key", choices=list(PROFILES.keys()))
-    p.add_argument("mode", choices=["master","premaster"])
+    p.add_argument("mode", choices=["master", "premaster"])
     p.add_argument("wav_path")
     p.add_argument("--plots", action="store_true", help="Salva grafici PNG e annota i percorsi nel report")
     p.add_argument("--plots-dir", default="plots", help="Cartella di output per i PNG")
@@ -649,7 +689,7 @@ def main():
         file_path=args.wav_path,
         enable_plots=args.plots,
         plots_dir=args.plots_dir,
-        emoji=not args.no_emoji
+        emoji=not args.no_emoji,
     )
     sys.stdout.write(report)
 

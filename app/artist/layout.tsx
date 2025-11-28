@@ -49,7 +49,7 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
   const { theme, toggleTheme } = useTheme();
   const { data } = useArtistRank();
 
-  const [authChecked, setAuthChecked] = useState(false);
+  // Stato auth solo per UI, niente piu redirect
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -57,32 +57,43 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+
     async function checkAuth() {
+      const supabase = createClient();
+
       try {
-        const supabase = createClient();
         const {
           data: { user },
+          error,
         } = await supabase.auth.getUser();
+
+        if (error) {
+          throw error;
+        }
+
         if (!active) return;
+
         if (!user) {
           setIsAuthenticated(false);
-          router.replace("/login");
+          setUserEmail(null);
         } else {
           setIsAuthenticated(true);
           setUserEmail(user.email ?? null);
         }
       } catch (err) {
         console.warn("ArtistLayout auth check failed", err);
-        router.replace("/login");
-      } finally {
-        if (active) setAuthChecked(true);
+        if (!active) return;
+        setIsAuthenticated(false);
+        setUserEmail(null);
       }
     }
+
     checkAuth();
+
     return () => {
       active = false;
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     function handleOutside(ev: MouseEvent) {
@@ -97,6 +108,7 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
   const artist = data?.artist;
   const artistName = artist?.artist_name || "Artist";
   const artistPhoto = artist?.artist_photo_url;
+  const accountSubtitle = userEmail || (isAuthenticated ? "Pro Account" : "Guest");
 
   async function handleLogout() {
     try {
@@ -107,16 +119,6 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
     } finally {
       router.replace("/login");
     }
-  }
-
-  if (!authChecked || !isAuthenticated) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[var(--background)] text-[var(--text-primary)]">
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--sidebar-bg)] px-4 py-3 text-sm text-[var(--text-muted)]">
-          Verifico la sessione...
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -143,7 +145,9 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <span>New Thread...</span>
-            <span className="ml-auto rounded border border-[var(--border)] px-1.5 text-xs text-[var(--text-muted)]">⋯</span>
+            <span className="ml-auto rounded border border-[var(--border)] px-1.5 text-xs text-[var(--text-muted)]">
+              ⋯
+            </span>
           </div>
 
           <nav className="space-y-1 px-3">
@@ -183,10 +187,22 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
                 )}
               </div>
               <div className="min-w-0 flex-1 text-left">
-                <div className="truncate text-sm font-medium text-[var(--text-primary)]">{artistName}</div>
-                <div className="truncate text-xs text-[var(--text-muted)]">{userEmail || "Pro Account"}</div>
+                <div className="truncate text-sm font-medium text-[var(--text-primary)]">
+                  {artistName}
+                </div>
+                <div className="truncate text-xs text-[var(--text-muted)]">
+                  {accountSubtitle}
+                </div>
               </div>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[var(--text-muted)]">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="text-[var(--text-muted)]"
+              >
                 <path d="M6 9l6 6 6-6" />
               </svg>
             </button>
@@ -196,7 +212,7 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
                 <div className="px-4 py-3">
                   <div className="text-sm font-semibold truncate">{artistName}</div>
                   <div className="text-xs text-[var(--text-muted)] truncate">
-                    {userEmail || "email non disponibile"}
+                    {userEmail || (isAuthenticated ? "email non disponibile" : "Non loggato")}
                   </div>
                   <div className="mt-3 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] px-2 py-1.5">
                     <button
@@ -235,25 +251,32 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
                   </div>
                 </div>
                 <div className="border-t border-[var(--border)] text-sm">
-                  {[
-                    { label: "Manage cookies", href: "#" },
-                    { label: "Terms & policies", href: "#" },
-                    { label: "Help", href: "#" },
-                  ].map((item) => (
+                  {[{ label: "Manage cookies", href: "#" }, { label: "Terms & policies", href: "#" }, { label: "Help", href: "#" }].map(
+                    (item) => (
+                      <button
+                        key={item.label}
+                        className="flex w-full items-center px-4 py-2 text-left text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] hover:text-[var(--text-primary)] transition-colors"
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        {item.label}
+                      </button>
+                    )
+                  )}
+                  {isAuthenticated ? (
                     <button
-                      key={item.label}
-                      className="flex w-full items-center px-4 py-2 text-left text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] hover:text-[var(--text-primary)] transition-colors"
-                      onClick={() => setMenuOpen(false)}
+                      onClick={handleLogout}
+                      className="flex w-full items-center px-4 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
                     >
-                      {item.label}
+                      Log out
                     </button>
-                  ))}
-                  <button
-                    onClick={handleLogout}
-                    className="flex w-full items-center px-4 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
-                  >
-                    Log out
-                  </button>
+                  ) : (
+                    <button
+                      onClick={() => router.push("/login")}
+                      className="flex w-full items-center px-4 py-2 text-left text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-200 transition-colors"
+                    >
+                      Login Tekkin
+                    </button>
+                  )}
                 </div>
               </div>
             )}

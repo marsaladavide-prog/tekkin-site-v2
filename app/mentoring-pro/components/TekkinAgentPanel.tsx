@@ -314,7 +314,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     const fetchProjects = async () => {
       setLoadingProjects(true);
       try {
-        const res = await fetch("/api/tekkin-projects");
+        const res = await fetch("/api/agent-dm/projects");
         if (!res.ok) {
           console.warn("API progetti non disponibile, uso cache locale");
           const local = loadLocalProjects();
@@ -357,7 +357,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
       setLoadingTasks(true);
       try {
         const res = await fetch(
-          `/api/tekkin-tasks?projectId=${encodeURIComponent(selectedProjectId)}`
+          `/api/agent-dm/tasks?projectId=${encodeURIComponent(selectedProjectId)}`
         );
         if (!res.ok) {
           console.warn("API tasks non disponibile, uso cache locale");
@@ -491,7 +491,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     if (!name) return;
     setCreatingProject(true);
     try {
-      const res = await fetch("/api/tekkin-projects", {
+      const res = await fetch("/api/agent-dm/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -547,7 +547,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
 
     setCreatingTask(true);
     try {
-      const res = await fetch("/api/tekkin-tasks", {
+      const res = await fetch("/api/agent-dm/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -625,7 +625,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
       if (updates.priority !== undefined) payload.priority = updates.priority;
       if (updates.title !== undefined) payload.title = updates.title;
 
-      const res = await fetch("/api/tekkin-tasks", {
+      const res = await fetch("/api/agent-dm/tasks", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -671,7 +671,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     setRetryingSync(true);
     try {
       const res = await fetch(
-        `/api/tekkin-tasks?projectId=${encodeURIComponent(selectedProjectId)}`
+        `/api/agent-dm/tasks?projectId=${encodeURIComponent(selectedProjectId)}`
       );
       if (!res.ok) {
         throw new Error(`API ${res.status}`);
@@ -707,7 +707,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     });
 
     try {
-      const res = await fetch("/api/tekkin-tasks", {
+      const res = await fetch("/api/agent-dm/tasks", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: taskId }),
@@ -741,7 +741,7 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     }
 
     try {
-      const res = await fetch("/api/tekkin-projects", {
+      const res = await fetch("/api/agent-dm/projects", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: projectId }),
@@ -1626,3 +1626,4 @@ export default function TekkinAgentPanel({ view }: { view?: PanelView }) {
     )}
   </>
 );
+}

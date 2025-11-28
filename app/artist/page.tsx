@@ -1,39 +1,106 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArtistHero } from "./components/ArtistHero";
-import { TekkinRankSection } from "./components/TekkinRankSection";
-import { ArtistSelection } from "./components/ArtistSelection";
-import { ReleasesHighlights } from "./components/ReleasesHighlights";
-import { UnreleasedLab } from "./components/UnreleasedLab";
-import { InstagramFeed } from "./components/InstagramFeed";
+import { createClient } from "@/utils/supabase/client";
+import Link from "next/link";
 
-export default function ArtistPage() {
-  const [isDark, setIsDark] = useState(true);
+type ProjectRow = {
+  id: string;
+  title: string;
+  status: string | null;
+  version_name: string | null;
+  created_at: string;
+};
+
+export default function ProjectsPage() {
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const supabase = createClient();
 
   useEffect(() => {
-    document.documentElement.classList.add("dark");
-  }, []);
+    const load = async () => {
+      const { data, error } = await supabase
+        .from("projects")
+        .select(
+          `
+          id,
+          title,
+          status,
+          created_at,
+          project_versions (
+            version_name,
+            created_at
+          )
+        `
+        )
+        .order("created_at", { ascending: false });
 
-  const toggleTheme = () => {
-    const html = document.documentElement;
-    const nowDark = !html.classList.contains("dark");
-    html.classList.toggle("dark");
-    setIsDark(nowDark);
-  };
+      if (error) {
+        console.error("Supabase load projects error:", error);
+        return;
+      }
+
+      const mapped: ProjectRow[] =
+        data?.map((p: any) => {
+          const latestVersion = p.project_versions?.[0] ?? null;
+          return {
+            id: p.id,
+            title: p.title,
+            status: p.status,
+            version_name: latestVersion?.version_name ?? "v1",
+            created_at: p.created_at,
+          };
+        }) ?? [];
+
+      setProjects(mapped);
+    };
+
+    void load();
+  }, [supabase]);
 
   return (
-    <div className="relative min-h-full bg-[#0b0b0c] text-white selection:bg-[#06b6d4] selection:text-black">
-      <div className="pointer-events-none fixed inset-0 bg-grid-pattern opacity-[0.03]" />
+    <div className="w-full max-w-6xl mx-auto py-8">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold">Projects</h1>
+        <Link
+          href="/artist/projects/new"
+          className="rounded-full px-4 py-2 text-sm font-medium bg-[var(--accent)] text-black"
+        >
+          New Project
+        </Link>
+      </div>
 
-      <div className="relative mx-auto flex min-h-full max-w-6xl flex-col gap-10 px-6 py-12">
-        <ArtistHero isDark={isDark} onToggleTheme={toggleTheme} />
-        <TekkinRankSection />
-        <ArtistSelection />
-        <ReleasesHighlights />
-        <UnreleasedLab />
-        <InstagramFeed />
-        <div className="h-4" />
+      <div className="overflow-hidden rounded-2xl border border-white/5">
+        <table className="w-full text-sm">
+          <thead className="bg-white/5 text-white/70">
+            <tr>
+              <th className="px-4 py-3 text-left">#</th>
+              <th className="px-4 py-3 text-left">Track name</th>
+              <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Version</th>
+              <th className="px-4 py-3 text-left">Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map((p, index) => (
+              <tr key={p.id} className="border-t border-white/5">
+                <td className="px-4 py-3">{index + 1}</td>
+                <td className="px-4 py-3 font-medium">{p.title}</td>
+                <td className="px-4 py-3">{p.status}</td>
+                <td className="px-4 py-3">{p.version_name}</td>
+                <td className="px-4 py-3">
+                  {new Date(p.created_at).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+            {projects.length === 0 && (
+              <tr>
+                <td className="px-4 py-6 text-center text-white/40" colSpan={5}>
+                  Nessun project ancora. Crea il primo con "New Project".
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
