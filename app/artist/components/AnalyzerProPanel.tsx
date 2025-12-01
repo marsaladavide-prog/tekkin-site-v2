@@ -1,14 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Gauge,
-  Waves,
-  Activity,
-  Sparkles,
-  ChartBar,
-  Info,
-} from "lucide-react";
+import { useMemo } from "react";
+import { Waves, Gauge, Activity, ChartBar, Info } from "lucide-react";
 
 export type AnalyzerVersion = {
   id: string;
@@ -27,7 +20,7 @@ export type AnalyzerVersion = {
   stereo_image?: number | null;
   tonality?: number | null;
 
-  // v4 extras salvati in DB
+  // v4 extras
   analyzer_bpm?: number | null;
   analyzer_spectral_centroid_hz?: number | null;
   analyzer_spectral_rolloff_hz?: number | null;
@@ -35,141 +28,165 @@ export type AnalyzerVersion = {
   analyzer_spectral_flatness?: number | null;
   analyzer_zero_crossing_rate?: number | null;
 
-  // opzionali se un domani li passi dal backend
-  analyzer_profile_key?: string | null;
-  analyzer_mode?: string | null; // "master" | "premaster" ecc
+  analyzer_profile_key?: string | null; // in futuro: genere scelto dall artista
+  analyzer_mode?: string | null; // in futuro: "master" | "premaster" scelto dall artista
 };
 
 type AnalyzerProPanelProps = {
   version: AnalyzerVersion;
 };
 
+function normalizeBpmValue(raw?: number | null): number | null {
+  if (raw == null || !Number.isFinite(raw) || raw <= 0) return null;
+
+  let bpm = raw;
+
+  const hardMin = 60;
+  const hardMax = 180;
+
+  while (bpm > hardMax && bpm / 2 >= hardMin) {
+    bpm = bpm / 2;
+  }
+
+  while (bpm < hardMin && bpm * 2 <= hardMax) {
+    bpm = bpm * 2;
+  }
+
+  return Math.round(bpm);
+}
+
+function formatBpm(raw?: number | null): string {
+  const normalized = normalizeBpmValue(raw);
+  if (normalized == null) return "n.a.";
+  return String(normalized);
+}
+
 function formatNumber(
   n: number | null | undefined,
   digits: number = 1,
-  fallback: string = "n.a."
-): string {
+  fallback = "n.a."
+) {
   if (n == null || Number.isNaN(n)) return fallback;
   return n.toFixed(digits);
 }
 
 function getBrightnessLabel(centroidHz?: number | null): string {
-  if (centroidHz == null || centroidHz <= 0) return "Unknown";
+  if (centroidHz == null || centroidHz <= 0) return "Sconosciuto";
   if (centroidHz < 1500) return "Dark / Warm";
-  if (centroidHz < 3500) return "Balanced";
+  if (centroidHz < 3500) return "Bilanciato";
   if (centroidHz < 6000) return "Bright";
-  return "Very bright";
+  return "Molto bright";
 }
 
-function getTextureLabel(
-  flatness?: number | null,
-  zcr?: number | null
-): string {
-  if (flatness == null || zcr == null) return "Unknown";
-
-  if (flatness < 0.2 && zcr < 0.08) return "Clean / Controlled";
-  if (flatness < 0.3 && zcr < 0.15) return "Punchy";
-  if (flatness >= 0.3 && zcr >= 0.15) return "Noisy / Aggressive";
-  if (flatness >= 0.3 && zcr < 0.1) return "Bright but controlled";
-
-  return "Mixed texture";
+function getMixState(lufs?: number | null): string {
+  if (lufs == null) return "Sconosciuto";
+  if (lufs <= -11) return "Molto conservativo";
+  if (lufs <= -9.5) return "Conservativo";
+  if (lufs <= -8.5) return "In zona club";
+  if (lufs <= -7) return "Aggressivo";
+  return "Molto aggressivo";
 }
 
-function getScoreColor(score?: number | null): string {
-  if (score == null) return "text-white/60";
-  if (score >= 8.5) return "text-emerald-400";
-  if (score >= 7) return "text-emerald-300";
-  if (score >= 5.5) return "text-amber-300";
-  return "text-red-400";
-}
-
-function getMetricPillColor(value?: number | null): string {
-  if (value == null) return "bg-white/5 text-white/60";
-  if (value >= 0.7) return "bg-emerald-500/20 text-emerald-300";
-  if (value >= 0.4) return "bg-amber-500/20 text-amber-300";
-  return "bg-red-500/20 text-red-300";
+function getScoreLabel(score?: number | null): string {
+  if (score == null) return "Analisi parziale";
+  if (score >= 8.5) return "Ready";
+  if (score >= 7) return "Almost";
+  if (score >= 5.5) return "Work in progress";
+  return "Early";
 }
 
 export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
-  const [showFullFeedback, setShowFullFeedback] = useState(false);
-
+  const modeLabel = version.analyzer_mode || "Master";
+  const profileLabel = version.analyzer_profile_key || "Minimal / Deep Tech";
   const brightnessLabel = getBrightnessLabel(
     version.analyzer_spectral_centroid_hz
   );
-  const textureLabel = getTextureLabel(
-    version.analyzer_spectral_flatness,
-    version.analyzer_zero_crossing_rate
-  );
 
-  const modeLabel = version.analyzer_mode || "master";
-  const profileLabel = version.analyzer_profile_key || "minimal_deep_tech";
+  const mixState = getMixState(version.lufs);
+  const scoreLabel = getScoreLabel(version.overall_score);
+
+  const quickBullets = useMemo(() => {
+    const items: string[] = [];
+
+    if (version.lufs != null) {
+      items.push(`Loudness attuale: ${version.lufs.toFixed(1)} LUFS`);
+    }
+
+    if (version.analyzer_bpm != null) {
+      const bpmDisplay = formatBpm(version.analyzer_bpm);
+      items.push(`BPM rilevato: ${bpmDisplay}`);
+    }
+
+    const brightness = getBrightnessLabel(
+      version.analyzer_spectral_centroid_hz
+    );
+    items.push(`Tonalità generale: ${brightness}`);
+
+    return items;
+  }, [
+    version.lufs,
+    version.analyzer_bpm,
+    version.analyzer_spectral_centroid_hz,
+  ]);
 
   const feedbackText = version.feedback ?? "";
-  const feedbackShort =
-    feedbackText.length > 800
-      ? feedbackText.slice(0, 800) + "..."
-      : feedbackText;
 
   return (
-    <section className="w-full rounded-2xl border border-white/8 bg-[radial-gradient(circle_at_top,_#22c55e20,_transparent_55%),_#050607] p-4 md:p-6 shadow-xl shadow-emerald-500/15 backdrop-blur">
-      {/* Header */}
+    <section className="w-full rounded-2xl border border-white/10 bg-black/70 p-4 md:p-5 shadow-xl shadow-black/50">
+      {/* HEADER */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-xl bg-emerald-500/15 p-2">
-            <Waves className="h-5 w-5 text-emerald-300" />
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 rounded-lg bg-emerald-500/20 p-2">
+            <Waves className="h-4 w-4 text-emerald-300" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold tracking-[0.18em] text-emerald-300 uppercase">
+            <p className="text-[11px] font-semibold tracking-[0.18em] uppercase text-emerald-300">
               Tekkin Analyzer PRO
-            </h2>
-            <p className="mt-0.5 text-xs text-white/60">
-              Version {version.version_name}
-              {version.created_at ? (
-                <>
-                  {" "}
-                  · analyzed {new Date(version.created_at).toLocaleString()}
-                </>
-              ) : null}
             </p>
-            <p className="mt-0.5 text-[11px] text-white/40">
-              Engine v3.6 report + v4 extras for BPM and spectral insight.
+            <p className="text-sm font-medium text-white">
+              Versione {version.version_name}
+            </p>
+            <p className="mt-0.5 text-[11px] text-white/55">
+              Analizzato il{" "}
+              {version.created_at
+                ? new Date(version.created_at).toLocaleString("it-IT")
+                : "data non disponibile"}
+              . Engine v3.6 con extras BPM e spectral.
             </p>
           </div>
         </div>
 
-        <div className="flex items-end gap-4">
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex gap-2">
-              <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
-                {modeLabel}
+        <div className="flex flex-col items-end gap-1.5 text-right">
+          <div className="flex gap-2">
+            <span className="rounded-full border border-white/20 px-2.5 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
+              {modeLabel}
+            </span>
+            <span className="rounded-full border border-white/20 px-2.5 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
+              {profileLabel}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-white/55">
+              Tekkin score
+            </span>
+            <span className="text-xl font-semibold text-white">
+              {version.overall_score != null
+                ? version.overall_score.toFixed(1)
+                : "n.a."}
+            </span>
+            {version.overall_score != null && (
+              <span className="text-[11px] text-white/55">
+                ({scoreLabel})
               </span>
-              <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white/60">
-                {profileLabel}
-              </span>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-[11px] uppercase tracking-wide text-white/50">
-                Overall score
-              </span>
-              <span
-                className={`text-2xl font-semibold ${getScoreColor(
-                  version.overall_score
-                )}`}
-              >
-                {version.overall_score != null
-                  ? version.overall_score.toFixed(1)
-                  : "n.a."}
-                {version.overall_score != null ? "/10" : ""}
-              </span>
-            </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Row 1: Loudness, Rhythm, Spectrum */}
-      <div className="mt-5 grid gap-4 md:grid-cols-3">
+      {/* METRICS ROW */}
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         {/* Loudness */}
-        <div className="rounded-xl border border-white/8 bg-white/5 p-3.5">
+        <div className="rounded-xl border border-white/12 bg-black/80 px-3.5 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Gauge className="h-4 w-4 text-emerald-300" />
@@ -177,68 +194,55 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
                 Loudness
               </span>
             </div>
-            <span className="text-[10px] text-white/50">
-              Target MDTech: -8.5 / -7.0 LUFS
+            <span className="text-[10px] text-white/55">
+              Target: -8.5 / -7.0
             </span>
           </div>
-          <div className="mt-2 flex items-baseline gap-1">
-            <span className="text-2xl font-semibold text-white">
+          <div className="mt-1.5 flex items-baseline gap-1">
+            <span className="text-xl font-semibold text-white">
               {version.lufs != null ? version.lufs.toFixed(1) : "n.a."}
             </span>
             <span className="text-[11px] text-white/60">LUFS</span>
           </div>
-          <p className="mt-1.5 text-[11px] text-white/60">
-            Usa questo numero per allineare le tue versioni alla reference Tekkin
-            per minimal deep tech.
+          <p className="mt-1 text-[11px] text-white/60">
+            Stato mix: <span className="font-semibold">{mixState}</span>
           </p>
         </div>
 
-  {/* Rhythm */}
-        <div className="rounded-xl border border-white/8 bg-white/5 p-3.5">
+        {/* Rhythm */}
+        <div className="rounded-xl border border-white/12 bg-black/80 px-3.5 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <Activity className="h-4 w-4 text-emerald-300" />
+              <Activity className="h-4 w-4 text-cyan-300" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
                 Rhythm
               </span>
             </div>
-            <span className="text-[10px] text-white/50">Timing & key</span>
+            <span className="text-[10px] text-white/55">Timing</span>
           </div>
-
-          {/* BPM grande */}
-          <div className="mt-2 flex items-baseline gap-1">
-            <span className="text-2xl font-semibold text-white">
-              {formatNumber(version.analyzer_bpm ?? null, 1)}
+          <div className="mt-1.5 flex items-baseline gap-1">
+            <span className="text-xl font-semibold text-white">
+              {formatBpm(version.analyzer_bpm)}
             </span>
             <span className="text-[11px] text-white/60">BPM</span>
           </div>
-
-          {/* Key placeholder pulito */}
-          <div className="mt-2 flex items-center justify-between text-[11px]">
-            <span className="text-white/60">Key</span>
-            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-white/45">
-              in arrivo
-            </span>
-          </div>
-
-          <p className="mt-2 text-[11px] text-white/60">
-            Usa il BPM per allineare groove, reference e set DJ. La key verrà
-            aggiunta come metrica dedicata nelle prossime versioni.
+          <p className="mt-1 text-[11px] text-white/60">
+            Usa questo valore per allineare la versione a reference e set.
           </p>
         </div>
 
         {/* Spectrum */}
-        <div className="rounded-xl border border-white/8 bg-white/5 p-3.5">
+        <div className="rounded-xl border border-white/12 bg-black/80 px-3.5 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <ChartBar className="h-4 w-4 text-emerald-300" />
+              <ChartBar className="h-4 w-4 text-sky-300" />
               <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
                 Spectrum
               </span>
             </div>
-            <span className="text-[10px] text-white/50">{brightnessLabel}</span>
+            <span className="text-[10px] text-white/55">{brightnessLabel}</span>
           </div>
-          <dl className="mt-2 space-y-1.5 text-[11px] text-white/70">
+          <dl className="mt-1.5 space-y-1 text-[11px] text-white/70">
             <div className="flex justify-between">
               <dt>Centroid</dt>
               <dd>{formatNumber(version.analyzer_spectral_centroid_hz, 0)} Hz</dd>
@@ -252,120 +256,39 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
               <dd>{formatNumber(version.analyzer_spectral_bandwidth_hz, 0)} Hz</dd>
             </div>
           </dl>
-          <p className="mt-1.5 text-[11px] text-white/60">
-            Indica quanto il mix è bilanciato tra low e top. Valori molto alti
-            di rolloff e centroid indicano mix molto bright.
-          </p>
         </div>
       </div>
 
-      {/* Row 2: Texture e Mix Metrics */}
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {/* Texture */}
-        <div className="rounded-xl border border-white/8 bg-white/5 p-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="h-4 w-4 text-emerald-300" />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
-                Texture
-              </span>
-            </div>
-            <span className="text-[10px] text-white/50">{textureLabel}</span>
-          </div>
-          <dl className="mt-2 space-y-1.5 text-[11px] text-white/70">
-            <div className="flex justify-between">
-              <dt>Flatness</dt>
-              <dd>{formatNumber(version.analyzer_spectral_flatness, 3)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt>Zero crossing</dt>
-              <dd>{formatNumber(version.analyzer_zero_crossing_rate, 3)}</dd>
-            </div>
-          </dl>
-          <p className="mt-1.5 text-[11px] text-white/60">
-            Flatness e zero crossing insieme ti dicono quanto il contenuto è
-            pulito, punchy o rumoroso. Utile per capire se stai over saturando.
-          </p>
+      {/* QUICK MIX REPORT (BREVE) */}
+      <div className="mt-4 rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
+        <div className="flex items-center gap-1.5">
+          <Info className="h-4 w-4 text-emerald-300" />
+          <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+            Quick mix report
+          </span>
         </div>
-
-        {/* Mix metrics v3.6 */}
-        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Info className="h-4 w-4 text-emerald-300" />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-emerald-300">
-                Mix metrics
-              </span>
-            </div>
-            <span className="text-[10px] text-emerald-200/80">
-              From Tekkin profiles
-            </span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <MetricPill label="Sub clarity" value={version.sub_clarity} />
-            <MetricPill label="Hi end" value={version.hi_end} />
-            <MetricPill label="Dynamics" value={version.dynamics} />
-            <MetricPill label="Stereo image" value={version.stereo_image} />
-            <MetricPill label="Tonality" value={version.tonality} />
-          </div>
-          <p className="mt-1.5 text-[11px] text-emerald-100/80">
-            Questi valori arrivano direttamente dal tuo motore 3.6
-            e possono alimentare Tekkin Rank o highlight automatici.
-          </p>
-        </div>
+        <p className="mt-1 text-[11px] text-white/60">
+          Punti chiave estratti dal report tecnico.
+        </p>
+        <ul className="mt-2 space-y-1 text-[11px] text-white/80">
+          {quickBullets.map((b) => (
+            <li key={b}>• {b}</li>
+          ))}
+        </ul>
       </div>
 
-      {/* Feedback section */}
-      <div className="mt-5 rounded-xl border border-white/10 bg-black/60 p-3.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <Info className="h-4 w-4 text-emerald-300" />
-            <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
-              Tekkin Analyzer PRO report
-            </span>
-          </div>
-          {feedbackText && feedbackText.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowFullFeedback((v) => !v)}
-              className="rounded-full bg-white/5 px-2.5 py-0.5 text-[10px] font-medium text-white/70 hover:bg-white/10"
-            >
-              {showFullFeedback ? "Collapse" : "Expand"}
-            </button>
-          ) : null}
-        </div>
-        <div className="mt-2 max-h-64 overflow-y-auto rounded-lg bg-black/60 p-2 text-[11px] leading-relaxed text-white/80">
-          <pre className="whitespace-pre-wrap font-mono text-[11px]">
-            {feedbackText
-              ? showFullFeedback
-                ? feedbackText
-                : feedbackShort
-              : "Nessun feedback disponibile per questa versione."}
+      {/* TERMINAL / REPORT COMPLETO */}
+      <div className="mt-4 rounded-xl border border-white/15 bg-black px-3.5 py-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-white/65">
+          <Info className="h-4 w-4 text-emerald-300" />
+          Report tecnico completo
+        </p>
+        <div className="max-h-72 overflow-y-auto rounded-lg bg-black/90 p-2">
+          <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-white/80">
+            {feedbackText || "Nessun report testuale disponibile per questa versione."}
           </pre>
         </div>
       </div>
     </section>
-  );
-}
-
-type MetricPillProps = {
-  label: string;
-  value?: number | null;
-};
-
-function MetricPill({ label, value }: MetricPillProps) {
-  const colorClass = getMetricPillColor(
-    value != null ? Number(value) : null
-  );
-
-  return (
-    <div
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium ${colorClass}`}
-    >
-      <span>{label}</span>
-      <span className="text-white/70">
-        {value != null ? value.toFixed(2) : "n.a."}
-      </span>
-    </div>
   );
 }

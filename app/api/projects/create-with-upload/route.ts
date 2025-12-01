@@ -18,7 +18,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     const formData = await req.formData();
@@ -26,6 +29,10 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file") as File | null;
     const title = formData.get("title") as string | null;
     const status = (formData.get("status") as string | null) ?? "DEMO";
+
+    // nuovi campi scelti dall artista
+    const mixType = (formData.get("mix_type") as string | null) ?? "master";
+    const genre = (formData.get("genre") as string | null) ?? null;
 
     if (!file || !title) {
       return NextResponse.json(
@@ -62,6 +69,9 @@ export async function POST(req: NextRequest) {
         bpm: null,
         track_key: null,
         artist_name: null,
+        // nuovi metadati
+        mix_type: mixType, // "master" | "premaster"
+        genre,             // es. "minimal_deep_tech"
       })
       .select()
       .single();
@@ -86,6 +96,9 @@ export async function POST(req: NextRequest) {
         tonality: null,
         overall_score: null,
         feedback: null,
+        // opzionale: se vuoi puoi duplicare qui
+        // mix_type: mixType,
+        // genre,
       });
 
     if (versionError) {

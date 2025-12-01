@@ -8,147 +8,140 @@ type ProjectRow = {
   id: string;
   title: string;
   status: string | null;
-  version_name: string;
+  version_name: string | null;
   created_at: string;
-  version_id?: string | null;
-  overall_score?: number | null;
 };
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
-      setLoading(true);
-      setErrorMsg(null);
+      try {
+        setLoading(true);
+        setErrorMsg(null);
 
-      const supabase = createClient();
+        const supabase = createClient();
 
-      const { data, error } = await supabase
-        .from("projects")
-        .select(
-          `
-          id,
-          title,
-          status,
-          created_at,
-          project_versions (
+        const { data, error } = await supabase
+          .from("projects")
+          .select(
+            `
             id,
-            version_name,
+            title,
+            status,
             created_at,
-            overall_score
+            project_versions (
+              version_name,
+              created_at
+            )
+          `
           )
-        `
-        )
-        .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("Supabase load projects error:", error);
-        setErrorMsg("Errore nel caricamento dei projects");
+        if (error) {
+          console.error("Supabase load projects error:", error);
+          setErrorMsg("Errore nel caricamento dei projects.");
+          setProjects([]);
+          setLoading(false);
+          return;
+        }
+
+        const mapped: ProjectRow[] =
+          data?.map((p: any) => {
+            const versions = (p.project_versions ?? []) as any[];
+
+            // se arrivano non ordinati, prendo comunque la piu recente
+            const latestVersion =
+              versions.length > 0
+                ? [...versions].sort(
+                    (a, b) =>
+                      new Date(b.created_at).getTime() -
+                      new Date(a.created_at).getTime()
+                  )[0]
+                : null;
+
+            return {
+              id: p.id,
+              title: p.title,
+              status: p.status,
+              version_name: latestVersion?.version_name ?? null,
+              created_at: p.created_at,
+            };
+          }) ?? [];
+
+        setProjects(mapped);
         setLoading(false);
-        return;
+      } catch (err) {
+        console.error("Unexpected load projects error:", err);
+        setErrorMsg("Errore inatteso nel caricamento dei projects.");
+        setProjects([]);
+        setLoading(false);
       }
-
-      const mapped: ProjectRow[] =
-        (data ?? []).map((p: any) => {
-          const versions = p.project_versions ?? [];
-          const latest =
-            versions.length > 0
-              ? versions.sort(
-                  (a: any, b: any) =>
-                    new Date(b.created_at).getTime() -
-                    new Date(a.created_at).getTime()
-                )[0]
-              : null;
-
-          return {
-            id: p.id,
-            title: p.title,
-            status: p.status,
-            version_name: latest?.version_name ?? "v1",
-            version_id: latest?.id ?? null,
-            overall_score: latest?.overall_score ?? null,
-            created_at: p.created_at,
-          };
-        });
-
-      setProjects(mapped);
-      setLoading(false);
     };
 
     void load();
   }, []);
 
-  const handleAnalyze = async (projectId: string) => {
-    const project = projects.find((x) => x.id === projectId);
-    if (!project) return;
-
-    const versionId = project.version_id;
-    if (!versionId) {
-      setErrorMsg("Nessuna versione trovata per questo progetto.");
-      return;
-    }
-
-    try {
-      setAnalyzingId(projectId);
-      setErrorMsg(null);
-
-      const res = await fetch("/api/projects/run-analyzer", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          version_id: versionId,
-        }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Errore avviando l'analisi");
-      }
-
-      const json = await res.json();
-      const newScore =
-        typeof json.overall_score === "number" ? json.overall_score : null;
-
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === projectId ? { ...p, overall_score: newScore } : p
-        )
-      );
-    } catch (err) {
-      console.error("Analyze error:", err);
-      setErrorMsg("Errore durante l'analisi.");
-    } finally {
-      setAnalyzingId(null);
-    }
-  };
+  const hasProjects = projects.length > 0;
 
   return (
     <div className="w-full max-w-6xl mx-auto py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Projects</h1>
+        <div>
+          <h1 className="text-2xl font-semibold">Projects</h1>
+          <p className="text-xs text-white/50 mt-1">
+            Qui gestisci le tracce che vuoi analizzare con Tekkin Analyzer.
+          </p>
+        </div>
         <Link
           href="/artist/projects/new"
-          className="rounded-full px-4 py-2 text-sm font-medium bg-[var(--accent)] text-black"
+          className="rounded-full px-4 py-2 text-sm font-medium bg-[var(--accent)] text-black hover:opacity-90"
         >
-          New Project
+          New project
         </Link>
       </div>
 
       {loading && (
-        <p className="text-sm text-white/50">Caricamento projects...</p>
+        <div className="rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-white/70">
+          Caricamento dei tuoi projects in corso...
+        </div>
       )}
 
       {errorMsg && !loading && (
-        <p className="mb-4 text-sm text-red-400">{errorMsg}</p>
+        <div className="rounded-2xl border border-red-500/40 bg-red-950/50 p-4 text-sm text-red-200 mb-4">
+          {errorMsg}
+        </div>
       )}
 
-      {!loading && (
+      {!loading && !hasProjects && !errorMsg && (
+        <div className="rounded-2xl border border-white/10 bg-black/50 p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-sm font-semibold text-white">
+              Nessun project ancora creato
+            </h2>
+            <p className="text-xs text-white/70 mt-1">
+              Crea il tuo primo project, carica una versione della traccia
+              e lancia Tekkin Analyzer per vedere subito il report.
+            </p>
+            <ul className="mt-3 text-xs text-white/65 space-y-1.5">
+              <li>1. Clicca su "New project"</li>
+              <li>2. Dai un nome alla traccia</li>
+              <li>3. Carica la prima versione audio e fai Analyze</li>
+            </ul>
+          </div>
+          <Link
+            href="/artist/projects/new"
+            className="inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium bg-[var(--accent)] text-black hover:opacity-90"
+          >
+            Crea il tuo primo project
+          </Link>
+        </div>
+      )}
+
+      {!loading && hasProjects && (
         <div className="overflow-hidden rounded-2xl border border-white/5 bg-black/40">
           <table className="w-full text-sm">
             <thead className="bg-white/5 text-white/70">
@@ -156,10 +149,8 @@ export default function ProjectsPage() {
                 <th className="px-4 py-3 text-left">#</th>
                 <th className="px-4 py-3 text-left">Track name</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Version</th>
-                <th className="px-4 py-3 text-left">Score</th>
-                <th className="px-4 py-3 text-left">Actions</th>
-                <th className="px-4 py-3 text-left">Date</th>
+                <th className="px-4 py-3 text-left">Latest version</th>
+                <th className="px-4 py-3 text-left">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -168,53 +159,30 @@ export default function ProjectsPage() {
                   key={p.id}
                   className="border-t border-white/5 hover:bg-white/5 transition-colors"
                 >
-                  <td className="px-4 py-3">{index + 1}</td>
-                  <td className="px-4 py-3 font-medium">
-  <Link
-    href={`/artist/projects/${p.id}`}
-    className="hover:underline"
-  >
-    {p.title}
-  </Link>
-</td>
-
-                  <td className="px-4 py-3">{p.status}</td>
-                  <td className="px-4 py-3">{p.version_name}</td>
-
-                  <td className="px-4 py-3">
-                    {p.overall_score != null ? p.overall_score : "n.a."}
+                  <td className="px-4 py-3 align-middle text-xs text-white/70">
+                    {index + 1}
                   </td>
-
-                  <td className="px-4 py-3">
-                    {p.overall_score == null ? (
-                      <button
-                        onClick={() => handleAnalyze(p.id)}
-                        className="rounded-full px-3 py-1 text-xs bg-[var(--accent)] text-black"
-                        disabled={analyzingId === p.id}
-                      >
-                        {analyzingId === p.id ? "Analyzing..." : "Analyze v1"}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-white/50">Analyzed</span>
-                    )}
+                  <td className="px-4 py-3 align-middle">
+                    <Link
+                      href={`/artist/projects/${p.id}`}
+                      className="text-sm font-medium text-white hover:underline"
+                    >
+                      {p.title}
+                    </Link>
                   </td>
-
-                  <td className="px-4 py-3">
-                    {new Date(p.created_at).toLocaleDateString()}
+                  <td className="px-4 py-3 align-middle text-xs">
+                    <span className="inline-flex items-center rounded-full border border-white/15 px-2 py-0.5 text-[11px] uppercase tracking-wide text-white/70">
+                      {p.status ?? "UNKNOWN"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-middle text-sm text-white/80">
+                    {p.version_name ?? "n.a."}
+                  </td>
+                  <td className="px-4 py-3 align-middle text-xs text-white/60">
+                    {new Date(p.created_at).toLocaleDateString("it-IT")}
                   </td>
                 </tr>
               ))}
-
-              {projects.length === 0 && !errorMsg && (
-                <tr>
-                  <td
-                    className="px-4 py-6 text-center text-white/40"
-                    colSpan={7}
-                  >
-                    Nessun project ancora. Crea il primo con "New Project".
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
