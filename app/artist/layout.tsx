@@ -10,19 +10,19 @@ import { useArtistRank } from "./hooks/useArtistRank";
 
 const navItems = [
   {
-    label: "Explore",
-    href: "/artist/explore",
+    label: "Projects",
+    href: "/artist/projects",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
       </svg>
     ),
   },
   {
-    label: "Works / Unreleased",
-    href: "/artist/projects",
+    label: "Discovery",
+    href: "/artist/discovery",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M9 18V5l12-2v13" />
@@ -41,6 +41,13 @@ const navItems = [
       </svg>
     ),
   },
+];
+
+const menuItems = [
+  { label: "Manage cookies", href: "#" },
+  { label: "Terms & policies", href: "#" },
+  { label: "Help", href: "#" },
+  { label: "Profile", href: "http://localhost:3000/artist/settings/profile" },
 ];
 
 export default function ArtistLayout({ children }: { children: ReactNode }) {
@@ -251,17 +258,20 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
                   </div>
                 </div>
                 <div className="border-t border-[var(--border)] text-sm">
-                  {[{ label: "Manage cookies", href: "#" }, { label: "Terms & policies", href: "#" }, { label: "Help", href: "#" }].map(
-                    (item) => (
-                      <button
-                        key={item.label}
-                        className="flex w-full items-center px-4 py-2 text-left text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] hover:text-[var(--text-primary)] transition-colors"
-                        onClick={() => setMenuOpen(false)}
-                      >
-                        {item.label}
-                      </button>
-                    )
-                  )}
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.label}
+                      className="flex w-full items-center px-4 py-2 text-left text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] hover:text-[var(--text-primary)] transition-colors"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (item.href && item.href !== "#") {
+                          router.push(item.href);
+                        }
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                   {isAuthenticated ? (
                     <button
                       onClick={handleLogout}

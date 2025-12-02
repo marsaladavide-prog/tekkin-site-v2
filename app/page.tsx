@@ -83,6 +83,13 @@ useEffect(() => {
         >
           Artist
         </a>
+
+                <a
+          href="/agent-dm"
+          className="border border-[#222] rounded-md px-6 py-3 hover:bg-[#111]"
+        >
+          Agent
+        </a>
       </div>
 
       {/* === ANIMAZIONE SCANLINES === */}

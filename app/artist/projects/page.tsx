@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 
 type ProjectRow = {
@@ -16,6 +17,9 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [confirmProject, setConfirmProject] = useState<ProjectRow | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -87,6 +91,23 @@ export default function ProjectsPage() {
 
   const hasProjects = projects.length > 0;
 
+  async function handleDeleteProject(project: ProjectRow) {
+    setDeleteError(null);
+    setDeletingId(project.id);
+    const supabase = createClient();
+    try {
+      const { error } = await supabase.from("projects").delete().eq("id", project.id);
+      if (error) throw error;
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+      setConfirmProject(null);
+    } catch (err) {
+      console.error("Delete project error:", err);
+      setDeleteError("Eliminazione non riuscita, riprova tra poco.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="w-full max-w-6xl mx-auto py-8">
       <div className="flex items-center justify-between mb-6">
@@ -151,6 +172,7 @@ export default function ProjectsPage() {
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-left">Latest version</th>
                 <th className="px-4 py-3 text-left">Created</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -181,10 +203,65 @@ export default function ProjectsPage() {
                   <td className="px-4 py-3 align-middle text-xs text-white/60">
                     {new Date(p.created_at).toLocaleDateString("it-IT")}
                   </td>
+                  <td className="px-4 py-3 align-middle text-right text-xs">
+                    <div className="inline-flex items-center gap-2">
+                      <Link
+                        href={`/artist/projects/${p.id}`}
+                        className="rounded-full border border-white/15 px-3 py-1 text-[11px] text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      >
+                        Apri
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setConfirmProject(p);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-500/40 text-red-400 hover:bg-red-500/10"
+                        aria-label={`Elimina ${p.title}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {confirmProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[var(--sidebar-bg)] p-5 shadow-2xl">
+            <p className="text-sm font-semibold text-white">
+              Elimina “{confirmProject.title}”?
+            </p>
+            <p className="mt-2 text-xs text-white/70">
+              Verranno rimossi anche i file collegati. L’azione è definitiva.
+            </p>
+            {deleteError && (
+              <p className="mt-2 text-xs text-red-300">{deleteError}</p>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmProject(null)}
+                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                disabled={!!deletingId}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteProject(confirmProject)}
+                className="rounded-full bg-red-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                disabled={deletingId === confirmProject.id}
+              >
+                {deletingId === confirmProject.id ? "Elimino..." : "Conferma"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
