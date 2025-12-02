@@ -125,29 +125,50 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const {
+      lufs,
+      sub_clarity,
+      hi_end,
+      dynamics,
+      stereo_image,
+      tonality,
+      overall_score,
+      feedback,
+      bpm,
+      spectral_centroid_hz,
+      spectral_rolloff_hz,
+      spectral_bandwidth_hz,
+      spectral_flatness,
+      zero_crossing_rate,
+      fix_suggestions,
+      reference_ai,
+    } = result;
+
     // 3. aggiorno la versione con i dati dell'analisi
     const { data: updatedVersion, error: updateError } = await supabase
       .from("project_versions")
       .update({
-        lufs: result.lufs,
-        sub_clarity: result.sub_clarity,
-        hi_end: result.hi_end,
-        dynamics: result.dynamics,
-        stereo_image: result.stereo_image,
-        tonality: result.tonality,
-        overall_score: result.overall_score,
-        feedback: result.feedback,
+        lufs,
+        sub_clarity,
+        hi_end,
+        dynamics,
+        stereo_image,
+        tonality,
+        overall_score,
+        feedback,
 
-        analyzer_bpm: result.bpm ?? null,
-        analyzer_spectral_centroid_hz: result.spectral_centroid_hz ?? null,
-        analyzer_spectral_rolloff_hz: result.spectral_rolloff_hz ?? null,
-        analyzer_spectral_bandwidth_hz: result.spectral_bandwidth_hz ?? null,
-        analyzer_spectral_flatness: result.spectral_flatness ?? null,
-        analyzer_zero_crossing_rate: result.zero_crossing_rate ?? null,
+        analyzer_bpm: bpm ?? null,
+        analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
+        analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
+        analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
+        analyzer_spectral_flatness: spectral_flatness ?? null,
+        analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
+        fix_suggestions: fix_suggestions ?? null,
+        analyzer_reference_ai: reference_ai ?? null,
       })
       .eq("id", version.id)
       .select(
-        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate"
+        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai"
       )
       .single();
 

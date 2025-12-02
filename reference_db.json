@@ -1,0 +1,60 @@
+{
+  "genres": {
+    "minimal_deep_tech": {
+      "name": "Minimal / Deep Tech",
+      "tracks": [
+        {
+          "id": "mdt_001",
+          "artist": "Artista Esempio",
+          "title": "Groove 1",
+          "bpm": 128.0,
+          "key": "8A",
+          "features": {
+            "lufs_integrated": -8.7,
+            "crest_factor": 9.2,
+            "sub_ratio": 0.26,
+            "low_ratio": 0.40,
+            "lowmid_ratio": 0.06,
+            "mid_ratio": 0.15,
+            "high_ratio": 0.09,
+            "air_ratio": 0.04,
+            "spectral_centroid_hz": 3400.0,
+            "spectral_rolloff_hz": 12500.0,
+            "zero_crossing_rate": 0.05,
+            "bpm": 128.0
+          }
+        }
+      ],
+      "feature_stats": {
+        "mean": {
+          "lufs_integrated": -8.5,
+          "crest_factor": 9.0,
+          "sub_ratio": 0.27,
+          "low_ratio": 0.39,
+          "lowmid_ratio": 0.06,
+          "mid_ratio": 0.16,
+          "high_ratio": 0.08,
+          "air_ratio": 0.04,
+          "spectral_centroid_hz": 3450.0,
+          "spectral_rolloff_hz": 12400.0,
+          "zero_crossing_rate": 0.051,
+          "bpm": 128.5
+        },
+        "std": {
+          "lufs_integrated": 0.6,
+          "crest_factor": 0.5,
+          "sub_ratio": 0.03,
+          "low_ratio": 0.03,
+          "lowmid_ratio": 0.01,
+          "mid_ratio": 0.02,
+          "high_ratio": 0.02,
+          "air_ratio": 0.01,
+          "spectral_centroid_hz": 200.0,
+          "spectral_rolloff_hz": 500.0,
+          "zero_crossing_rate": 0.005,
+          "bpm": 1.0
+        }
+      }
+    }
+  }
+}

@@ -52,10 +52,25 @@ def estimate_bpm(y: np.ndarray, sr: int) -> float:
     if not np.any(valid):
         return 0.0
 
-    idx = np.argmax(ac[valid])
-    lag_idx = np.where(valid)[0][idx]
-    bpm = float(60.0 * sr / (lag_idx * hop + 1e-9))
-    return round(bpm, 1)
+    valid_bpms = bpms[valid]
+    valid_ac = ac[valid]
+
+    order = np.argsort(valid_ac)[::-1]
+    best_idx = int(order[0])
+    best_bpm = float(valid_bpms[best_idx])
+    best_ac = float(valid_ac[best_idx])
+
+    if best_bpm < 90 and order.size > 1:
+        target = best_bpm * 2.0
+        for idx in order[1:]:
+            candidate_bpm = float(valid_bpms[int(idx)])
+            candidate_ac = float(valid_ac[int(idx)])
+            if abs(candidate_bpm - target) <= 5.0 and candidate_ac >= best_ac * 0.3:
+                best_bpm = candidate_bpm
+                best_ac = candidate_ac
+                break
+
+    return round(best_bpm, 1)
 
 def compute_spectral_features(y: np.ndarray, sr: int) -> dict:
     n = len(y)

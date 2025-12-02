@@ -62,8 +62,8 @@ async def analyze(request: Request, payload: AnalyzePayload):
       tmp_path,
     )
 
-    # 3. uso il motore v3.6 per generare il report testuale
-    report = analyze_to_text(
+    # 3. uso il motore v3.6 per generare il report testuale + struttura
+    analysis = analyze_to_text(
       lang=payload.lang,
       profile_key=payload.profile_key,
       mode=payload.mode,
@@ -71,18 +71,31 @@ async def analyze(request: Request, payload: AnalyzePayload):
       enable_plots=False,
       plots_dir="plots",
       emoji=False,
+      return_struct=True,
     )
+
+    report = analysis["report"]
+    fix_suggestions = analysis.get("fix_suggestions", [])
+    # Reference AI v1: inoltra al frontend il profilo sintetico del mix
+    reference_ai = analysis.get("reference_ai")
 
     # 4. estraggo i numeri principali dal report
     lufs, overall = extract_metrics_from_report(report, payload.lang)
 
     # 5. analisi v4 extras
     extras = analyze_v4_extras(tmp_path)
+    raw_bpm = extras.get("bpm")
+    corrected_bpm = raw_bpm
+
+    if raw_bpm is not None and raw_bpm < 90:
+      corrected_bpm = raw_bpm * 2
     print("[analyzer] v4 extras:", extras)
 
     if lufs is None or overall is None:
       print("[analyzer] Impossibile estrarre LUFS / overall dal report")
       raise HTTPException(status_code=500, detail="Report non parsabile")
+
+    print("[analyzer-api] reference_ai debug:", reference_ai)
 
     # 5. rispondo in JSON nel formato che il sito si aspetta
     # ATTENZIONE: per ora sub_clarity / hi_end / dynamics / stereo_image / tonality
@@ -98,7 +111,9 @@ async def analyze(request: Request, payload: AnalyzePayload):
       "tonality": None,
       "overall_score": overall,
       "feedback": report,
-      "bpm": extras.get("bpm"),
+      "fix_suggestions": fix_suggestions,
+      "reference_ai": reference_ai,
+      "bpm": corrected_bpm,
       "spectral_centroid_hz": extras.get("spectral_centroid_hz"),
       "spectral_rolloff_hz": extras.get("spectral_rolloff_hz"),
       "spectral_bandwidth_hz": extras.get("spectral_bandwidth_hz"),

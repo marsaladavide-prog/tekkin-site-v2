@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { Waves, Gauge, Activity, ChartBar, Info } from "lucide-react";
+import type { FixSuggestion, ReferenceAi } from "@/types/analyzer";
 
 export type AnalyzerVersion = {
   id: string;
@@ -30,6 +31,8 @@ export type AnalyzerVersion = {
 
   analyzer_profile_key?: string | null; // in futuro: genere scelto dall artista
   analyzer_mode?: string | null; // in futuro: "master" | "premaster" scelto dall artista
+  fix_suggestions?: FixSuggestion[] | null;
+  reference_ai?: ReferenceAi | null;
 };
 
 type AnalyzerProPanelProps = {
@@ -56,9 +59,10 @@ function normalizeBpmValue(raw?: number | null): number | null {
 }
 
 function formatBpm(raw?: number | null): string {
-  const normalized = normalizeBpmValue(raw);
-  if (normalized == null) return "n.a.";
-  return String(normalized);
+  const bpm = normalizeBpmValue(raw);
+  if (bpm == null) return "n.a.";
+  const displayedBpm = bpm < 90 ? Math.round(bpm * 2) : bpm;
+  return String(displayedBpm);
 }
 
 function formatNumber(
@@ -104,6 +108,9 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
 
   const mixState = getMixState(version.lufs);
   const scoreLabel = getScoreLabel(version.overall_score);
+  const refAi = version.reference_ai;
+
+  console.log("REF AI PANEL:", refAi, version.id); // <--- aggiungi questa riga
 
   const quickBullets = useMemo(() => {
     const items: string[] = [];
@@ -259,6 +266,93 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
         </div>
       </div>
 
+      {refAi && (
+        <section className="mt-4">
+          <h3 className="text-xs font-semibold tracking-wide uppercase mb-2 text-foreground/80">
+            Reference AI - Profile match
+          </h3>
+
+          <div className="rounded-xl border border-border/60 bg-black/40 p-3 text-xs flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] opacity-70">Profilo</p>
+                <p className="text-sm font-medium">{refAi.profile_label}</p>
+              </div>
+
+              <div className="text-right">
+                <p className="text-[11px] opacity-70">Match</p>
+                <p className="text-lg font-semibold leading-none">
+                  {(refAi.match_ratio * 100).toFixed(0)}%
+                </p>
+                <p className="text-[11px] opacity-60 mt-0.5">
+                  {refAi.match_ratio >= 0.75
+                    ? "Molto vicino al profilo"
+                    : refAi.match_ratio >= 0.5
+                    ? "Abbastanza vicino"
+                    : refAi.match_ratio >= 0.25
+                    ? "Lontano"
+                    : "Molto lontano"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[11px] opacity-80">
+              <span>
+                Loudness in target:{" "}
+                <span className="font-medium">
+                  {refAi.lufs_in_target ? "si" : "no"}
+                </span>
+              </span>
+              <span>
+                Crest in target:{" "}
+                <span className="font-medium">
+                  {refAi.crest_in_target ? "si" : "no"}
+                </span>
+              </span>
+              <span>
+                Tone: <span className="font-medium">{refAi.tone_tag}</span>
+              </span>
+            </div>
+          </div>
+
+          {refAi.bands_status && (
+            <div className="mt-2 rounded-xl border border-border/40 bg-black/30 p-3 text-[11px]">
+              <p className="mb-2 font-semibold uppercase tracking-wide opacity-70">
+                Bande vs target
+              </p>
+              <div className="grid grid-cols-7 gap-2">
+                {Object.entries(refAi.bands_status).map(([band, info]) => (
+                  <div key={band} className="flex flex-col items-center">
+                    <span className="uppercase text-[10px] opacity-70">
+                      {band}
+                    </span>
+                    <span className="text-[11px]">
+                      {(info.value * 100).toFixed(0)}%
+                    </span>
+                    <span
+                      className={
+                        "mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] " +
+                        (info.status === "in_target"
+                          ? "bg-emerald-600/30 text-emerald-300"
+                          : info.status === "low"
+                          ? "bg-amber-500/20 text-amber-300"
+                          : "bg-red-600/20 text-red-300")
+                      }
+                    >
+                      {info.status === "in_target"
+                        ? "ok"
+                        : info.status === "low"
+                        ? "low"
+                        : "high"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* QUICK MIX REPORT (BREVE) */}
       <div className="mt-4 rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
         <div className="flex items-center gap-1.5">
@@ -276,6 +370,42 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
           ))}
         </ul>
       </div>
+
+      {version.fix_suggestions && version.fix_suggestions.length > 0 && (
+        <section className="mt-4 rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
+          <div className="flex items-center gap-1.5">
+            <Info className="h-4 w-4 text-emerald-300" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+              Fix mirati sul mix e sulle bande
+            </span>
+          </div>
+          <div className="mt-3 space-y-3 text-xs text-white/80">
+            {version.fix_suggestions.map((fix, idx) => (
+              <div
+                key={`${fix.issue}-${idx}`}
+                className="rounded-lg border border-white/15 bg-white/5 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-white">
+                    {fix.issue}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-white/60">
+                    {fix.priority}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-white/70">{fix.analysis}</p>
+                {fix.steps && fix.steps.length > 0 && (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-white/70">
+                    {fix.steps.map((step, stepIndex) => (
+                      <li key={stepIndex}>{step}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* TERMINAL / REPORT COMPLETO */}
       <div className="mt-4 rounded-xl border border-white/15 bg-black px-3.5 py-3">

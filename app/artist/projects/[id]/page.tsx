@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -13,7 +14,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { AnalyzerProPanel } from "@/app/artist/components/AnalyzerProPanel";
-import type { AnalyzerMetricsFields } from "@/types/analyzer";
+import type {
+  AnalyzerMetricsFields,
+  AnalyzerRunResponse,
+  FixSuggestion,
+  ReferenceAi,
+} from "@/types/analyzer";
 
 // MAX FILE SIZE (Supabase hard limit)
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -36,6 +42,7 @@ type ProjectVersionRecord = AnalyzerMetricsFields & {
   version_name: string;
   created_at: string;
   audio_url: string | null;
+  analyzer_reference_ai?: ReferenceAi | null;
 };
 
 type SupabaseProjectRecord = {
@@ -95,6 +102,9 @@ export default function ProjectDetailPage() {
   const [fileTooLarge, setFileTooLarge] = useState(false);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [audioStates, setAudioStates] = useState<Record<string, AudioPreviewState>>({});
+  const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<
+    Record<string, FixSuggestion[] | null>
+  >({});
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -103,6 +113,15 @@ export default function ProjectDetailPage() {
     const mb = kb / 1024;
     return `${mb.toFixed(1)} MB`;
   };
+
+  const versionsWithFixes = useMemo(() => {
+    if (!project) return [];
+    return project.versions.map((version) => ({
+      ...version,
+      fix_suggestions:
+        fixSuggestionsByVersion[version.id] ?? version.fix_suggestions ?? null,
+    }));
+  }, [project, fixSuggestionsByVersion]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -212,7 +231,8 @@ export default function ProjectDetailPage() {
             analyzer_spectral_rolloff_hz,
             analyzer_spectral_bandwidth_hz,
             analyzer_spectral_flatness,
-            analyzer_zero_crossing_rate
+            analyzer_zero_crossing_rate,
+            analyzer_reference_ai
           )
         `
         )
@@ -252,6 +272,7 @@ export default function ProjectDetailPage() {
           analyzer_spectral_bandwidth_hz: v.analyzer_spectral_bandwidth_hz ?? null,
           analyzer_spectral_flatness: v.analyzer_spectral_flatness ?? null,
           analyzer_zero_crossing_rate: v.analyzer_zero_crossing_rate ?? null,
+          reference_ai: v.analyzer_reference_ai ?? null,
 
           analyzer_mode: projectData.mix_type ?? "master",
           analyzer_profile_key: profileLabel ?? "Minimal / Deep Tech",
@@ -364,6 +385,12 @@ export default function ProjectDetailPage() {
         throw new Error(text || "Errore avviando l'analisi");
       }
 
+      const runData = (await res.json()) as AnalyzerRunResponse | null;
+      setFixSuggestionsByVersion((prev) => ({
+        ...prev,
+        [versionId]: runData?.analyzer_result?.fix_suggestions ?? null,
+      }));
+
       // ricarico il project per aggiornare metrics e score
       await loadProject();
     } catch (err) {
@@ -374,7 +401,7 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const latestVersion = project?.versions[0] ?? null;
+  const latestVersion = versionsWithFixes[0] ?? null;
   const latestVersionId = latestVersion?.id ?? null;
   const latestVersionRef = useRef<string | null>(null);
 
@@ -392,7 +419,7 @@ export default function ProjectDetailPage() {
   }, [expandedVersionId, latestVersionId]);
 
   const expandedVersion =
-    project?.versions.find((v) => v.id === expandedVersionId) ?? null;
+    versionsWithFixes.find((v) => v.id === expandedVersionId) ?? null;
 
   useEffect(() => {
     if (!expandedVersion) return;
@@ -521,7 +548,7 @@ export default function ProjectDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {project.versions.length === 0 && (
+              {versionsWithFixes.length === 0 && (
                 <tr>
                   <td
                     className="px-4 py-4 text-center text-white/40"
@@ -531,7 +558,7 @@ export default function ProjectDetailPage() {
                   </td>
                 </tr>
               )}
-              {project.versions.map((v, index) => {
+              {versionsWithFixes.map((v, index) => {
                 const isLatestVersion = index === 0;
                 const isExpanded = expandedVersionId === v.id;
                 const audioState = audioStates[v.id];
@@ -575,21 +602,17 @@ export default function ProjectDetailPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          {v.overall_score == null ? (
-                            <button
-                              onClick={() => void handleAnalyzeVersion(v.id)}
-                              disabled={analyzingVersionId === v.id}
-                              className="rounded-full px-3 py-1 text-xs bg-[var(--accent)] text-black disabled:opacity-60"
-                            >
-                              {analyzingVersionId === v.id
-                                ? "Analyzing..."
-                                : "Analyze"}
-                            </button>
-                          ) : (
-                            <span className="text-xs text-white/50">
-                              Analyzed
-                            </span>
-                          )}
+                          <button
+                            onClick={() => void handleAnalyzeVersion(v.id)}
+                            disabled={analyzingVersionId === v.id}
+                            className="rounded-full px-3 py-1 text-xs bg-[var(--accent)] text-black disabled:opacity-60"
+                          >
+                            {analyzingVersionId === v.id
+                              ? "Analyzing..."
+                              : v.overall_score == null
+                              ? "Analyze"
+                              : "Re-analyze"}
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleToggleVersion(v)}
