@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.signal import resample_poly
 
+
 def load_audio_mono(path: str, target_sr: int = 44100):
     import soundfile as sf
 

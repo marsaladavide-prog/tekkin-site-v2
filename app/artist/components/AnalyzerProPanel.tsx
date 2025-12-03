@@ -2,41 +2,40 @@
 
 import { useMemo } from "react";
 import { Waves, Gauge, Activity, ChartBar, Info } from "lucide-react";
-import type { FixSuggestion, ReferenceAi } from "@/types/analyzer";
+import type {
+  AnalyzerMetricsFields,
+  AnalyzerV1Result,
+  AnalyzerIssue,
+  FixSuggestion,
+  ReferenceAi,
+} from "@/types/analyzer";
 
-export type AnalyzerVersion = {
+import type {
+  TekkinReadiness,
+  TekkinReadinessResult,
+} from "@/lib/tekkinProfiles";
+
+import {
+  evaluateTekkinStatus,
+  getReadinessLabel,
+} from "@/lib/tekkinProfiles";
+
+
+
+type VersionRow = AnalyzerMetricsFields & {
   id: string;
   version_name: string;
   created_at?: string;
   audio_url?: string | null;
-
-  // v3.6 core
-  lufs: number | null;
-  overall_score: number | null;
-  feedback: string | null;
-
-  sub_clarity?: number | null;
-  hi_end?: number | null;
-  dynamics?: number | null;
-  stereo_image?: number | null;
-  tonality?: number | null;
-
-  // v4 extras
-  analyzer_bpm?: number | null;
-  analyzer_spectral_centroid_hz?: number | null;
-  analyzer_spectral_rolloff_hz?: number | null;
-  analyzer_spectral_bandwidth_hz?: number | null;
-  analyzer_spectral_flatness?: number | null;
-  analyzer_zero_crossing_rate?: number | null;
-
-  analyzer_profile_key?: string | null; // in futuro: genere scelto dall artista
-  analyzer_mode?: string | null; // in futuro: "master" | "premaster" scelto dall artista
+  analyzer_profile_key?: string | null;
+  analyzer_mode?: string | null;
   fix_suggestions?: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
 };
 
 type AnalyzerProPanelProps = {
-  version: AnalyzerVersion;
+  version: VersionRow;
+  mixV1?: AnalyzerV1Result | null;
 };
 
 function normalizeBpmValue(raw?: number | null): number | null {
@@ -99,7 +98,7 @@ function getScoreLabel(score?: number | null): string {
   return "Early";
 }
 
-export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
+export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
   const modeLabel = version.analyzer_mode || "Master";
   const profileLabel = version.analyzer_profile_key || "Minimal / Deep Tech";
   const brightnessLabel = getBrightnessLabel(
@@ -108,10 +107,29 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
 
   const mixState = getMixState(version.lufs);
   const scoreLabel = getScoreLabel(version.overall_score);
-  const refAi = version.reference_ai;
+  const refAi = version.reference_ai || null;
 
-  console.log("REF AI PANEL:", refAi, version.id); // <--- aggiungi questa riga
+  const modelMatch = refAi?.model_match || null;
+  const matchPercent: number | null =
+    modelMatch?.match_percent != null
+      ? modelMatch.match_percent
+      : refAi != null && typeof refAi.match_ratio === "number"
+      ? refAi.match_ratio * 100
+      : null;
 
+  const readiness: TekkinReadinessResult = refAi
+    ? evaluateTekkinStatus({
+        profileKey: refAi.profile_key,
+        mode: version.analyzer_mode,
+        matchPercent,
+        lufs: version.lufs,
+        lufsInTarget: refAi.lufs_in_target,
+        crestInTarget: refAi.crest_in_target,
+      })
+    : {
+        status: "unknown" as TekkinReadiness,
+        reasons: [],
+      };
   const quickBullets = useMemo(() => {
     const items: string[] = [];
 
@@ -277,22 +295,57 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
               <div>
                 <p className="text-[11px] opacity-70">Profilo</p>
                 <p className="text-sm font-medium">{refAi.profile_label}</p>
+                {refAi.bands_in_target != null &&
+                  refAi.bands_total != null && (
+                    <p className="mt-0.5 text-[11px] opacity-70">
+                      Bande in target:{" "}
+                      <span className="font-medium">
+                        {refAi.bands_in_target}/{refAi.bands_total}
+                      </span>
+                    </p>
+                  )}
+                {refAi.tone_tag && (
+                  <p className="mt-0.5 text-[11px] opacity-70">
+                    Tone: <span className="font-medium">{refAi.tone_tag}</span>
+                  </p>
+                )}
               </div>
 
               <div className="text-right">
-                <p className="text-[11px] opacity-70">Match</p>
+                <p className="text-[11px] opacity-70">Match Tekkin</p>
                 <p className="text-lg font-semibold leading-none">
-                  {(refAi.match_ratio * 100).toFixed(0)}%
+                  {matchPercent != null ? `${matchPercent.toFixed(0)}%` : "n.a."}
                 </p>
-                <p className="text-[11px] opacity-60 mt-0.5">
-                  {refAi.match_ratio >= 0.75
-                    ? "Molto vicino al profilo"
-                    : refAi.match_ratio >= 0.5
-                    ? "Abbastanza vicino"
-                    : refAi.match_ratio >= 0.25
-                    ? "Lontano"
-                    : "Molto lontano"}
+                <p className="mt-0.5 flex items-center justify-end gap-1.5">
+                  <span className="text-[11px] opacity-60">
+                    {matchPercent != null
+                      ? getReadinessLabel(readiness.status)
+                      : "Match sconosciuto"}
+                  </span>
+                  {matchPercent != null && (
+                    <span
+                      className={
+                        "rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide " +
+                        (readiness.status === "ready"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : readiness.status === "almost"
+                          ? "bg-lime-500/15 text-lime-300"
+                          : readiness.status === "work"
+                          ? "bg-amber-500/20 text-amber-300"
+                          : readiness.status === "early"
+                          ? "bg-red-600/25 text-red-300"
+                          : "bg-slate-600/30 text-slate-200")
+                      }
+                    >
+                      Tekkin
+                    </span>
+                  )}
                 </p>
+                {readiness.reasons.length > 0 && (
+                  <p className="mt-1 text-[10px] opacity-60">
+                    {readiness.reasons[0]}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -309,9 +362,6 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
                   {refAi.crest_in_target ? "si" : "no"}
                 </span>
               </span>
-              <span>
-                Tone: <span className="font-medium">{refAi.tone_tag}</span>
-              </span>
             </div>
           </div>
 
@@ -321,32 +371,45 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
                 Bande vs target
               </p>
               <div className="grid grid-cols-7 gap-2">
-                {Object.entries(refAi.bands_status).map(([band, info]) => (
-                  <div key={band} className="flex flex-col items-center">
-                    <span className="uppercase text-[10px] opacity-70">
-                      {band}
-                    </span>
-                    <span className="text-[11px]">
-                      {(info.value * 100).toFixed(0)}%
-                    </span>
-                    <span
-                      className={
-                        "mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] " +
-                        (info.status === "in_target"
-                          ? "bg-emerald-600/30 text-emerald-300"
-                          : info.status === "low"
-                          ? "bg-amber-500/20 text-amber-300"
-                          : "bg-red-600/20 text-red-300")
-                      }
-                    >
-                      {info.status === "in_target"
-                        ? "ok"
-                        : info.status === "low"
-                        ? "low"
-                        : "high"}
-                    </span>
-                  </div>
-                ))}
+                {Object.entries(refAi.bands_status).map(
+                  ([band, infoRaw]) => {
+                    const info: any = infoRaw as any;
+                    const value =
+                      typeof info.value === "number" ? info.value : null;
+                    const status = info.status as
+                      | "in_target"
+                      | "low"
+                      | "high"
+                      | string;
+
+                    return (
+                      <div key={band} className="flex flex-col items-center">
+                        <span className="uppercase text-[10px] opacity-70">
+                          {band}
+                        </span>
+                        <span className="text-[11px]">
+                          {value != null ? `${(value * 100).toFixed(0)}%` : "n.a."}
+                        </span>
+                        <span
+                          className={
+                            "mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] " +
+                            (status === "in_target"
+                              ? "bg-emerald-600/30 text-emerald-300"
+                              : status === "low"
+                              ? "bg-amber-500/20 text-amber-300"
+                              : "bg-red-600/20 text-red-300")
+                          }
+                        >
+                          {status === "in_target"
+                            ? "ok"
+                            : status === "low"
+                            ? "low"
+                            : "high"}
+                        </span>
+                      </div>
+                    );
+                  }
+                )}
               </div>
             </div>
           )}
@@ -371,6 +434,57 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
         </ul>
       </div>
 
+      {mixV1 && (
+        <section className="mt-4 rounded-xl border border-white/12 bg-black/70 px-3.5 py-3">
+          <div className="flex items-center gap-1.5">
+            <Info className="h-4 w-4 text-cyan-300" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+              Tekkin Analyzer V1
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 text-[11px] text-white/80 md:grid-cols-3">
+            <div>
+              <p className="text-[10px] uppercase text-white/50">Loudness</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1.metrics.loudness.integrated_lufs.toFixed(1)} LUFS
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase text-white/50">Structure BPM</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1.metrics.structure.bpm.toFixed(0)} BPM
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase text-white/50">Structure bars</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1.metrics.structure.bars_total} barre
+              </p>
+            </div>
+          </div>
+          {mixV1.issues && mixV1.issues.length > 0 && (
+            <div className="mt-3 space-y-3 text-xs text-white/80">
+              {mixV1.issues.map((issue: AnalyzerIssue, index: number) => (
+                <div
+                  key={`${issue.issue}-${index}`}
+                  className="rounded-lg border border-white/15 bg-white/5 p-3"
+                >
+                  <p className="text-sm font-semibold text-white">{issue.issue}</p>
+                  <p className="mt-1 text-[11px] text-white/70">
+                    {issue.analysis}
+                  </p>
+                  {issue.suggestion && (
+                    <p className="mt-1 text-[11px] text-lime-200">
+                      Suggerimento: {issue.suggestion}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {version.fix_suggestions && version.fix_suggestions.length > 0 && (
         <section className="mt-4 rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
           <div className="flex items-center gap-1.5">
@@ -380,7 +494,7 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
             </span>
           </div>
           <div className="mt-3 space-y-3 text-xs text-white/80">
-            {version.fix_suggestions.map((fix, idx) => (
+            {version.fix_suggestions.map((fix: FixSuggestion, idx: number) => (
               <div
                 key={`${fix.issue}-${idx}`}
                 className="rounded-lg border border-white/15 bg-white/5 p-3"
@@ -396,7 +510,7 @@ export function AnalyzerProPanel({ version }: AnalyzerProPanelProps) {
                 <p className="mt-1 text-[11px] text-white/70">{fix.analysis}</p>
                 {fix.steps && fix.steps.length > 0 && (
                   <ul className="mt-2 list-disc space-y-1 pl-4 text-[11px] text-white/70">
-                    {fix.steps.map((step, stepIndex) => (
+                    {fix.steps.map((step: string, stepIndex: number) => (
                       <li key={stepIndex}>{step}</li>
                     ))}
                   </ul>

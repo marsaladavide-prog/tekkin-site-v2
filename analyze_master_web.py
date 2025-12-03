@@ -41,11 +41,11 @@ except Exception:
 
 VERSION = "3.6"
 
-REFERENCE_DB = None
+reference_db = None
 try:
-    REFERENCE_DB = load_reference_db("reference_db.json")
-except:
-    REFERENCE_DB = None
+    reference_db = load_reference_db("reference_db.json")
+except FileNotFoundError:
+    reference_db = None
 
 # ---------- Profili ----------
 PROFILES = {
@@ -1004,21 +1004,24 @@ def analyze_to_text(lang, profile_key, mode, file_path, enable_plots=False, plot
     fix_suggestions = gen_fix_suggestions(lang, profile_key, band_norm, meters, mode)
     reference_db_output = None
 
-    if REFERENCE_DB is not None:
+    if reference_db is not None:
         try:
+            metrics = {
+                "lufs_integrated": integrated_lufs,
+                "crest_factor": crest,
+                "sub_ratio": band_norm["sub"],
+                "low_ratio": band_norm["low"],
+                "lowmid_ratio": band_norm["lowmid"],
+                "mid_ratio": band_norm["mid"],
+                "presence_ratio": band_norm["presence"],
+                "air_ratio": band_norm["air"],
+            }
+            extras = None
+
             reference_db_output = evaluate_track_with_reference(
-                {
-                    "lufs_integrated": integrated_lufs,
-                    "crest_factor": crest,
-                    "sub_ratio": band_norm["sub"],
-                    "low_ratio": band_norm["low"],
-                    "lowmid_ratio": band_norm["lowmid"],
-                    "mid_ratio": band_norm["mid"],
-                    "presence_ratio": band_norm["presence"],
-                    "air_ratio": band_norm["air"],
-                },
-                extras=None,
-                db=REFERENCE_DB,
+                db=reference_db,
+                metrics=metrics,
+                extras=extras,
             )
         except Exception as e:
             reference_db_output = {"error": str(e)}

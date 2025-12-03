@@ -19,6 +19,7 @@ import type {
   AnalyzerRunResponse,
   FixSuggestion,
   ReferenceAi,
+  AnalyzerV1Result,
 } from "@/types/analyzer";
 
 // MAX FILE SIZE (Supabase hard limit)
@@ -29,6 +30,7 @@ type VersionRow = AnalyzerMetricsFields & {
   version_name: string;
   created_at: string;
   audio_url: string | null;
+  mix_v1?: AnalyzerV1Result | null;
 };
 
 type AudioPreviewState = {
@@ -43,6 +45,7 @@ type ProjectVersionRecord = AnalyzerMetricsFields & {
   created_at: string;
   audio_url: string | null;
   analyzer_reference_ai?: ReferenceAi | null;
+  analyzer_mix_v1?: AnalyzerV1Result | null;
 };
 
 type SupabaseProjectRecord = {
@@ -105,6 +108,9 @@ export default function ProjectDetailPage() {
   const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<
     Record<string, FixSuggestion[] | null>
   >({});
+  const [mixV1ByVersion, setMixV1ByVersion] = useState<
+    Record<string, AnalyzerV1Result | null>
+  >({});
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -120,8 +126,10 @@ export default function ProjectDetailPage() {
       ...version,
       fix_suggestions:
         fixSuggestionsByVersion[version.id] ?? version.fix_suggestions ?? null,
+      // Qui agganci il risultato V1, se lo vuoi dentro la versione
+      mix_v1: mixV1ByVersion[version.id] ?? (version as any).mix_v1 ?? null,
     }));
-  }, [project, fixSuggestionsByVersion]);
+  }, [project, fixSuggestionsByVersion, mixV1ByVersion]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -232,7 +240,8 @@ export default function ProjectDetailPage() {
             analyzer_spectral_bandwidth_hz,
             analyzer_spectral_flatness,
             analyzer_zero_crossing_rate,
-            analyzer_reference_ai
+            analyzer_reference_ai,
+            analyzer_mix_v1
           )
         `
         )
@@ -273,11 +282,10 @@ export default function ProjectDetailPage() {
           analyzer_spectral_flatness: v.analyzer_spectral_flatness ?? null,
           analyzer_zero_crossing_rate: v.analyzer_zero_crossing_rate ?? null,
           reference_ai: v.analyzer_reference_ai ?? null,
+          mix_v1: v.analyzer_mix_v1 ?? null,
 
           analyzer_mode: projectData.mix_type ?? "master",
           analyzer_profile_key: profileLabel ?? "Minimal / Deep Tech",
-          analyzer_key: v.analyzer_key ?? null,
-          analyzer_key_confidence: v.analyzer_key_confidence ?? null,
         }))
         .sort(
           (a: VersionRow, b: VersionRow) =>
@@ -386,13 +394,24 @@ export default function ProjectDetailPage() {
       }
 
       const runData = (await res.json()) as AnalyzerRunResponse | null;
+
+      // salva le fix suggestions (come già facevi)
       setFixSuggestionsByVersion((prev) => ({
         ...prev,
         [versionId]: runData?.analyzer_result?.fix_suggestions ?? null,
       }));
 
+      // nuovo: salva anche il risultato Tekkin Analyzer V1 per questa versione
+      const mixV1 = runData?.analyzer_result?.mix_v1 as AnalyzerV1Result | null;
+
+      setMixV1ByVersion((prev) => ({
+        ...prev,
+        [versionId]: mixV1,
+      }));
+
       // ricarico il project per aggiornare metrics e score
       await loadProject();
+
     } catch (err) {
       console.error("Analyze version error:", err);
       setErrorMsg("Errore durante l'analisi della versione.");
@@ -402,6 +421,7 @@ export default function ProjectDetailPage() {
   };
 
   const latestVersion = versionsWithFixes[0] ?? null;
+
   const latestVersionId = latestVersion?.id ?? null;
   const latestVersionRef = useRef<string | null>(null);
 
@@ -662,7 +682,10 @@ export default function ProjectDetailPage() {
                               Anteprima audio non disponibile per questa versione.
                             </p>
                           )}
-                          <AnalyzerProPanel version={v} />
+                          <AnalyzerProPanel
+                            version={v}
+                            mixV1={mixV1ByVersion[v.id] ?? v.mix_v1 ?? null}
+                          />
                         </td>
                       </tr>
                     )}

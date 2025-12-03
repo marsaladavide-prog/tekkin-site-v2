@@ -125,6 +125,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // QUI: alias semplice, cosi cleanResult esiste
+    const cleanResult = result;
+
     const {
       lufs,
       sub_clarity,
@@ -142,35 +145,40 @@ export async function POST(req: NextRequest) {
       zero_crossing_rate,
       fix_suggestions,
       reference_ai,
+      mix_v1,
     } = result;
 
     // 3. aggiorno la versione con i dati dell'analisi
     const { data: updatedVersion, error: updateError } = await supabase
-      .from("project_versions")
-      .update({
-        lufs,
-        sub_clarity,
-        hi_end,
-        dynamics,
-        stereo_image,
-        tonality,
-        overall_score,
-        feedback,
+  .from("project_versions")
+  .update({
+    lufs,
+    sub_clarity,
+    hi_end,
+    dynamics,
+    stereo_image,
+    tonality,
+    overall_score,
+    feedback,
 
-        analyzer_bpm: bpm ?? null,
-        analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
-        analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
-        analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
-        analyzer_spectral_flatness: spectral_flatness ?? null,
-        analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
-        fix_suggestions: fix_suggestions ?? null,
-        analyzer_reference_ai: reference_ai ?? null,
-      })
-      .eq("id", version.id)
-      .select(
-        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai"
-      )
-      .single();
+
+    analyzer_reference_ai: cleanResult.reference_ai ?? null,
+    analyzer_mix_v1: cleanResult.mix_v1 ?? null,
+
+    analyzer_bpm: bpm ?? null,
+    analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
+    analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
+    analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
+    analyzer_spectral_flatness: spectral_flatness ?? null,
+    analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
+    fix_suggestions: fix_suggestions ?? null,
+  })
+  .eq("id", version.id)
+  .select(
+    "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai, analyzer_mix_v1, fix_suggestions"
+  )
+  .single();
+
 
     if (updateError || !updatedVersion) {
       console.error("[run-analyzer] Update version error:", updateError);
