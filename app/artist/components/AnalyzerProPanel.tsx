@@ -8,7 +8,10 @@ import type {
   AnalyzerIssue,
   FixSuggestion,
   ReferenceAi,
+  AnalyzerAiAction,
+  AnalyzerAiMeta,
 } from "@/types/analyzer";
+
 
 import type {
   TekkinReadiness,
@@ -31,11 +34,20 @@ type VersionRow = AnalyzerMetricsFields & {
   analyzer_mode?: string | null;
   fix_suggestions?: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
+  analyzer_ai_summary?: string | null;
+  analyzer_ai_actions?: AnalyzerAiAction[] | null;
+  analyzer_ai_meta?: AnalyzerAiMeta | null;
 };
 
 type AnalyzerProPanelProps = {
   version: VersionRow;
   mixV1?: AnalyzerV1Result | null;
+  aiSummary?: string | null;
+  aiActions?: AnalyzerAiAction[] | null;
+  aiMeta?: AnalyzerAiMeta | null;
+  aiLoading?: boolean;
+  aiError?: string | null;
+  onAskAi?: () => void;
 };
 
 function normalizeBpmValue(raw?: number | null): number | null {
@@ -98,7 +110,16 @@ function getScoreLabel(score?: number | null): string {
   return "Early";
 }
 
-export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
+export function AnalyzerProPanel({
+  version,
+  mixV1,
+  aiSummary,
+  aiActions,
+  aiMeta,
+  aiLoading,
+  aiError,
+  onAskAi,
+}: AnalyzerProPanelProps) {
   const modeLabel = version.analyzer_mode || "Master";
   const profileLabel = version.analyzer_profile_key || "Minimal / Deep Tech";
   const brightnessLabel = getBrightnessLabel(
@@ -108,6 +129,8 @@ export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
   const mixState = getMixState(version.lufs);
   const scoreLabel = getScoreLabel(version.overall_score);
   const refAi = version.reference_ai || null;
+  const effectiveLufs =
+    version.lufs ?? mixV1?.metrics?.loudness?.integrated_lufs ?? null;
 
   const modelMatch = refAi?.model_match || null;
   const matchPercent: number | null =
@@ -116,6 +139,9 @@ export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
       : refAi != null && typeof refAi.match_ratio === "number"
       ? refAi.match_ratio * 100
       : null;
+
+      const effectiveStructureBpm =
+  version.analyzer_bpm ?? mixV1?.metrics?.structure?.bpm ?? null;
 
   const readiness: TekkinReadinessResult = refAi
     ? evaluateTekkinStatus({
@@ -155,6 +181,9 @@ export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
   ]);
 
   const feedbackText = version.feedback ?? "";
+  const aiSummaryText = aiSummary ?? version.analyzer_ai_summary ?? null;
+  const aiActionsList = aiActions ?? version.analyzer_ai_actions ?? null;
+  const aiMetaData = aiMeta ?? version.analyzer_ai_meta ?? null;
 
   return (
     <section className="w-full rounded-2xl border border-white/10 bg-black/70 p-4 md:p-5 shadow-xl shadow-black/50">
@@ -443,18 +472,22 @@ export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
             </span>
           </div>
           <div className="mt-3 grid gap-2 text-[11px] text-white/80 md:grid-cols-3">
-            <div>
-              <p className="text-[10px] uppercase text-white/50">Loudness</p>
-              <p className="text-sm font-semibold text-white">
-                {mixV1.metrics.loudness.integrated_lufs.toFixed(1)} LUFS
-              </p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase text-white/50">Structure BPM</p>
-              <p className="text-sm font-semibold text-white">
-                {mixV1.metrics.structure.bpm.toFixed(0)} BPM
-              </p>
-            </div>
+              <div>
+                <p className="text-[10px] uppercase text-white/50">Loudness</p>
+                <p className="text-sm font-semibold text-white">
+                  {effectiveLufs != null
+                    ? `${effectiveLufs.toFixed(1)} LUFS`
+                    : "n.a."}
+                </p>
+              </div>
+<div>
+  <p className="text-[10px] uppercase text-white/50">Structure BPM</p>
+  <p className="text-sm font-semibold text-white">
+    {effectiveStructureBpm != null
+      ? `${effectiveStructureBpm.toFixed(0)} BPM`
+      : "n.a."}
+  </p>
+</div>
             <div>
               <p className="text-[10px] uppercase text-white/50">Structure bars</p>
               <p className="text-sm font-semibold text-white">
@@ -478,6 +511,115 @@ export function AnalyzerProPanel({ version, mixV1 }: AnalyzerProPanelProps) {
                       Suggerimento: {issue.suggestion}
                     </p>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+            {/* TEKKIN AI COACH */}
+      {(aiSummaryText ||
+        (aiActionsList && aiActionsList.length > 0) ||
+        aiMetaData ||
+        onAskAi) && (
+        <section className="mt-4 rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <Info className="h-4 w-4 text-emerald-300" />
+              <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+                Tekkin AI coach
+              </span>
+            </div>
+
+            {onAskAi && (
+              <button
+                type="button"
+                onClick={onAskAi}
+                disabled={aiLoading}
+                className="rounded-full border border-emerald-400/60 px-2.5 py-0.5 text-[11px] uppercase tracking-wide text-emerald-200 disabled:opacity-50"
+              >
+                {aiLoading ? "Analisi in corso..." : "Chiedi a Tekkin AI"}
+              </button>
+            )}
+          </div>
+
+          {aiError && (
+            <p className="mt-2 text-[11px] text-red-300">{aiError}</p>
+          )}
+
+          {aiSummaryText ? (
+            <p className="mt-2 text-[11px] text-white/75">{aiSummaryText}</p>
+          ) : !aiLoading ? (
+            <p className="mt-2 text-[11px] text-white/55">
+              Nessun riassunto AI ancora generato per questa versione.
+            </p>
+          ) : null}
+
+          {aiMetaData && (
+            <div className="mt-3 grid gap-3 text-[11px] text-white/80 md:grid-cols-3">
+              <div>
+                <p className="text-[10px] uppercase text-white/50">
+                  Valutazione artistica
+                </p>
+                <p className="mt-1">{aiMetaData.artistic_assessment}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-white/50">Label fit</p>
+                <p className="mt-1">{aiMetaData.label_fit ?? "n.a."}</p>
+                <p className="mt-1 text-white/60">
+                  Potential gain:{" "}
+                  {aiMetaData.predicted_rank_gain != null
+                    ? `+${aiMetaData.predicted_rank_gain.toFixed(1)} punti`
+                    : "n.a."}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase text-white/50">Struttura</p>
+                <p className="mt-1">
+                  {aiMetaData.structure_feedback ??
+                    "Nessun commento struttura."}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {aiMetaData?.risk_flags && aiMetaData.risk_flags.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[10px] uppercase text-white/50 mb-1">
+                Risk flags
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {aiMetaData.risk_flags.map((flag: string) => (
+                  <span
+                    key={flag}
+                    className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-red-200"
+                  >
+                    {flag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {aiActionsList && aiActionsList.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {aiActionsList.map((action) => (
+                <div
+                  key={action.title}
+                  className="rounded-lg border border-white/15 bg-white/5 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white">
+                      {action.title}
+                    </p>
+                    <span className="text-[10px] uppercase tracking-wide text-white/60">
+                      {action.focus_area} · {action.priority}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-white/75">
+                    {action.description}
+                  </p>
                 </div>
               ))}
             </div>

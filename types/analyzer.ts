@@ -57,17 +57,32 @@ export type AnalyzerMetricsFields = {
 export type AnalyzerResult = {
   version_id: string;
   project_id: string;
+
+  // metri principali
   lufs: number;
   overall_score: number;
   feedback: string;
+
+  // campi aggiuntivi che il Python sta già mandando
+  sub_clarity: number | null;
+  hi_end: number | null;
+  dynamics: number | null;
+  stereo_image: number | null;
+  tonality: string | null;
+
+  // suggerimenti + reference AI
   fix_suggestions: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
+
+  // extra analisi v4
   bpm: number | null;
   spectral_centroid_hz: number | null;
   spectral_rolloff_hz: number | null;
   spectral_bandwidth_hz: number | null;
   spectral_flatness: number | null;
   zero_crossing_rate: number | null;
+
+  // Tekkin Analyzer V1
   mix_v1?: AnalyzerV1Result | null;
 };
 
@@ -168,4 +183,41 @@ export type AnalyzerV1Result = {
   profile: string;
   metrics: AnalyzerV1Metrics;
   issues: AnalyzerIssue[];
+};
+
+// ---- TEKKIN AI COACH ----
+
+export type AnalyzerAiFocusArea =
+  | "loudness"
+  | "sub"
+  | "lowmid"
+  | "mid"
+  | "high"
+  | "stereo"
+  | "structure"
+  | "groove"
+  | "arrangement"
+  | "other";
+
+export type AnalyzerAiPriority = "low" | "medium" | "high";
+
+export type AnalyzerAiAction = {
+  title: string;
+  description: string;
+  focus_area: AnalyzerAiFocusArea;
+  priority: AnalyzerAiPriority;
+};
+
+export type AnalyzerAiMeta = {
+  artistic_assessment: string;
+  risk_flags: string[];
+  predicted_rank_gain: number | null;
+  label_fit: string | null;
+  structure_feedback: string | null;
+};
+
+export type AnalyzerAiCoach = {
+  summary: string;
+  actions: AnalyzerAiAction[];
+  meta: AnalyzerAiMeta;
 };

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import type { AnalyzerResult } from "@/types/analyzer";
+import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult";
 
 export const runtime = "nodejs";
 
@@ -20,7 +22,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // corpo della richiesta dal client
     const requestBody = await req.json().catch(() => null);
     const versionId = requestBody?.version_id as string | undefined;
 
@@ -65,13 +66,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Se è già una URL completa, usala; altrimenti crea una signed URL dal bucket "tracks"
+    // 2. Signed URL se serve
     let audioUrl = audioPath;
-
     if (!audioPath.startsWith("http")) {
       const { data: signed, error: signedError } = await supabase.storage
         .from("tracks")
-        .createSignedUrl(audioPath, 60 * 30); // 30 minuti
+        .createSignedUrl(audioPath, 60 * 30);
 
       if (signedError || !signed?.signedUrl) {
         console.error("[run-analyzer] Signed URL error:", signedError);
@@ -114,71 +114,53 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await analyzerRes.json().catch(() => null);
+    const raw = await analyzerRes.json().catch(() => null);
 
-    console.log("[run-analyzer] Analyzer result JSON:", result);
+    console.log("[run-analyzer] Analyzer result JSON:", raw);
 
-    if (!result) {
+    if (!raw) {
       return NextResponse.json(
         { error: "Risposta Analyzer non valida" },
         { status: 500 }
       );
     }
 
-    // QUI: alias semplice, cosi cleanResult esiste
-    const cleanResult = result;
+    const result = raw as AnalyzerResult;
 
-    const {
-      lufs,
-      sub_clarity,
-      hi_end,
-      dynamics,
-      stereo_image,
-      tonality,
-      overall_score,
-      feedback,
-      bpm,
-      spectral_centroid_hz,
-      spectral_rolloff_hz,
-      spectral_bandwidth_hz,
-      spectral_flatness,
-      zero_crossing_rate,
-      fix_suggestions,
-      reference_ai,
-      mix_v1,
-    } = result;
+    // mapping centralizzato
+    const updatePayload = buildAnalyzerUpdatePayload(result);
 
-    // 3. aggiorno la versione con i dati dell'analisi
     const { data: updatedVersion, error: updateError } = await supabase
-  .from("project_versions")
-  .update({
-    lufs,
-    sub_clarity,
-    hi_end,
-    dynamics,
-    stereo_image,
-    tonality,
-    overall_score,
-    feedback,
-
-
-    analyzer_reference_ai: cleanResult.reference_ai ?? null,
-    analyzer_mix_v1: cleanResult.mix_v1 ?? null,
-
-    analyzer_bpm: bpm ?? null,
-    analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
-    analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
-    analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
-    analyzer_spectral_flatness: spectral_flatness ?? null,
-    analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
-    fix_suggestions: fix_suggestions ?? null,
-  })
-  .eq("id", version.id)
-  .select(
-    "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai, analyzer_mix_v1, fix_suggestions"
-  )
-  .single();
-
+      .from("project_versions")
+      .update(updatePayload)
+      .eq("id", version.id)
+      .select(
+        [
+          "id",
+          "version_name",
+          "created_at",
+          "audio_url",
+          "lufs",
+          "sub_clarity",
+          "hi_end",
+          "dynamics",
+          "stereo_image",
+          "tonality",
+          "overall_score",
+          "feedback",
+          "analyzer_bpm",
+          "analyzer_spectral_centroid_hz",
+          "analyzer_spectral_rolloff_hz",
+          "analyzer_spectral_bandwidth_hz",
+          "analyzer_spectral_flatness",
+          "analyzer_zero_crossing_rate",
+          "analyzer_reference_ai",
+          "analyzer_mix_v1",
+          "fix_suggestions",
+          "analyzer_json",
+        ].join(", ")
+      )
+      .single();
 
     if (updateError || !updatedVersion) {
       console.error("[run-analyzer] Update version error:", updateError);

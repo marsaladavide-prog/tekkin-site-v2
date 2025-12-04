@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     // verifica che il project esista
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id")
+      .select("id, mix_type")
       .eq("id", projectId)
       .single();
 
@@ -98,6 +98,7 @@ export async function POST(req: NextRequest) {
 
     const audioUrl = storageData?.path ?? filePath;
 
+    // inserisco la nuova versione con il mix_type normalizzato
     const { data: newVersion, error: versionError } = await supabase
       .from("project_versions")
       .insert({
@@ -106,7 +107,7 @@ export async function POST(req: NextRequest) {
         audio_url: audioUrl,
         mix_type: mixType,
       })
-      .select("id, version_name, created_at, overall_score, lufs")
+      .select("id, project_id, version_name, created_at, overall_score, lufs, mix_type")
       .single();
 
     if (versionError || !newVersion) {
@@ -115,6 +116,22 @@ export async function POST(req: NextRequest) {
         { error: "Errore salvataggio nuova versione" },
         { status: 500 }
       );
+    }
+
+    // se questa nuova versione è un MASTER, porto il project a MASTER
+    if (newVersion.mix_type === "master") {
+      const { error: projectUpdateError } = await supabase
+        .from("projects")
+        .update({ mix_type: "master" })
+        .eq("id", newVersion.project_id);
+
+      if (projectUpdateError) {
+        console.error(
+          "[add-version] Failed to update project mix_type to master:",
+          projectUpdateError
+        );
+        // qui decidi: io loggo e vado avanti, non blocco l'upload
+      }
     }
 
     return NextResponse.json(
