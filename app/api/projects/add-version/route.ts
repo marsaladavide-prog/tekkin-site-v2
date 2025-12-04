@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+const DEFAULT_MIX_TYPE: TekkinMixType = "premaster";
+
+function normalizeMixType(value?: string | null): TekkinMixType {
+  if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) {
+    return value as TekkinMixType;
+  }
+  return DEFAULT_MIX_TYPE;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -21,6 +31,7 @@ export async function POST(req: NextRequest) {
     const versionName =
       String(formData.get("version_name") ?? "").trim() || "v2";
     const audioFile = formData.get("file"); // IMPORTANTE: "file", non "audio"
+    const mixType = normalizeMixType(formData.get("mix_type") as string | null);
 
     if (!projectId || !audioFile || !(audioFile instanceof File)) {
       return NextResponse.json(
@@ -93,6 +104,7 @@ export async function POST(req: NextRequest) {
         project_id: projectId,
         version_name: versionName,
         audio_url: audioUrl,
+        mix_type: mixType,
       })
       .select("id, version_name, created_at, overall_score, lufs")
       .single();

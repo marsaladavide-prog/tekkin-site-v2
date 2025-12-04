@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 
 export const runtime = "nodejs";
+
+const DEFAULT_MIX_TYPE: TekkinMixType = "master";
+
+function normalizeMixType(value?: string | null): TekkinMixType {
+  if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) {
+    return value as TekkinMixType;
+  }
+  return DEFAULT_MIX_TYPE;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,7 +41,7 @@ export async function POST(req: NextRequest) {
     const status = (formData.get("status") as string | null) ?? "DEMO";
 
     // nuovi campi scelti dall artista
-    const mixType = (formData.get("mix_type") as string | null) ?? "master";
+    const mixType = normalizeMixType(formData.get("mix_type") as string | null);
     const genre = (formData.get("genre") as string | null) ?? null;
 
     if (!file || !title) {
@@ -96,9 +106,7 @@ export async function POST(req: NextRequest) {
         tonality: null,
         overall_score: null,
         feedback: null,
-        // opzionale: se vuoi puoi duplicare qui
-        // mix_type: mixType,
-        // genre,
+        mix_type: mixType,
       });
 
     if (versionError) {

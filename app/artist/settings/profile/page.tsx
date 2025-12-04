@@ -2,31 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-
-const TEKKIN_GENRES = [
-  "house",
-  "deep_house",
-  "funky_house",
-  "soulful_house",
-  "jackin_house",
-  "progressive_house",
-  "afro_house",
-  "organic_house",
-  "piano_house",
-  "tech_house",
-  "peak_time_tech_house",
-  "bass_house",
-  "tribal_tech_house",
-  "minimal_deep_tech",
-  "minimal_house",
-  "micro_house",
-  "minimal_techno",
-] as const;
-
-function formatGenreLabel(value: string) {
-  const pretty = value.replace(/_/g, " ");
-  return pretty.charAt(0).toUpperCase() + pretty.slice(1);
-}
+import { TEKKIN_GENRES, TekkinGenreId } from "@/lib/constants/genres";
 
 type ProfileData = {
   id: string;
@@ -48,7 +24,7 @@ export default function ArtistProfilePage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [artistName, setArtistName] = useState("");
-  const [mainGenre, setMainGenre] = useState<string>("");
+  const [mainGenre, setMainGenre] = useState<TekkinGenreId | "">("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("");
   const [bioShort, setBioShort] = useState("");
@@ -71,7 +47,12 @@ export default function ArtistProfilePage() {
         // data è direttamente il record del profilo
         setProfile(data);
         setArtistName(data.artist_name ?? "");
-        setMainGenre(data.main_genres?.[0] ?? "");
+        const storedGenre = data.main_genres?.[0] ?? "";
+        setMainGenre(
+          storedGenre && TEKKIN_GENRES.some((genre) => genre.id === storedGenre)
+            ? (storedGenre as TekkinGenreId)
+            : ""
+        );
         setCity(data.city ?? "");
         setCountry(data.country ?? "");
         setBioShort(data.bio_short ?? "");
@@ -208,13 +189,16 @@ export default function ArtistProfilePage() {
           </label>
           <select
             value={mainGenre}
-            onChange={(e) => setMainGenre(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              setMainGenre(value === "" ? "" : (value as TekkinGenreId));
+            }}
             className="w-full rounded-md border bg-background px-2 py-1"
           >
             <option value="">Seleziona un genere</option>
-            {TEKKIN_GENRES.map((g) => (
-              <option key={g} value={g}>
-                {formatGenreLabel(g)}
+            {TEKKIN_GENRES.map((genre) => (
+              <option key={genre.id} value={genre.id}>
+                {genre.label}
               </option>
             ))}
           </select>

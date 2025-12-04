@@ -20,17 +20,48 @@ import type {
   FixSuggestion,
   ReferenceAi,
   AnalyzerV1Result,
+  AnalyzerAiCoach,
+  AnalyzerAiAction,
+  AnalyzerAiMeta,
 } from "@/types/analyzer";
+import {
+  getTekkinGenreLabel,
+  TEKKIN_MIX_TYPES,
+  TekkinGenreId,
+  TekkinMixType,
+} from "@/lib/constants/genres";
 
 // MAX FILE SIZE (Supabase hard limit)
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+function normalizeMixType(
+  value?: string | null,
+  fallback: TekkinMixType = "premaster"
+): TekkinMixType {
+  if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) {
+    return value as TekkinMixType;
+  }
+  return fallback;
+}
+
+function getMixTypeLabel(
+  value?: string | null | TekkinMixType,
+  fallback: TekkinMixType = "premaster"
+): string {
+  const normalized = normalizeMixType(value, fallback);
+  return normalized === "master" ? "Master" : "Premaster";
+}
 
 type VersionRow = AnalyzerMetricsFields & {
   id: string;
   version_name: string;
   created_at: string;
   audio_url: string | null;
+  mix_type: TekkinMixType;
   mix_v1?: AnalyzerV1Result | null;
+  analyzer_ai_summary?: string | null;
+  analyzer_ai_actions?: AnalyzerAiAction[] | null;
+  analyzer_ai_meta?: AnalyzerAiMeta | null;
 };
 
 type AudioPreviewState = {
@@ -46,6 +77,7 @@ type ProjectVersionRecord = AnalyzerMetricsFields & {
   audio_url: string | null;
   analyzer_reference_ai?: ReferenceAi | null;
   analyzer_mix_v1?: AnalyzerV1Result | null;
+  mix_type?: string | null;
 };
 
 type SupabaseProjectRecord = {
@@ -53,8 +85,8 @@ type SupabaseProjectRecord = {
   title: string;
   status: string | null;
   created_at: string;
-  mix_type: string | null;
-  genre: string | null;
+  mix_type: TekkinMixType | null;
+  genre: TekkinGenreId | null;
   project_versions: ProjectVersionRecord[];
 };
 
@@ -63,26 +95,21 @@ type ProjectDetail = {
   title: string;
   status: string | null;
   created_at: string;
-  mix_type: string | null;
-  genre: string | null;
+  mix_type: TekkinMixType | null;
+  genre: TekkinGenreId | null;
   versions: VersionRow[];
 };
 
 // mapping semplice da valore DB -> label
-function getProfileLabel(genre: string | null): string | null {
-  if (!genre) return null;
-  switch (genre) {
-    case "minimal_deep_tech":
-      return "Minimal / Deep Tech";
-    case "tech_house":
-      return "Tech House";
-    case "house":
-      return "House";
-    case "altro":
-      return "Altro";
-    default:
-      return genre;
-  }
+function normalizeAiMeta(meta?: AnalyzerAiMeta | null): AnalyzerAiMeta {
+  const rawRiskFlags = meta?.risk_flags;
+  return {
+    artistic_assessment: meta?.artistic_assessment ?? "",
+    risk_flags: Array.isArray(rawRiskFlags) ? rawRiskFlags : [],
+    predicted_rank_gain: meta?.predicted_rank_gain ?? null,
+    label_fit: meta?.label_fit ?? null,
+    structure_feedback: meta?.structure_feedback ?? null,
+  };
 }
 
 export default function ProjectDetailPage() {
@@ -110,6 +137,18 @@ export default function ProjectDetailPage() {
   >({});
   const [mixV1ByVersion, setMixV1ByVersion] = useState<
     Record<string, AnalyzerV1Result | null>
+  >({});
+  const [versionMixType, setVersionMixType] = useState<TekkinMixType>(
+    TEKKIN_MIX_TYPES[0]
+  );
+  const [aiByVersion, setAiByVersion] = useState<
+    Record<string, AnalyzerAiCoach>
+  >({});
+  const [aiLoadingVersionId, setAiLoadingVersionId] = useState<string | null>(
+    null
+  );
+  const [aiErrorByVersion, setAiErrorByVersion] = useState<
+    Record<string, string | null>
   >({});
 
   const formatBytes = (bytes: number) => {
@@ -205,9 +244,12 @@ export default function ProjectDetailPage() {
   const loadProject = useCallback(async () => {
     if (!projectId) return;
 
-    try {
-      setLoading(true);
-      setErrorMsg(null);
+      try {
+        setLoading(true);
+        setErrorMsg(null);
+        setAiByVersion({});
+        setAiErrorByVersion({});
+        setVersionMixType(TEKKIN_MIX_TYPES[0]);
 
       const supabase = createClient();
 
@@ -241,7 +283,11 @@ export default function ProjectDetailPage() {
             analyzer_spectral_flatness,
             analyzer_zero_crossing_rate,
             analyzer_reference_ai,
-            analyzer_mix_v1
+            analyzer_mix_v1,
+            mix_type,
+            analyzer_ai_summary,
+            analyzer_ai_actions,
+            analyzer_ai_meta
           )
         `
         )
@@ -259,39 +305,63 @@ export default function ProjectDetailPage() {
       const projectData = data as SupabaseProjectRecord;
       const versionsRaw = projectData.project_versions ?? [];
 
-      const profileLabel = getProfileLabel(projectData.genre ?? null);
+      const profileLabel =
+        getTekkinGenreLabel(projectData.genre ?? null) ??
+        "Minimal / Deep Tech";
 
       const versions: VersionRow[] = versionsRaw
-        .map((v: ProjectVersionRecord) => ({
-          id: v.id,
-          version_name: v.version_name,
-          created_at: v.created_at,
-          audio_url: v.audio_url ?? null,
-          lufs: v.lufs ?? null,
-          sub_clarity: v.sub_clarity ?? null,
-          hi_end: v.hi_end ?? null,
-          dynamics: v.dynamics ?? null,
-          stereo_image: v.stereo_image ?? null,
-          tonality: v.tonality ?? null,
-          overall_score: v.overall_score ?? null,
-          feedback: v.feedback ?? null,
-          analyzer_bpm: v.analyzer_bpm ?? null,
-          analyzer_spectral_centroid_hz: v.analyzer_spectral_centroid_hz ?? null,
-          analyzer_spectral_rolloff_hz: v.analyzer_spectral_rolloff_hz ?? null,
-          analyzer_spectral_bandwidth_hz: v.analyzer_spectral_bandwidth_hz ?? null,
-          analyzer_spectral_flatness: v.analyzer_spectral_flatness ?? null,
-          analyzer_zero_crossing_rate: v.analyzer_zero_crossing_rate ?? null,
-          reference_ai: v.analyzer_reference_ai ?? null,
-          mix_v1: v.analyzer_mix_v1 ?? null,
+        .map((v: ProjectVersionRecord) => {
+          const versionMixType = normalizeMixType(
+            v.mix_type ?? projectData.mix_type ?? null
+          );
 
-          analyzer_mode: projectData.mix_type ?? "master",
-          analyzer_profile_key: profileLabel ?? "Minimal / Deep Tech",
-        }))
+          return {
+            id: v.id,
+            version_name: v.version_name,
+            created_at: v.created_at,
+            audio_url: v.audio_url ?? null,
+            lufs: v.lufs ?? null,
+            sub_clarity: v.sub_clarity ?? null,
+            hi_end: v.hi_end ?? null,
+            dynamics: v.dynamics ?? null,
+            stereo_image: v.stereo_image ?? null,
+            tonality: v.tonality ?? null,
+            overall_score: v.overall_score ?? null,
+            feedback: v.feedback ?? null,
+            analyzer_bpm: v.analyzer_bpm ?? null,
+            analyzer_spectral_centroid_hz: v.analyzer_spectral_centroid_hz ?? null,
+            analyzer_spectral_rolloff_hz: v.analyzer_spectral_rolloff_hz ?? null,
+            analyzer_spectral_bandwidth_hz: v.analyzer_spectral_bandwidth_hz ?? null,
+            analyzer_spectral_flatness: v.analyzer_spectral_flatness ?? null,
+            analyzer_zero_crossing_rate: v.analyzer_zero_crossing_rate ?? null,
+            analyzer_ai_summary: v.analyzer_ai_summary ?? null,
+            analyzer_ai_actions: v.analyzer_ai_actions ?? null,
+            analyzer_ai_meta: v.analyzer_ai_meta ?? null,
+            reference_ai: v.analyzer_reference_ai ?? null,
+            mix_v1: v.analyzer_mix_v1 ?? null,
+            mix_type: versionMixType,
+
+            analyzer_mode: versionMixType,
+            analyzer_profile_key: profileLabel ?? "Minimal / Deep Tech",
+          };
+        })
         .sort(
           (a: VersionRow, b: VersionRow) =>
             new Date(b.created_at).getTime() -
             new Date(a.created_at).getTime()
         );
+
+      const aiFromDb: Record<string, AnalyzerAiCoach> = {};
+      versions.forEach((version) => {
+        if (!version.analyzer_ai_summary) return;
+        aiFromDb[version.id] = {
+          summary: version.analyzer_ai_summary,
+          actions: version.analyzer_ai_actions ?? [],
+          meta: normalizeAiMeta(version.analyzer_ai_meta ?? null),
+        };
+      });
+
+      setAiByVersion(aiFromDb);
 
       setProject({
         id: projectData.id,
@@ -341,6 +411,7 @@ export default function ProjectDetailPage() {
     }
 
     formData.append("project_id", projectId);
+    formData.append("mix_type", versionMixType);
 
       try {
         setUploading(true);
@@ -362,6 +433,7 @@ export default function ProjectDetailPage() {
         setSelectedFileName(null);
         setSelectedFileSize(null);
         setFileTooLarge(false);
+        setVersionMixType(TEKKIN_MIX_TYPES[0]);
         await loadProject();
       } catch (err) {
       console.error("Upload new version error:", err);
@@ -417,6 +489,58 @@ export default function ProjectDetailPage() {
       setErrorMsg("Errore durante l'analisi della versione.");
     } finally {
       setAnalyzingVersionId(null);
+    }
+  };
+
+  const handleGenerateAiForVersion = async (versionId: string) => {
+    try {
+      setAiLoadingVersionId(versionId);
+      setAiErrorByVersion((prev) => ({ ...prev, [versionId]: null }));
+
+      const res = await fetch("/api/analyzer/ai-summary", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ version_id: versionId, force: true }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("[AI coach] error response:", text);
+        throw new Error(text || "Errore Tekkin AI");
+      }
+
+      const data = (await res.json()) as {
+        ok: boolean;
+        version_id: string;
+        ai: AnalyzerAiCoach;
+      };
+
+      if (!data.ok || !data.ai) {
+        throw new Error("Risposta Tekkin AI non valida");
+      }
+
+      setAiByVersion((prev) => ({
+        ...prev,
+        [versionId]: data.ai,
+      }));
+    } catch (err: unknown) {
+      console.error("[AI coach] unexpected error:", err);
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+          ? err
+          : "Errore Tekkin AI";
+      setAiErrorByVersion((prev) => ({
+        ...prev,
+        [versionId]: message,
+      }));
+    } finally {
+      setAiLoadingVersionId((prev) =>
+        prev === versionId ? null : prev
+      );
     }
   };
 
@@ -485,8 +609,8 @@ export default function ProjectDetailPage() {
                 {new Date(project.created_at).toLocaleDateString("it-IT")}
               </p>
               <p className="text-[11px] text-white/50 mt-0.5">
-                Mix type: {project.mix_type ?? "master"} · Genere:{" "}
-                {getProfileLabel(project.genre) ?? "n.d."}
+                Mix type: {getMixTypeLabel(project.mix_type, "master")} · Genere:{" "}
+                {getTekkinGenreLabel(project.genre) ?? "n.d."}
               </p>
             </div>
             <span className="inline-flex items-center rounded-full border border-white/15 px-3 py-1 text-xs uppercase tracking-wide text-white/80">
@@ -508,6 +632,24 @@ export default function ProjectDetailPage() {
                 placeholder="Version name (es. v2, Master, Alt mix)"
                 className="flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm"
               />
+
+              <div className="flex flex-col gap-1 text-sm">
+                <label className="text-sm text-white/70">Version mix type</label>
+                <select
+                  name="mix_type"
+                  value={versionMixType}
+                  onChange={(e) =>
+                    setVersionMixType(e.target.value as TekkinMixType)
+                  }
+                  className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm"
+                >
+                  {TEKKIN_MIX_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {getMixTypeLabel(type, type)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               {/* file input + helper text */}
               <div className="space-y-2">
@@ -583,6 +725,7 @@ export default function ProjectDetailPage() {
                 const isExpanded = expandedVersionId === v.id;
                 const audioState = audioStates[v.id];
                 const hasAudio = Boolean(v.audio_url);
+                const ai = aiByVersion[v.id];
                 return (
                   <Fragment key={v.id}>
                     <tr
@@ -591,10 +734,15 @@ export default function ProjectDetailPage() {
                       }`}
                     >
                       <td className="px-4 py-2">
-                        <div className="text-sm font-semibold text-white">
-                          {v.version_name}
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <span className="font-semibold text-white">
+                            {v.version_name}
+                          </span>
+                          <span className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
+                            {getMixTypeLabel(v.mix_type)}
+                          </span>
                           {isLatestVersion && (
-                            <span className="ml-2 inline-flex items-center rounded-full border border-white/20 px-2 py-0.5 text-[11px] uppercase tracking-wide text-white/70">
+                            <span className="inline-flex items-center rounded-full border border-white/20 px-2 py-0.5 text-[11px] uppercase tracking-wide text-white/70">
                               Latest
                             </span>
                           )}
@@ -685,6 +833,16 @@ export default function ProjectDetailPage() {
                           <AnalyzerProPanel
                             version={v}
                             mixV1={mixV1ByVersion[v.id] ?? v.mix_v1 ?? null}
+                            aiSummary={
+                              ai?.summary ?? v.analyzer_ai_summary ?? null
+                            }
+                            aiActions={
+                              ai?.actions ?? v.analyzer_ai_actions ?? null
+                            }
+                            aiMeta={ai?.meta ?? v.analyzer_ai_meta ?? null}
+                            aiLoading={aiLoadingVersionId === v.id}
+                            aiError={aiErrorByVersion[v.id] ?? null}
+                            onAskAi={() => void handleGenerateAiForVersion(v.id)}
                           />
                         </td>
                       </tr>

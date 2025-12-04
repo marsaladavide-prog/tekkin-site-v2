@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { TEKKIN_GENRES } from "@/lib/constants/genres";
 
 export default function NewProjectPage() {
   const router = useRouter();
@@ -126,18 +127,20 @@ export default function NewProjectPage() {
 
           {/* Genre */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm text-white/70">Genre</label>
-            <select
-              name="genre"
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm"
-            >
-              <option value="minimal_deep_tech">Minimal / Deep Tech</option>
-              <option value="tech_house">Tech House</option>
-              <option value="house">House</option>
-              <option value="altro">Altro</option>
-            </select>
+            <label className="block text-sm font-medium text-zinc-200">
+  Genre
+</label>
+<select
+  value={genre}
+  onChange={(e) => setGenre(e.target.value)}
+  className="mt-1 w-full rounded-lg bg-zinc-900/70 px-3 py-2 text-sm text-zinc-100 outline-none ring-1 ring-zinc-700 focus:ring-teal-500"
+>
+  {TEKKIN_GENRES.map((g) => (
+    <option key={g.id} value={g.id}>
+      {g.label}
+    </option>
+  ))}
+</select>
           </div>
 
           {errorMsg && (

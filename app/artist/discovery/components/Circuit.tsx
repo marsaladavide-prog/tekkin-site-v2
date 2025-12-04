@@ -3,7 +3,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { TEKKIN_GENRES, formatGenreLabel } from "@/app/artist/constants/genres";
+import {
+  TEKKIN_GENRES,
+  formatGenreLabel,
+} from "@/lib/constants/genres";
 
 type CircuitArtist = {
   id: string;
@@ -61,9 +64,9 @@ export function Circuit() {
           className="w-full max-w-xs rounded-md border bg-background px-2 py-1"
         >
           <option value="">Tutti i generi</option>
-          {TEKKIN_GENRES.map((g) => (
-            <option key={g} value={g}>
-              {formatGenreLabel(g)}
+          {TEKKIN_GENRES.map((genre) => (
+            <option key={genre.id} value={genre.id}>
+              {genre.label}
             </option>
           ))}
         </select>
