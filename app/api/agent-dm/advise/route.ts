@@ -42,6 +42,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Tasks error" }, { status: 500 });
     }
 
+    const tasksInfo = (tasks ?? []).map(t => ({
+      title: t.title,
+      status: t.status,
+      start_date: t.start_date,
+      due_date: t.due_date,
+    }));
+
+    const tasksList =
+      tasksInfo
+        .map(
+          t =>
+            `- [${t.status}] ${t.title}` +
+            (t.start_date ? ` | start: ${t.start_date}` : "") +
+            (t.due_date ? ` | due: ${t.due_date}` : "")
+        )
+        .join("\n") || "nessuno";
+
     // 3. FETCH GOALS (solo ultimi 5)
     const { data: goalsData } = await supabase
       .from("goals")
@@ -51,12 +68,6 @@ export async function POST(req: NextRequest) {
       .limit(5);
 
     // 4. PREPARA IL CONTEXT COMPATTO
-    const tasksByStatus = {
-      todo: tasks?.filter(t => t.status === "todo").map(t => t.title) ?? [],
-      doing: tasks?.filter(t => t.status === "doing").map(t => t.title) ?? [],
-      done: tasks?.filter(t => t.status === "done").map(t => t.title) ?? [],
-    };
-
     const goals = goalsData?.map(g => g.label) ?? [];
 
     // 5. PREPARA IL PROMPT
@@ -75,6 +86,11 @@ Regole:
 - Non inventare informazioni. Se manca un dato, ignoralo.
 - Sii pratico e diretto, orientato all’esecuzione.
 - Massimo 5 task consigliati.
+- Usa start_date e due_date per decidere le priorità.
+- Dai priorità a:
+  - task in ritardo (due_date < oggi)
+  - task che iniziano oggi (start_date = oggi)
+- Non mettere nei tasks_today quelli che partono più avanti.
 
 Formato obbligatorio:
 
@@ -95,10 +111,8 @@ Progetto selezionato:
 - Nome: ${project.name}
 - Categoria: ${project.category}
 
-Tasks:
-- TODO: ${tasksByStatus.todo.join(", ") || "nessuno"}
-- DOING: ${tasksByStatus.doing.join(", ") || "nessuno"}
-- DONE: ${tasksByStatus.done.join(", ") || "nessuno"}
+Tasks (con date):
+${tasksList}
 
 Goals:
 ${goals.length ? goals.join("\n") : "nessuno"}

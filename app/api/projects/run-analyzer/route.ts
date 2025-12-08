@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import type { AnalyzerResult } from "@/types/analyzer";
+import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult";
 
 export const runtime = "nodejs";
 
@@ -20,7 +22,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // corpo della richiesta dal client
     const requestBody = await req.json().catch(() => null);
     const versionId = requestBody?.version_id as string | undefined;
 
@@ -46,6 +47,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+        // 1b. recupero il project per avere genre e mix_type
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("id, genre, mix_type")
+      .eq("id", version.project_id)
+      .single();
+
+    if (projectError || !project) {
+      console.error("[run-analyzer] Project not found:", projectError);
+      return NextResponse.json(
+        { error: "Project non trovato" },
+        { status: 404 }
+      );
+    }
+
+    // profilo di analisi e modalità (master/premaster)
+    const profileKey = project.genre || "minimal_deep_tech";
+    const mode = project.mix_type || "master";
+
+
     const analyzerUrl =
       process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
 
@@ -65,13 +86,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Se è già una URL completa, usala; altrimenti crea una signed URL dal bucket "tracks"
+    // 2. Signed URL se serve
     let audioUrl = audioPath;
-
     if (!audioPath.startsWith("http")) {
       const { data: signed, error: signedError } = await supabase.storage
         .from("tracks")
-        .createSignedUrl(audioPath, 60 * 30); // 30 minuti
+        .createSignedUrl(audioPath, 60 * 30);
 
       if (signedError || !signed?.signedUrl) {
         console.error("[run-analyzer] Signed URL error:", signedError);
@@ -84,11 +104,14 @@ export async function POST(req: NextRequest) {
       audioUrl = signed.signedUrl;
     }
 
-    const payload = {
-      version_id: version.id,
-      project_id: version.project_id,
-      audio_url: audioUrl,
-    };
+const payload = {
+  version_id: version.id,
+  project_id: version.project_id,
+  audio_url: audioUrl,
+  profile_key: profileKey,
+  mode,
+  lang: "it",
+};
 
     console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl, payload);
 
@@ -114,42 +137,87 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await analyzerRes.json().catch(() => null);
+    const raw = await analyzerRes.json().catch(() => null);
 
-    console.log("[run-analyzer] Analyzer result JSON:", result);
+    console.log("[run-analyzer] Analyzer result JSON:", raw);
 
-    if (!result) {
+    if (!raw) {
       return NextResponse.json(
         { error: "Risposta Analyzer non valida" },
         { status: 500 }
       );
     }
 
-    // 3. aggiorno la versione con i dati dell'analisi
-    const { data: updatedVersion, error: updateError } = await supabase
-      .from("project_versions")
-      .update({
-        lufs: result.lufs,
-        sub_clarity: result.sub_clarity,
-        hi_end: result.hi_end,
-        dynamics: result.dynamics,
-        stereo_image: result.stereo_image,
-        tonality: result.tonality,
-        overall_score: result.overall_score,
-        feedback: result.feedback,
+    const result = raw as AnalyzerResult;
 
-        analyzer_bpm: result.bpm ?? null,
-        analyzer_spectral_centroid_hz: result.spectral_centroid_hz ?? null,
-        analyzer_spectral_rolloff_hz: result.spectral_rolloff_hz ?? null,
-        analyzer_spectral_bandwidth_hz: result.spectral_bandwidth_hz ?? null,
-        analyzer_spectral_flatness: result.spectral_flatness ?? null,
-        analyzer_zero_crossing_rate: result.zero_crossing_rate ?? null,
-      })
-      .eq("id", version.id)
-      .select(
-        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate"
-      )
-      .single();
+    // mapping centralizzato
+    const updatePayload = buildAnalyzerUpdatePayload(result);
+    const payloadWithoutKey = ((): Omit<typeof updatePayload, "analyzer_key"> => {
+      const { analyzer_key, ...rest } = updatePayload;
+      return rest;
+    })();
+
+    const versionSelectFieldsBase = [
+      "id",
+      "version_name",
+      "created_at",
+      "audio_url",
+      "lufs",
+      "sub_clarity",
+      "hi_end",
+      "dynamics",
+      "stereo_image",
+      "tonality",
+      "overall_score",
+      "feedback",
+      "analyzer_bpm",
+      "analyzer_spectral_centroid_hz",
+      "analyzer_spectral_rolloff_hz",
+      "analyzer_spectral_bandwidth_hz",
+      "analyzer_spectral_flatness",
+      "analyzer_zero_crossing_rate",
+      "analyzer_reference_ai",
+      "analyzer_mix_v1",
+      "fix_suggestions",
+      "analyzer_json",
+    ];
+
+    const buildSelectFields = (includeKey: boolean) =>
+      includeKey
+        ? [...versionSelectFieldsBase, "analyzer_key"]
+        : versionSelectFieldsBase;
+
+    const hasAnalyzerKeyError = (error: any) => {
+      if (!error) return false;
+      const message =
+        `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+      return message.includes("analyzer_key");
+    };
+
+    const updateVersion = async (includeKey: boolean) =>
+      supabase
+        .from("project_versions")
+        .update(includeKey ? updatePayload : payloadWithoutKey)
+        .eq("id", version.id)
+        .select(buildSelectFields(includeKey).join(", "))
+        .single();
+
+    let includeAnalyzerKey = true;
+    let updateResult = await updateVersion(includeAnalyzerKey);
+
+    if (
+      updateResult.error &&
+      hasAnalyzerKeyError(updateResult.error) &&
+      includeAnalyzerKey
+    ) {
+      console.warn(
+        "[run-analyzer] analyzer_key column missing, retrying without it"
+      );
+      includeAnalyzerKey = false;
+      updateResult = await updateVersion(includeAnalyzerKey);
+    }
+
+    const { data: updatedVersion, error: updateError } = updateResult;
 
     if (updateError || !updatedVersion) {
       console.error("[run-analyzer] Update version error:", updateError);

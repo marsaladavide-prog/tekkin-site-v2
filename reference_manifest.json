@@ -1,0 +1,24 @@
+{
+  "tracks": [
+    {
+      "id": "mdt_001",
+      "genre": "minimal_deep_tech",
+      "artist": "Artista Esempio",
+      "title": "Groove 1",
+      "audio_path": "reference_audio/minimal_deep_tech/groove_1.wav",
+      "spotify_url": null,
+      "beatport_url": null,
+      "notes": "Banger classico, kick secco, sub pulito"
+    },
+    {
+      "id": "th_001",
+      "genre": "tech_house",
+      "artist": "Artista Tech",
+      "title": "Club Weapon",
+      "audio_path": "reference_audio/tech_house/club_weapon.wav",
+      "spotify_url": null,
+      "beatport_url": null,
+      "notes": "Molto vicino alle tue reference attuali"
+    }
+  ]
+}

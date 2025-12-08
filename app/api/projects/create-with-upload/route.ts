@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 
 export const runtime = "nodejs";
+
+const DEFAULT_MIX_TYPE: TekkinMixType = "master";
+
+function normalizeMixType(value?: string | null): TekkinMixType {
+  if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) {
+    return value as TekkinMixType;
+  }
+  return DEFAULT_MIX_TYPE;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,7 +28,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (!user) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     const formData = await req.formData();
@@ -26,6 +39,10 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file") as File | null;
     const title = formData.get("title") as string | null;
     const status = (formData.get("status") as string | null) ?? "DEMO";
+
+    // nuovi campi scelti dall artista
+    const mixType = normalizeMixType(formData.get("mix_type") as string | null);
+    const genre = (formData.get("genre") as string | null) ?? null;
 
     if (!file || !title) {
       return NextResponse.json(
@@ -62,6 +79,9 @@ export async function POST(req: NextRequest) {
         bpm: null,
         track_key: null,
         artist_name: null,
+        // nuovi metadati
+        mix_type: mixType, // "master" | "premaster"
+        genre,             // es. "minimal_deep_tech"
       })
       .select()
       .single();
@@ -86,6 +106,7 @@ export async function POST(req: NextRequest) {
         tonality: null,
         overall_score: null,
         feedback: null,
+        mix_type: mixType,
       });
 
     if (versionError) {

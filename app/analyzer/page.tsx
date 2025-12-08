@@ -110,10 +110,10 @@ export default function AnalyzerPage() {
                   className="bg-[#111] border border-[#00ffff55] text-[#9ef3f3] px-3 py-2 rounded-md"
                 >
                   <option value="minimal_deep_tech">Minimal / Deep Tech</option>
-                  <option value="tech_house_modern">Tech House Modern</option>
-                  <option value="melodic_deep_house">Melodic / Deep House</option>
+                  <option value="tech_house">Tech House Modern</option>
+                  <option value="minimal_house">Melodic / Deep House</option>
                   <option value="peak_time_techno">Peak-Time Techno</option>
-                  <option value="house_groovy_classic">House Groovy Classic</option>
+                  <option value="house">House Groovy Classic</option>
                 </select>
               </label>
             </div>

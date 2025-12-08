@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedSupabase } from "@/app/api/projects/helpers";
+
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { supabase, user, authError } = await getAuthenticatedSupabase();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Autenticazione richiesta" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const projectId = String(body?.project_id ?? "").trim();
+
+    if (!projectId) {
+      return NextResponse.json({ error: "project_id richiesto" }, { status: 400 });
+    }
+
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("id, user_id")
+      .eq("id", projectId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (projectError) {
+      console.error("Fetch project for delete failed:", projectError);
+      return NextResponse.json({ error: "Errore recupero project" }, { status: 500 });
+    }
+
+    if (!project) {
+      return NextResponse.json({ error: "Project non trovato" }, { status: 404 });
+    }
+
+    const { error: deleteVersionsError } = await supabase
+      .from("project_versions")
+      .delete()
+      .eq("project_id", projectId);
+
+    if (deleteVersionsError) {
+      console.error("Delete project versions failed:", deleteVersionsError);
+      return NextResponse.json(
+        { error: "Impossibile eliminare le versioni" },
+        { status: 500 }
+      );
+    }
+
+    const { error: deleteProjectError } = await supabase
+      .from("projects")
+      .delete()
+      .eq("id", projectId);
+
+    if (deleteProjectError) {
+      console.error("Delete project failed:", deleteProjectError);
+      return NextResponse.json(
+        { error: "Impossibile eliminare il project" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (err) {
+    console.error("Unexpected error in delete-project:", err);
+    return NextResponse.json({ error: "Errore inatteso" }, { status: 500 });
+  }
+}

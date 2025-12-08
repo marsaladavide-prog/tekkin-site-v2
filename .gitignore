@@ -6,3 +6,38 @@ node_modules
 .vscode
 temp_files/
 *.zip
+__pycache__/
+*.pyc
+refs_audio/
+
+# Node
+node_modules
+.next
+out
+dist
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor
+.vscode
+.idea
+
+# Python venv
+.tekkin-analyzer-venv
+venv
+.env-venv
+*.pyc
+__pycache__/
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -25,17 +25,18 @@ export async function POST(req: NextRequest) {
   if (error || !auth.user) return NextResponse.json({ error: "Auth" }, { status: 401 });
 
   const body = await req.json();
+  const { projectId, title, status, start_date, due_date, actual_hours, priority } = body;
 
   const { data, error: err } = await supabase
     .from("agent_dm_tasks")
     .insert({
-      project_id: body.projectId,
-      title: body.title,
-      status: body.status ?? "todo",
-      start_date: body.start_date,
-      due_date: body.due_date,
-      actual_hours: body.actual_hours,
-      priority: body.priority
+      project_id: projectId,
+      title,
+      status: status ?? "todo",
+      start_date: start_date || null,
+      due_date: due_date || null,
+      actual_hours,
+      priority,
     })
     .select("*")
     .single();
@@ -51,11 +52,19 @@ export async function PATCH(req: NextRequest) {
   if (error || !auth.user) return NextResponse.json({ error: "Auth" }, { status: 401 });
 
   const body = await req.json();
-  const id = body.id;
+  const { id, start_date, due_date, ...rest } = body;
+  const updateData: Record<string, unknown> = { ...rest };
+
+  if ("start_date" in body) {
+    updateData.start_date = start_date || null;
+  }
+  if ("due_date" in body) {
+    updateData.due_date = due_date || null;
+  }
 
   const { data, error: err } = await supabase
     .from("agent_dm_tasks")
-    .update(body)
+    .update(updateData)
     .eq("id", id)
     .select("*")
     .single();

@@ -1,109 +1,153 @@
 "use client";
 
-import { useState } from "react";
-
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
+import { TEKKIN_GENRES } from "@/lib/constants/genres";
 
 export default function NewProjectPage() {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const [title, setTitle] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [genre, setGenre] = useState("minimal_deep_tech");
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
+    setErrorMsg(null);
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setErrorMsg("Inserisci un nome per la traccia.");
+      return;
+    }
 
     try {
-      const form = e.currentTarget;
-      const formData = new FormData(form);
+      setSubmitting(true);
 
-      const file = formData.get("file") as File | null;
+      const supabase = createClient();
 
-      if (!file) {
-        setError("Seleziona un file audio.");
-        setIsSubmitting(false);
+      // prendo utente per associarlo al project
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        console.error("New project auth error:", authError);
+        setErrorMsg("Devi essere loggato per creare un project.");
+        setSubmitting(false);
         return;
       }
 
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        setError(
-          "File troppo grande. Limite massimo server: 50 MB per file. " +
-            "Ti consigliamo di usare MP3 320 kbps per versioni più leggere."
-        );
-        setIsSubmitting(false);
+      const { data, error } = await supabase
+        .from("projects")
+        .insert({
+          title: trimmedTitle,
+          status: "DRAFT",
+          user_id: user.id,
+          mix_type: "premaster",
+          genre,
+        })
+        .select("id")
+        .single();
+
+      if (error || !data) {
+        console.error("Insert project error:", error);
+        setErrorMsg("Errore creando il project. Riprova tra poco.");
+        setSubmitting(false);
         return;
       }
 
-      const res = await fetch("/api/projects/create-with-upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Errore nella creazione del progetto");
-      } else {
-        form.reset();
-      }
+      // redirect diretto al dettaglio project
+      router.push(`/artist/projects/${data.id}`);
     } catch (err) {
-      console.error(err);
-      setError("Errore imprevisto");
-    } finally {
-      setIsSubmitting(false);
+      console.error("Unexpected new project error:", err);
+      setErrorMsg("Errore inatteso creando il project.");
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      {/* TITLE */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Title</label>
-        <input
-          type="text"
-          name="title"
-          required
-          className="w-full rounded-md border border-neutral-700 bg-black px-3 py-2 text-sm text-white"
-        />
-      </div>
-
-      {/* STATUS */}
-      <div>
-        <label className="block text-sm font-medium mb-1">Status</label>
-        <select
-          name="status"
-          defaultValue="DEMO"
-          className="w-full rounded-md border border-neutral-700 bg-black px-3 py-2 text-sm text-white"
-        >
-          <option value="DEMO">Demo</option>
-          <option value="WIP">Work in progress</option>
-          <option value="FINAL">Final</option>
-        </select>
-      </div>
-
-      {/* FILE AUDIO */}
-      <div>
-        <label className="block text-sm font-medium mb-1">File audio</label>
-        <input
-          type="file"
-          name="file"
-          accept="audio/*"
-          required
-          className="w-full text-sm text-neutral-300"
-        />
-        <p className="mt-1 text-xs text-neutral-400">
-          Formati consigliati: MP3 320 kbps. Limite massimo server: 50 MB per file.
-        </p>
-      </div>
-
-      {error && <p className="text-sm text-red-500">{error}</p>}
-
+    <div className="w-full max-w-lg mx-auto py-10">
       <button
-        type="submit"
-        disabled={isSubmitting}
-        className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-black"
+        type="button"
+        onClick={() => router.push("/artist/projects")}
+        className="mb-4 text-sm text-white/60 hover:text-white"
       >
-        {isSubmitting ? "Carico..." : "Crea progetto"}
+        ← Back to projects
       </button>
-    </form>
+
+      <div className="rounded-3xl border border-white/10 bg-black/50 p-6 shadow-[0_0_40px_rgba(0,0,0,0.8)]">
+        <h1 className="text-xl font-semibold text-white">
+          Crea un nuovo project
+        </h1>
+        <p className="mt-1 text-xs text-white/60">
+          Dai un nome alla traccia che vuoi analizzare. Dopo la creazione
+          potrai caricare la prima versione audio e lanciare Tekkin Analyzer.
+        </p>
+
+        <form onSubmit={handleCreate} className="mt-5 space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="title"
+              className="text-sm font-medium text-white/80"
+            >
+              Nome traccia
+            </label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              placeholder="Es. Kryptomania, Minimal Roller v1..."
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full rounded-xl bg-black/70 border border-white/15 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+            />
+            <p className="text-[11px] text-white/50">
+              Puoi sempre cambiare il nome dopo. Ti serve solo per riconoscere la traccia
+              nella lista dei projects.
+            </p>
+          </div>
+
+          {/* Genre */}
+          <div className="flex flex-col gap-1">
+            <label className="block text-sm font-medium text-zinc-200">
+  Genre
+</label>
+<select
+  value={genre}
+  onChange={(e) => setGenre(e.target.value)}
+  className="mt-1 w-full rounded-lg bg-zinc-900/70 px-3 py-2 text-sm text-zinc-100 outline-none ring-1 ring-zinc-700 focus:ring-teal-500"
+>
+  {TEKKIN_GENRES.map((g) => (
+    <option key={g.id} value={g.id}>
+      {g.label}
+    </option>
+  ))}
+</select>
+          </div>
+
+          {errorMsg && (
+            <div className="rounded-xl border border-red-500/40 bg-red-950/60 px-3 py-2 text-xs text-red-100">
+              {errorMsg}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-[11px] text-white/50">
+              Step successivo: carica file audio e lancia Analyze.
+            </p>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium bg-[var(--accent)] text-black hover:opacity-90 disabled:opacity-60"
+            >
+              {submitting ? "Creazione in corso..." : "Crea project"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

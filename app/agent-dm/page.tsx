@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import DateInput from "@/components/ui/DateInput";
 
 type AgentDmProject = {
   id: string;
@@ -56,12 +57,58 @@ export default function AgentDmPage() {
 
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskStatus, setNewTaskStatus] = useState<"todo" | "doing" | "done">("todo");
+  const [newTaskStart, setNewTaskStart] = useState("");
+  const [newTaskDue, setNewTaskDue] = useState("");
 
   const [newGoalLabel, setNewGoalLabel] = useState("");
   const [newGoalDue, setNewGoalDue] = useState("");
 
   const [advice, setAdvice] = useState<AgentDmAdvice | null>(null);
   const [loadingAdvice, setLoadingAdvice] = useState(false);
+
+  const todayIso = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const toIsoDate = (value?: string | null) => (value ? value.split("T")[0] : "");
+  const formatShortDate = (value?: string | null) => {
+    const iso = toIsoDate(value);
+    if (!iso) return "";
+    return new Date(iso).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" });
+  };
+
+  type DateState = "none" | "past" | "today" | "future";
+  const getDateState = (value?: string | null): DateState => {
+    const iso = toIsoDate(value);
+    if (!iso) return "none";
+    if (iso < todayIso) return "past";
+    if (iso === todayIso) return "today";
+    return "future";
+  };
+  const badgeClass = (state: DateState, type: "start" | "due") => {
+    const base = "rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-tight";
+    if (type === "due") {
+      if (state === "past") return `${base} bg-red-500/20 text-red-300`;
+      if (state === "today") return `${base} bg-yellow-500/20 text-yellow-300`;
+      return `${base} bg-white/5 text-[var(--text-muted)]`;
+    }
+    return state === "today"
+      ? `${base} bg-[var(--accent)]/20 text-[var(--accent)]`
+      : `${base} bg-white/5 text-[var(--text-muted)]`;
+  };
+  const overdueCount = useMemo(
+    () =>
+      tasks.filter(task => {
+        const due = toIsoDate(task.due_date);
+        return Boolean(due && due < todayIso);
+      }).length,
+    [tasks, todayIso]
+  );
+  const startTodayCount = useMemo(
+    () =>
+      tasks.filter(task => {
+        const start = toIsoDate(task.start_date);
+        return Boolean(start && start === todayIso);
+      }).length,
+    [tasks, todayIso]
+  );
 
   // load iniziale
   useEffect(() => {
@@ -207,6 +254,8 @@ export default function AgentDmPage() {
           projectId: selectedProjectId,
           title: newTaskTitle.trim(),
           status: newTaskStatus,
+          start_date: newTaskStart || null,
+          due_date: newTaskDue || null,
         }),
       });
       if (!res.ok) {
@@ -220,6 +269,8 @@ export default function AgentDmPage() {
       }
       setNewTaskTitle("");
       setNewTaskStatus("todo");
+      setNewTaskStart("");
+      setNewTaskDue("");
     } catch (err) {
       console.error("handleCreateTask error", err);
     }
@@ -483,7 +534,15 @@ export default function AgentDmPage() {
               </button>
             </div>
 
-            <div className="mb-3 flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+            {(overdueCount > 0 || startTodayCount > 0) && (
+              <div className="mb-2 text-[10px] text-[var(--text-muted)]">
+                {overdueCount > 0 && `⚠️ ${overdueCount} task in ritardo`}
+                {overdueCount > 0 && startTodayCount > 0 && " · "}
+                {startTodayCount > 0 && `${startTodayCount} iniziano oggi`}
+              </div>
+            )}
+
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
               <input
                 type="text"
                 className="flex-1 rounded-full bg-black/60 px-3 py-1.5 text-xs outline-none"
@@ -499,6 +558,24 @@ export default function AgentDmPage() {
                 }}
                 disabled={!selectedProject}
               />
+              <div className="flex items-center gap-2">
+                <DateInput
+                  value={newTaskStart}
+                  onChange={setNewTaskStart}
+                  inline
+                  className="w-24"
+                  aria-label="Data di inizio task"
+                  max={newTaskDue || undefined}
+                />
+                <DateInput
+                  value={newTaskDue}
+                  onChange={setNewTaskDue}
+                  inline
+                  className="w-24"
+                  aria-label="Data di scadenza task"
+                  min={newTaskStart || undefined}
+                />
+              </div>
               <select
                 className="rounded-full bg-black/60 px-2 py-1 text-[10px]"
                 value={newTaskStatus}
@@ -542,28 +619,40 @@ export default function AgentDmPage() {
                         </div>
                       )}
 
-                      {columnTasks.map(task => (
-                        <article
-                          key={task.id}
-                          className="group rounded-lg border border-white/5 bg-black/40 px-2 py-2 text-[11px]"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="space-y-1">
-                              <div className="line-clamp-2 font-medium">
-                                {task.title}
-                              </div>
-                              <div className="flex gap-2 text-[10px] text-[var(--text-muted)]">
+                      {columnTasks.map(task => {
+                        const startState = getDateState(task.start_date);
+                        const dueState = getDateState(task.due_date);
+                        return (
+                          <article
+                            key={task.id}
+                            className="group rounded-lg border border-white/5 bg-black/40 px-2 py-2 text-[11px]"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="space-y-1">
+                                <div className="line-clamp-2 font-medium">
+                                  {task.title}
+                                </div>
+                              <div className="flex flex-wrap gap-2">
+                                {task.start_date && (
+                                  <span
+                                    className={badgeClass(startState, "start")}
+                                    title={`Inizio ${formatShortDate(task.start_date)}`}
+                                  >
+                                    Inizio {formatShortDate(task.start_date)}
+                                  </span>
+                                )}
                                 {task.due_date && (
-                                  <span>
-                                    Due{" "}
-                                    {new Date(task.due_date).toLocaleDateString("it-IT", {
-                                      day: "2-digit",
-                                      month: "2-digit",
-                                    })}
+                                  <span
+                                    className={badgeClass(dueState, "due")}
+                                    title={`Scadenza ${formatShortDate(task.due_date)}`}
+                                  >
+                                    Scadenza {formatShortDate(task.due_date)}
                                   </span>
                                 )}
                                 {task.actual_hours != null && (
-                                  <span>{task.actual_hours} h</span>
+                                  <span className="text-[10px] text-[var(--text-muted)]">
+                                    {task.actual_hours} h
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -607,7 +696,8 @@ export default function AgentDmPage() {
                             </div>
                           </div>
                         </article>
-                      ))}
+                      );
+                    })}
 
                       {!loadingTasks && columnTasks.length === 0 && (
                         <div className="rounded-lg border border-dashed border-white/5 bg-black/20 px-2 py-3 text-center text-[10px] text-[var(--text-muted)]">
@@ -697,11 +787,13 @@ export default function AgentDmPage() {
                 }}
               />
               <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  className="flex-1 rounded-full bg-black/60 px-2 py-1 text-[10px]"
+                <DateInput
                   value={newGoalDue}
-                  onChange={e => setNewGoalDue(e.target.value)}
+                  onChange={setNewGoalDue}
+                  inline
+                  className="flex-1"
+                  aria-label="Data di scadenza del goal"
+                  min={todayIso}
                 />
                 <button
                   onClick={handleCreateGoal}
