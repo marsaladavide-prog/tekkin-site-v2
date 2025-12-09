@@ -6,58 +6,46 @@ import { TekkinRankHighlightCard } from "@/app/artist/components/TekkinRankHighl
 
 type Artist = {
   id: string;
-  artist_name?: string | null;
-  artist_photo_url?: string | null;
-
-  // generi principali come array
-  main_genres?: string[] | null;
-
-  bio_short?: string | null;
-  city?: string | null;
-  country?: string | null;
-  open_to_collab?: boolean | null;
-
-  // link esterni (allineali ai campi reali della API)
-  spotify_url?: string | null;
-  beatport_url?: string | null;
-  instagram_url?: string | null;
-  presskit_link?: string | null;
+  artist_name: string | null;
+  artist_photo_url: string | null;
+  main_genres: string[] | null;
+  bio_short: string | null;
+  city: string | null;
+  country: string | null;
+  open_to_collab: boolean | null;
+  spotify_url: string | null;
+  instagram_username: string | null;
+  beatport_url: string | null;
+  presskit_link: string | null;
 };
 
 type Props = {
-  // con Next 15 i params sono una Promise
-  params: Promise<{ artistId: string }>;
+  params: { artistId: string };
 };
 
 export default function ArtistDetailPage({ params }: Props) {
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const artistId = params.artistId;
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const { artistId } = await params;
-
         const res = await fetch(`/api/artist/discovery/${artistId}`);
-        const text = await res.text();
-
         let data: any = null;
-        if (text) {
-          try {
-            data = JSON.parse(text);
-          } catch {
-            console.error("Artist detail non JSON:", text);
-          }
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          console.error("Artist detail non JSON:", jsonErr);
         }
 
         if (!res.ok) {
           console.error("Artist detail error:", {
             status: res.status,
             data,
-            text,
           });
 
           if (!cancelled) {
@@ -92,7 +80,7 @@ export default function ArtistDetailPage({ params }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [params]);
+  }, [artistId]);
 
   if (loading) {
     return (
@@ -143,6 +131,10 @@ export default function ArtistDetailPage({ params }: Props) {
     locationLabel && artist.open_to_collab
       ? `${locationLabel} · Open to collab`
       : locationLabel || (artist.open_to_collab ? "Open to collab" : null);
+  const instagramProfileUrl = artist.instagram_username
+    ? `https://instagram.com/${artist.instagram_username}`
+    : null;
+
 
   return (
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
@@ -155,7 +147,7 @@ export default function ArtistDetailPage({ params }: Props) {
           avatarUrl={artist.artist_photo_url ?? null}
           spotifyUrl={artist.spotify_url ?? null}
           beatportUrl={artist.beatport_url ?? null}
-          instagramUrl={artist.instagram_url ?? null}
+          instagramUrl={instagramProfileUrl}
           presskitUrl={artist.presskit_link ?? null}
           onSendMessage={() => {
             // TODO: apri modal DM / routing a sistema messaggi quando sarà pronto

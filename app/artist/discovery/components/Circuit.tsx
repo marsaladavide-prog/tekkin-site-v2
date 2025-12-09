@@ -11,7 +11,7 @@ import {
 type CircuitArtist = {
   id: string;
   artist_name: string;
-  main_genre: string | null;
+  main_genres: string[] | null;
   city: string | null;
   country: string | null;
   open_to_collab: boolean | null;
@@ -100,41 +100,49 @@ export function Circuit() {
 
       {!loading && artists.length > 0 && (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {artists.map((a) => (
-            <Link
-              key={a.id}
-              href={`/artist/discovery/${a.id}`}
-              className="block rounded-lg border bg-background p-4 text-sm space-y-1 hover:border-primary/60 transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{a.artist_name}</span>
-                <span className="text-[10px] uppercase text-muted-foreground">
-                  {a.main_genre
-                    ? formatGenreLabel(a.main_genre)
-                    : "Genere non indicato"}
-                </span>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {a.city && a.country
-                  ? `${a.city}, ${a.country}`
-                  : a.country
-                  ? a.country
-                  : "Località non indicata"}
-              </div>
-              <div className="flex gap-2 pt-2 text-[10px]">
-                {a.open_to_collab && (
-                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-500">
-                    Collab
+          {artists.map((a) => {
+            const primaryGenre =
+              Array.isArray(a.main_genres) && a.main_genres.length > 0
+                ? a.main_genres[0]
+                : null;
+            const genreLabel = primaryGenre
+              ? formatGenreLabel(primaryGenre)
+              : "Genere non indicato";
+
+            return (
+              <Link
+                key={a.id}
+                href={`/artist/discovery/${a.id}`}
+                className="block rounded-lg border bg-background p-4 text-sm space-y-1 hover:border-primary/60 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{a.artist_name}</span>
+                  <span className="text-[10px] uppercase text-muted-foreground">
+                    {genreLabel}
                   </span>
-                )}
-                {a.open_to_promo && (
-                  <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-500">
-                    Promo
-                  </span>
-                )}
-              </div>
-            </Link>
-          ))}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {a.city && a.country
+                    ? `${a.city}, ${a.country}`
+                    : a.country
+                    ? a.country
+                    : "Località non indicata"}
+                </div>
+                <div className="flex gap-2 pt-2 text-[10px]">
+                  {a.open_to_collab && (
+                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-500">
+                      Collab
+                    </span>
+                  )}
+                  {a.open_to_promo && (
+                    <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-500">
+                      Promo
+                    </span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

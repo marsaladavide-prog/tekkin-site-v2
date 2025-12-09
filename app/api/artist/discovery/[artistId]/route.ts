@@ -3,10 +3,10 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function GET(
   _req: NextRequest,
-  ctx: { params: Promise<{ artistId: string }> }
+  { params }: { params: { artistId: string } }
 ) {
   try {
-    const { artistId } = await ctx.params;
+    const { artistId } = params;
 
     const supabase = await createClient();
 
@@ -22,14 +22,18 @@ export async function GET(
         bio_short,
         city,
         country,
-        open_to_collab
+        open_to_collab,
+        spotify_url,
+        instagram_username,
+        beatport_url,
+        presskit_link
       `
       )
       .eq("id", artistId)
       .maybeSingle();
 
     if (error) {
-      console.error("[GET /artist/discovery/:id] supabase error:", error);
+      console.error("[artist/discovery/:id] error", error);
       return NextResponse.json(
         { error: "Errore caricando l'artista" },
         { status: 500 }
@@ -43,25 +47,28 @@ export async function GET(
       );
     }
 
-    // Mappo ai campi che usa il frontend
     const artist = {
       id: data.id,
       artist_name: data.artist_name,
       artist_photo_url: data.avatar_url ?? data.photo_url ?? null,
-      bio_short: data.bio_short,
-      city: data.city,
-      country: data.country,
-      open_to_collab: data.open_to_collab,
       main_genres: Array.isArray(data.main_genres)
         ? data.main_genres
         : data.main_genres
         ? [data.main_genres]
         : [],
+      bio_short: data.bio_short,
+      city: data.city,
+      country: data.country,
+      open_to_collab: data.open_to_collab ?? false,
+      spotify_url: data.spotify_url ?? null,
+      instagram_username: data.instagram_username ?? null,
+      beatport_url: data.beatport_url ?? null,
+      presskit_link: data.presskit_link ?? null,
     };
 
     return NextResponse.json({ artist });
   } catch (err) {
-    console.error("[GET /artist/discovery/:id] unexpected:", err);
+    console.error("[artist/discovery/:id] unexpected error", err);
     return NextResponse.json(
       { error: "Errore inatteso caricando l'artista" },
       { status: 500 }
