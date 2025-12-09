@@ -1,55 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
-export const runtime = "nodejs";
+type CircuitArtistRouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
 
-interface Params {
-  params: { artistId: string }; // occhio al nome cartella [artistId]
-}
+export async function GET(
+  _req: NextRequest,
+  { params }: CircuitArtistRouteContext
+) {
+  const { id } = await params;
+  const artistId = id;
 
-export async function GET(_req: NextRequest, { params }: Params) {
-  try {
-    const supabase = await createClient();
-    const artistId = params.artistId;
-
-    const { data, error } = await supabase
-      .from("users_profile")
-      .select(
-        `
-        id,
-        artist_name,
-        main_genres,
-        city,
-        country,
-        bio_short,
-        open_to_collab,
-        open_to_promo,
-        spotify_url,
-        spotify_followers,
-        spotify_popularity
-        `
-      )
-      .eq("id", artistId)
-      .single();
-
-    if (error || !data) {
-      console.error("[circuit][artist-detail] error", error);
-      return NextResponse.json(
-        { error: "Artista non trovato" },
-        { status: 404 }
-      );
-    }
-
-    const mainGenres = (data as any).main_genres as string[] | null;
-
-    const response = {
-      ...data,
-      main_genre: mainGenres && mainGenres.length > 0 ? mainGenres[0] : null,
-    };
-
-    return NextResponse.json(response, { status: 200 });
-  } catch (err) {
-    console.error("[circuit][artist-detail] unexpected", err);
-    return NextResponse.json({ error: "Errore inatteso" }, { status: 500 });
+  if (!artistId || typeof artistId !== "string") {
+    return NextResponse.json(
+      { error: "ID artista non valido" },
+      { status: 400 }
+    );
   }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("users_profile")
+    .select(
+      `
+      id,
+      artist_name,
+      avatar_url,
+      photo_url,
+      main_genres,
+      bio_short,
+      city,
+      country,
+      open_to_collab,
+      spotify_url,
+      instagram_username,
+      beatport_url,
+      presskit_link
+    `
+    )
+    .eq("id", artistId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[circuit/artist/:id] supabase error", error);
+    return NextResponse.json(
+      { error: "Errore caricando l'artista" },
+      { status: 500 }
+    );
+  }
+
+  if (!data) {
+    return NextResponse.json(
+      { error: "Artista non trovato" },
+      { status: 404 }
+    );
+  }
+
+  const artist = {
+    id: data.id,
+    artist_name: data.artist_name,
+    artist_photo_url: data.avatar_url ?? data.photo_url ?? null,
+    main_genres: Array.isArray(data.main_genres)
+      ? data.main_genres
+      : data.main_genres
+      ? [data.main_genres]
+      : [],
+    bio_short: data.bio_short,
+    city: data.city,
+    country: data.country,
+    open_to_collab: data.open_to_collab ?? false,
+    spotify_url: data.spotify_url ?? null,
+    instagram_username: data.instagram_username ?? null,
+    beatport_url: data.beatport_url ?? null,
+    presskit_link: data.presskit_link ?? null,
+  };
+
+  return NextResponse.json({ artist });
 }

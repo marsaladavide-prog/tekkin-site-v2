@@ -20,22 +20,34 @@ type Artist = {
 };
 
 type Props = {
-  params: { artistId: string };
+  // Next 15 nel tuo setup si aspetta params come Promise
+  params: Promise<{ artistId: string }>;
 };
 
 export default function ArtistDetailPage({ params }: Props) {
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const artistId = params.artistId;
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
+        // qui risolviamo il Promise<{ artistId }>
+        const { artistId } = await params;
+
+        if (!artistId) {
+          if (!cancelled) {
+            setErrorMsg("ID artista mancante.");
+            setLoading(false);
+          }
+          return;
+        }
+
         const res = await fetch(`/api/artist/discovery/${artistId}`);
         let data: any = null;
+
         try {
           data = await res.json();
         } catch (jsonErr) {
@@ -80,7 +92,7 @@ export default function ArtistDetailPage({ params }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [artistId]);
+  }, [params]);
 
   if (loading) {
     return (
@@ -131,10 +143,10 @@ export default function ArtistDetailPage({ params }: Props) {
     locationLabel && artist.open_to_collab
       ? `${locationLabel} · Open to collab`
       : locationLabel || (artist.open_to_collab ? "Open to collab" : null);
+
   const instagramProfileUrl = artist.instagram_username
     ? `https://instagram.com/${artist.instagram_username}`
     : null;
-
 
   return (
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
