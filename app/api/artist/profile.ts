@@ -36,6 +36,7 @@ export function buildProfilePayload(
 
   return {
     id: userId,
+    user_id: userId,
     artist_name: sanitize(metadata.artist_name),
     artist_genre: sanitize(metadata.artist_genre),
     artist_photo_url: photo,
@@ -66,6 +67,7 @@ export function buildArtistPayload(
 
   return {
     id: artistId,
+    user_id: artistId,
     artist_name: sanitize(metadata.artist_name),
     artist_genre: sanitize(metadata.artist_genre),
     artist_photo_url: photo,

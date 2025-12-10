@@ -2,75 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { calculateArtistRankFromMetrics } from "@/lib/tekkinRank/calcArtistRank";
 
-type Artist = {
-  id: string;
-  user_id?: string;
-  artist_name: string;
-  artist_photo_url?: string | null;
-  artist_genre?: string | null;
-  artist_link_source?: string | null;
-
-  spotify_id?: string | null;
-  spotify_url?: string | null;
-  beatstats_url?: string | null;
-  beatport_url?: string | null;
-  instagram_url?: string | null;
-  soundcloud_url?: string | null;
-  traxsource_url?: string | null;
-  songstats_url?: string | null;
-  resident_advisor_url?: string | null;
-  songkick_url?: string | null;
-  apple_music_url?: string | null;
-  tidal_url?: string | null;
-
-  socials?: {
-    spotify?: string | null;
-    beatport?: string | null;
-    beatstats?: string | null;
-    instagram?: string | null;
-    soundcloud?: string | null;
-  };
-};
-
-type ArtistRank = {
-  tekkin_score: number;
-  level: string;
-  release_score: number;
-  support_score: number;
-  production_score: number;
-  branding_score: number;
-  activity_score: number;
-};
-
-type ArtistMetrics = {
-  spotify_monthly_listeners: number | null;
-  spotify_streams_total: number | null;
-  spotify_streams_change: number | null;
-  spotify_followers: number | null;
-  spotify_popularity: number | null;
-  beatport_charts: number | null;
-  beatport_hype_charts: number | null;
-  shows_last_90_days: number | null;
-  shows_total: number | null;
-  collected_at: string;
-};
-
-export type ArtistRankView = {
-  artist: Artist;
-  rank: ArtistRank;
-  metrics: ArtistMetrics | null;
-};
-
-const baseFallbackRank: ArtistRank = {
-  tekkin_score: 74,
-  level: "High Form",
-  release_score: 70,
-  support_score: 68,
-  production_score: 72,
-  branding_score: 66,
-  activity_score: 64,
-};
+import {
+  Artist,
+  ArtistMetrics,
+  ArtistRank,
+  ArtistRankView,
+  baseFallbackRank,
+} from "@/types/tekkinRank";
 
 function toNumber(value: any): number | null {
   const n = Number(value);
@@ -314,13 +254,17 @@ export function useArtistRank() {
         console.log("tekkin_artist_profile local:", localProfile);
         console.log("metricsFromProfile:", metricsFromProfile);
 
-        if (isMounted) {
-          setData({
-            artist: artistProfile,
-            rank: baseFallbackRank,
-            metrics: metricsFromProfile,
-          });
-        }
+if (isMounted) {
+  const calculatedRank = calculateArtistRankFromMetrics(
+    metricsFromProfile
+  );
+
+  setData({
+    artist: artistProfile,
+    rank: calculatedRank,
+    metrics: metricsFromProfile,
+  });
+}
       } catch (err: any) {
         console.error("useArtistRank error", err);
         if (isMounted) {

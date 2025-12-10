@@ -97,22 +97,7 @@ PROFILES = {
         },
         "artistic_weights": {"low_end": 0.3, "clarity": 0.4, "air": 0.3},
     },
-    "peak_time_techno": {
-        "label": "Peak-Time Techno",
-        "lufs_range": (-6.0, -5.0),
-        "crest_range": (5.5, 7.5),
-        "true_peak_range_dbfs": (-1.0, -0.1),
-        "bands_target": {
-            "sub": (0.18, 0.24),
-            "low": (0.32, 0.40),
-            "lowmid": (0.08, 0.12),
-            "mid": (0.20, 0.28),
-            "presence": (0.10, 0.16),
-            "air": (0.04, 0.08),
-            "high": (0.06, 0.10),
-        },
-        "artistic_weights": {"low_end": 0.35, "clarity": 0.4, "air": 0.25},
-    },
+
     "house": {
         "label": "House Groovy Classic",
         "lufs_range": (-8.5, -7.5),

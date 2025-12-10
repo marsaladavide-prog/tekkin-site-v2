@@ -11,7 +11,7 @@ import CalendarSection from "./mentoring-pro/components/CalendarSection";
 import PressKitCard from "./mentoring-pro/components/PressKitCard";
 
 // se vuoi mostrare il player in homepage:
-import SoundCloudLikePlayer from "./mentoring-pro/components/player/SoundCloudLikePlayer";
+import SoundCloudLikePlayer from "./mentoring-pro/components/SoundCloudLikePlayer";
 
 export default function HomePage() {
   const pathname = usePathname();

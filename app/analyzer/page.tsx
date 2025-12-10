@@ -50,139 +50,158 @@ export default function AnalyzerPage() {
 
   return (
     <main
-      className={`${shareTechMono.className} min-h-screen bg-[#0a0a0a] text-[#00ffff] flex flex-col items-center justify-center relative overflow-hidden`}
+      className={`${shareTechMono.className} min-h-screen bg-[#0a0a0a] text-[#00ffff] relative overflow-hidden`}
     >
       <div className="absolute inset-0 pointer-events-none animate-scanlines bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.05),rgba(255,255,255,0.05)_1px,transparent_2px,transparent_4px)]"></div>
 
-      <h1
-        className="relative text-5xl sm:text-6xl font-bold tracking-[0.15em] glitch"
-        data-text="TEKKIN ANALYZER PRO"
-      >
-        TEKKIN ANALYZER PRO
-      </h1>
-      <p className="mt-4 text-[#9ef3f3] text-lg sm:text-xl">
-        Audio Analyzer — v3.6
-      </p>
-
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="glitch-button mt-10 border-2 border-[#00ffff] text-[#00ffff] px-10 py-4 text-lg font-semibold hover:bg-[#00ffff] hover:text-black transition"
-        >
-          Avvia Analyzer
-        </button>
-      )}
-
-      {open && (
-        <div className="z-10 mt-10 flex flex-col items-center gap-6 bg-[#111] border border-[#00ffff33] rounded-xl p-6 w-[90%] max-w-2xl text-sm text-[#9ef3f3] shadow-xl">
-          {/* === Selettori === */}
-          <div className="flex flex-col gap-3 w-full">
-            <div className="flex flex-col sm:flex-row gap-3 justify-between">
-              <label className="flex flex-col text-[#00ffff]">
-                Lingua
-                <select
-                  value={lang}
-                  onChange={(e) => setLang(e.target.value)}
-                  className="bg-[#111] border border-[#00ffff55] text-[#9ef3f3] px-3 py-2 rounded-md"
-                >
-                  <option value="en">English</option>
-                  <option value="it">Italiano</option>
-                </select>
-              </label>
-
-              <label className="flex flex-col text-[#00ffff]">
-                Modalità
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value)}
-                  className="bg-[#111] border border-[#00ffff55] text-[#9ef3f3] px-3 py-2 rounded-md"
-                >
-                  <option value="master">Master</option>
-                  <option value="premaster">Premaster</option>
-                </select>
-              </label>
-
-              <label className="flex flex-col text-[#00ffff]">
-                Genere
-                <select
-                  value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
-                  className="bg-[#111] border border-[#00ffff55] text-[#9ef3f3] px-3 py-2 rounded-md"
-                >
-                  <option value="minimal_deep_tech">Minimal / Deep Tech</option>
-                  <option value="tech_house">Tech House Modern</option>
-                  <option value="minimal_house">Melodic / Deep House</option>
-                  <option value="peak_time_techno">Peak-Time Techno</option>
-                  <option value="house">House Groovy Classic</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          {/* === Upload File === */}
-          <label className="cursor-pointer border border-[#00ffff55] px-6 py-3 rounded-md hover:bg-[#00ffff22] transition">
-            Carica la tua traccia (.wav)
-            <input
-              type="file"
-              accept=".wav"
-              className="hidden"
-              onChange={(e) => {
-                const selected = e.target.files?.[0];
-                if (!selected) return;
-                setFile(selected);
-                setReport(`📡 File caricato: ${selected.name}\nPronto per l'analisi Tekkin PRO.\n`);
-              }}
-            />
-          </label>
-
-          {/* === Pulsante Analisi === */}
-          <button
-            onClick={handleAnalyze}
-            disabled={!file || analyzing}
-            className={`border-2 ${
-              analyzing
-                ? "border-gray-500 text-gray-500"
-                : "border-[#00ffff] text-[#00ffff] hover:bg-[#00ffff] hover:text-black transition"
-            } px-10 py-3 rounded-md text-lg font-semibold`}
+      <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 py-12 space-y-6 text-center">
+        <div className="space-y-2">
+          <h1
+            className="relative text-5xl sm:text-6xl font-bold tracking-[0.15em] glitch"
+            data-text="TEKKIN ANALYZER PRO"
           >
-            {analyzing ? "Analisi in corso..." : "Avvia Analisi"}
-          </button>
-
-          {/* === Barra di progresso === */}
-          {analyzing && (
-            <div className="relative w-full h-2 bg-[#00ffff22] rounded overflow-hidden mt-2">
-              <div
-                className="absolute top-0 left-0 h-full bg-[#00ffff] transition-all duration-150"
-                style={{ width: `${progress}%` }}
-              ></div>
-            </div>
-          )}
-
-          {/* === REPORT ELEGANTE === */}
-          {report && (
-            <div className="mt-6 w-full bg-[#00000088] border border-[#00ffff33] rounded-lg p-4 text-[#9ef3f3] whitespace-pre-wrap leading-relaxed">
-              <h2 className="text-[#00ffff] font-bold text-lg mb-2 border-b border-[#00ffff33] pb-1">
-                Report Tekkin Analyzer PRO
-              </h2>
-              <p className="text-sm sm:text-base">{report}</p>
-            </div>
-          )}
-
-          <button
-            onClick={() => {
-              setOpen(false);
-              setFile(null);
-              setReport("");
-              setAnalyzing(false);
-              setProgress(0);
-            }}
-            className="mt-3 border border-[#00ffff55] px-6 py-2 rounded hover:bg-[#00ffff22] transition"
-          >
-            Chiudi Analyzer
-          </button>
+            TEKKIN ANALYZER PRO
+          </h1>
+          <p className="text-[#9ef3f3] text-lg sm:text-xl">Audio Analyzer v3.6</p>
+          <p className="text-xs text-white/60">
+            {open
+              ? "Organizza linguaggio, genere e modalita prima di lanciare l'analisi."
+              : "Clicca su Avvia Analyzer per aprire la console Tekkin PRO."}
+          </p>
         </div>
-      )}
 
+        {!open ? (
+          <button
+            onClick={() => setOpen(true)}
+            className="glitch-button mt-4 border-2 border-[#00ffff] px-10 py-4 text-lg font-semibold text-[#00ffff] hover:bg-[#00ffff] hover:text-black transition"
+          >
+            Avvia Analyzer
+          </button>
+        ) : (
+          <div className="w-full space-y-6 text-left">
+            <section className="rounded-2xl border border-white/10 bg-black/70 p-5 text-white/80">
+              <h2 className="text-[10px] uppercase tracking-[0.3em] text-white/60">
+                Parametri di analisi
+              </h2>
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <label className="flex flex-col text-white/60">
+                  Lingua
+                  <select
+                    value={lang}
+                    onChange={(e) => setLang(e.target.value)}
+                    className="mt-1 rounded-md border border-white/15 bg-[#111] px-3 py-2 text-sm text-white"
+                  >
+                    <option value="en">English</option>
+                    <option value="it">Italiano</option>
+                  </select>
+                </label>
+                <label className="flex flex-col text-white/60">
+                  Modalita
+                  <select
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value)}
+                    className="mt-1 rounded-md border border-white/15 bg-[#111] px-3 py-2 text-sm text-white"
+                  >
+                    <option value="master">Master</option>
+                    <option value="premaster">Premaster</option>
+                  </select>
+                </label>
+                <label className="flex flex-col text-white/60">
+                  Genere
+                  <select
+                    value={genre}
+                    onChange={(e) => setGenre(e.target.value)}
+                    className="mt-1 rounded-md border border-white/15 bg-[#111] px-3 py-2 text-sm text-white"
+                  >
+                    <option value="minimal_deep_tech">Minimal / Deep Tech</option>
+                    <option value="tech_house">Tech House</option>
+                    <option value="minimal_house">Minimal House</option>
+                    <option value="house">House Groovy Classic</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-black/70 p-5 space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="cursor-pointer rounded-2xl border border-[#00ffff55] px-5 py-3 text-sm text-white transition hover:border-[#00ffff88]">
+                  Carica la tua traccia (.wav)
+                  <input
+                    type="file"
+                    accept=".wav"
+                    className="hidden"
+                    onChange={(e) => {
+                      const selected = e.target.files?.[0];
+                      if (!selected) return;
+                      setFile(selected);
+                      setReport(
+                        `File caricato: ${selected.name}
+Pronto per l'analisi Tekkin PRO.
+`
+                      );
+                    }}
+                  />
+                </label>
+                <span className="text-[11px] text-white/60">
+                  {file ? `File pronto: ${file.name}` : "Nessun file caricato"}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handleAnalyze}
+                  disabled={!file || analyzing}
+                  className={`rounded-full px-6 py-2 text-sm font-semibold uppercase tracking-[0.4em] transition ${
+                    analyzing
+                      ? "border border-gray-500 text-gray-500"
+                      : "border border-[#00ffff] text-[#00ffff] hover:bg-[#00ffff] hover:text-black"
+                  }`}
+                >
+                  {analyzing ? "Analisi in corso..." : "Avvia Analisi"}
+                </button>
+                {file && !analyzing && (
+                  <span className="text-[11px] text-white/60">Pronto per l'invio</span>
+                )}
+              </div>
+
+              {analyzing && (
+                <div className="space-y-2 text-[11px] text-white/60">
+                  <div className="h-2 w-full rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-[#00ffff]"
+                      style={{ width: `${Math.min(progress, 99)}%` }}
+                    ></div>
+                  </div>
+                  <p>Progresso stimato: {Math.min(progress, 100).toFixed(0)}%</p>
+                </div>
+              )}
+
+              {report && (
+                <div className="rounded-xl border border-white/10 bg-black/60 p-4 text-sm text-[#9ef3f3] whitespace-pre-wrap leading-relaxed">
+                  <h3 className="text-[10px] uppercase tracking-[0.3em] text-white/60">
+                    Report Tekkin Analyzer PRO
+                  </h3>
+                  <p className="mt-2">{report}</p>
+                </div>
+              )}
+            </section>
+
+            <button
+              onClick={() => {
+                setOpen(false);
+                setFile(null);
+                setReport("");
+                setAnalyzing(false);
+                setProgress(0);
+              }}
+              className="block w-full rounded-full border border-[#00ffff55] px-6 py-3 text-sm font-semibold text-white hover:bg-[#00ffff22] transition"
+            >
+              Chiudi Analyzer
+            </button>
+          </div>
+        )}
+      </div>
+    </main>
       <style jsx>{`
         @keyframes scanlines {
           0% {
@@ -250,6 +269,5 @@ export default function AnalyzerPage() {
           }
         }
       `}</style>
-    </main>
   );
 }

@@ -1,144 +1,125 @@
-﻿"use client";
+"use client";
 
-import { Info } from "lucide-react";
-import type { AnalyzerAiAction, AnalyzerAiCoach } from "@/types/analyzer";
+import type { AnalyzerAiCoach } from "@/types/analyzer";
+import { AnalyzerActionGroups } from "./AnalyzerActionGroups";
 
 type TekkinAiPlanSectionProps = {
-  coach: AnalyzerAiCoach | null;
-  loadingAi?: boolean;
-  error?: string | null;
-  onGenerateAi?: () => void;
+  aiCoach: AnalyzerAiCoach | null;
+  isGenerating: boolean;
+  hasAnalyzerResult: boolean;
+  onGenerateAi: () => void | Promise<void>;
 };
 
-const PRIORITY_STYLES: Record<AnalyzerAiAction["priority"], string> = {
-  high: "text-red-200 bg-red-500/20",
-  medium: "text-amber-200 bg-amber-500/20",
-  low: "text-emerald-200 bg-emerald-500/20",
-};
-
-export function TekkinAiPlanSection({ coach, loadingAi, error, onGenerateAi }: TekkinAiPlanSectionProps) {
-  const hasCoachContent = Boolean(
-    coach &&
-      (coach.summary?.trim() ||
-        coach.actions.length > 0 ||
-        coach.meta.artistic_assessment?.trim() ||
-        coach.meta.label_fit?.trim() ||
-        coach.meta.structure_feedback?.trim() ||
-        coach.meta.risk_flags.length > 0)
-  );
-  const riskFlags = coach?.meta?.risk_flags ?? [];
+export function TekkinAiPlanSection({
+  aiCoach,
+  isGenerating,
+  hasAnalyzerResult,
+  onGenerateAi,
+}: TekkinAiPlanSectionProps) {
+  const hasAi = Boolean(aiCoach);
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-black/80 p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Info className="h-4 w-4 text-emerald-300" />
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">
-              Tekkin AI
-            </p>
-            <p className="text-sm font-semibold text-white">Piano d&apos;azione Tekkin</p>
-          </div>
-        </div>
-        {onGenerateAi && (
-          <button
-            type="button"
-            onClick={onGenerateAi}
-            disabled={loadingAi}
-            className="rounded-full border border-emerald-400/60 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-200 disabled:opacity-50"
-          >
-            {loadingAi ? "Analisi in corso..." : "Chiedi a Tekkin AI"}
-          </button>
-        )}
+    <section className="rounded-xl border border-white/10 bg-black/40 p-5">
+      <div className="space-y-1">
+        <h3 className="text-xs font-semibold tracking-[0.18em] uppercase text-white/60">
+          Livello 2 – Piano Tekkin AI
+        </h3>
+        <p className="text-[11px] text-white/70">
+          Riassunto e piano di intervento basato sui dati tecnici Tekkin Analyzer.
+        </p>
       </div>
 
-      {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <p className="text-[11px] text-white/70">
+          Usa queste mosse per rifinire il mix prima del master o del club test.
+        </p>
 
-      {!hasCoachContent && !loadingAi ? (
+        <button
+          type="button"
+          onClick={onGenerateAi}
+          disabled={isGenerating || !hasAnalyzerResult}
+          className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-[11px] font-semibold text-black disabled:opacity-40"
+        >
+          {isGenerating
+            ? "Generazione in corso"
+            : hasAi
+            ? "Rigenera piano Tekkin"
+            : "Crea piano Tekkin"}
+        </button>
+      </div>
+
+      {!hasAi && (
         <p className="mt-4 text-[11px] text-white/60">
-          Nessun piano AI disponibile per questa versione.
+          Lancia prima Tekkin Analyzer sulla versione, poi genera il piano Tekkin AI
+          per avere un riassunto intelligente e 3-4 mosse di intervento.
         </p>
-      ) : null}
+      )}
 
-      {coach?.summary ? (
-        <p className="mt-4 text-sm text-white/80">{coach.summary}</p>
-      ) : hasCoachContent && !loadingAi ? (
-        <p className="mt-4 text-[11px] text-white/55">
-          Riassunto AI in attesa di generazione.
-        </p>
-      ) : null}
-
-      {coach?.meta && (
-        <div className="mt-4 grid gap-3 text-[11px] text-white/80 md:grid-cols-3">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.3em] text-white/60">
-              Valutazione artistica
+      {hasAi && aiCoach && (
+        <div className="mt-4 space-y-5">
+          <div className="rounded-lg bg-white/5 p-3">
+            <p className="text-[11px] font-semibold text-white/80">
+              Piano d'azione Tekkin
             </p>
-            <p className="mt-1 leading-relaxed text-sm text-white">
-              {coach.meta.artistic_assessment}
+            <p className="mt-1 text-[11px] text-white/80 whitespace-pre-line">
+              {aiCoach.summary}
             </p>
           </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.3em] text-white/60">Label fit</p>
-            <p className="mt-1 text-sm text-white">{coach.meta.label_fit ?? "n.a."}</p>
-            <p className="mt-1 text-[10px] text-white/60">
-              Potential gain: {coach.meta.predicted_rank_gain != null ? `+${coach.meta.predicted_rank_gain.toFixed(1)} punti` : "n.a."}
-            </p>
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.3em] text-white/60">Struttura</p>
-            <p className="mt-1 text-sm text-white">
-              {coach.meta.structure_feedback ?? "Nessun commento struttura."}
-            </p>
+
+          <AnalyzerActionGroups actions={aiCoach.actions ?? []} />
+
+          <div className="grid gap-3 rounded-lg bg-white/5 p-3 text-[11px] text-white/80 md:grid-cols-2">
+            <div>
+              <p className="font-semibold text-white">Valutazione artistica</p>
+              <p className="mt-1 text-white/80">
+                {aiCoach.meta?.artistic_assessment || "Nessuna valutazione disponibile."}
+              </p>
+            </div>
+
+            <div>
+              <p className="font-semibold text-white">Label fit</p>
+              <p className="mt-1 text-white/80">
+                {aiCoach.meta?.label_fit || "Non è stato trovato un fit chiaro."}
+              </p>
+
+              <p className="mt-2 font-semibold text-white">Struttura e resa per DJ</p>
+              <p className="mt-1 text-white/80">
+                {aiCoach.meta?.structure_feedback ||
+                  "Nessuna nota specifica sulla struttura."}
+              </p>
+            </div>
+
+            <div>
+              <p className="font-semibold text-white">Risk flags</p>
+              {aiCoach.meta?.risk_flags?.length ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {aiCoach.meta.risk_flags.map((flag) => (
+                    <span
+                      key={flag}
+                      className="rounded-full border border-white/20 px-2 py-[2px] text-[10px] uppercase tracking-[0.12em] text-white/70"
+                    >
+                      {flag}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-white/60">Nessun rischio critico rilevato.</p>
+              )}
+            </div>
+
+            <div>
+              <p className="font-semibold text-white">Potenziale miglioramento</p>
+              <p className="mt-1 text-white/80">
+                {aiCoach.meta?.predicted_rank_gain != null
+                  ? `Seguendo il piano Tekkin il punteggio potrebbe crescere di ~${aiCoach.meta.predicted_rank_gain.toFixed(
+                      1
+                    )} punti.`
+                  : "Il modello non ha stimato un guadagno di punteggio preciso."}
+              </p>
+            </div>
           </div>
         </div>
       )}
-
-      {riskFlags.length ? (
-        <div className="mt-3">
-          <p className="text-[10px] uppercase tracking-[0.3em] text-white/60 mb-1">Risk flags</p>
-          <div className="flex flex-wrap gap-1.5">
-            {riskFlags.map((flag) => (
-              <span key={flag} className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-red-200">
-                {flag}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {coach?.actions.length ? (
-        <div className="mt-4 space-y-3">
-          {coach.actions.map((action) => (
-            <div key={action.title} className="rounded-xl border border-white/15 bg-white/5 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-white">{action.title}</p>
-                <span className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
-                  {action.focus_area}
-                </span>
-              </div>
-              <p className="mt-1 text-[12px] text-white/75">{action.description}</p>
-              <span
-                className={`mt-3 inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${PRIORITY_STYLES[action.priority]}`}
-              >
-                Priorità {action.priority}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="mt-5 rounded-xl border border-white/15 bg-black/70 px-4 py-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60">Domande su questa analisi?</p>
-        <p className="mt-1 text-[11px] text-white/60">Prepara le tue domande per la futura assistenza AI.</p>
-        <button
-          type="button"
-          onClick={() => console.log("Coming soon: AI Assistant placeholder")}
-          className="mt-3 rounded-full border border-emerald-400/60 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-200 transition hover:bg-emerald-400/10"
-        >
-          Chiedi qualcosa all&apos;Analyzer
-        </button>
-      </div>
     </section>
   );
 }

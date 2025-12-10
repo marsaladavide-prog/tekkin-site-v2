@@ -1,6 +1,7 @@
 "use client";
 
-import type { AnalyzerWarningSeverity } from "@/types/analyzer";
+import { getTekkinGenreLabel, TekkinGenreId } from "@/lib/constants/genres";
+import type { AnalyzerWarningSeverity, ReferenceAi } from "@/types/analyzer";
 
 const HARD_MIN_BPM = 60;
 const HARD_MAX_BPM = 180;
@@ -147,4 +148,33 @@ export function getWarningBadgeClass(severity?: AnalyzerWarningSeverity): string
   if (severity === "error") return "text-red-200 bg-red-500/20";
   if (severity === "warning") return "text-amber-200 bg-amber-500/20";
   return "text-emerald-200 bg-emerald-500/20";
+}
+
+export function getReferenceGenreLabel(ref?: ReferenceAi | null): string | null {
+  if (!ref) return null;
+  if (ref.profile_label) return ref.profile_label;
+
+  if (ref.profile_key) {
+    try {
+      return getTekkinGenreLabel(ref.profile_key as TekkinGenreId) ?? ref.profile_key;
+    } catch {
+      return ref.profile_key;
+    }
+  }
+
+  return null;
+}
+
+export function getReferenceMatchPercent(ref?: ReferenceAi | null): number | null {
+  if (!ref) return null;
+
+  if (typeof ref.model_match?.match_percent === "number") {
+    return Math.round(ref.model_match.match_percent);
+  }
+
+  if (typeof ref.match_ratio === "number") {
+    return Math.round(ref.match_ratio * 100);
+  }
+
+  return null;
 }

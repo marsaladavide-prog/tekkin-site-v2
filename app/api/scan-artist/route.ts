@@ -1,5 +1,7 @@
 export const runtime = "nodejs";
 import { NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { getSupabaseAdmin } from "@/app/api/artist/profile";
 
 type ScanBody = {
   url?: string;
@@ -39,6 +41,14 @@ type ArtistData = {
   spotify_id?: string | null;
   beatstatsUrl?: string | null;
   beatstatsCurrentPositions?: string | null;
+  spotifyReleases?: {
+    id: string;
+    title: string;
+    releaseDate: string;
+    coverUrl: string | null;
+    spotifyUrl: string | null;
+    albumType: string | null;
+  }[];
 };
 
 async function findBeatstatsUrlByName(
@@ -215,6 +225,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError) {
+      console.error("[scan-artist] supabase auth error:", authError);
+    }
+    const userId = user?.id ?? null;
+
     const accessToken = await getSpotifyAccessToken();
     const spotifyArtist = await fetchSpotifyArtist(spotifyId, accessToken);
 
@@ -272,7 +292,7 @@ export async function POST(request: Request) {
       console.error("[scan-artist] errore fetch releases Spotify", err);
     }
 
-    const artist = {
+    const artist: ArtistData = {
       name: spotifyArtist.name,
       genre: primaryGenre,
       imageUrl,
@@ -295,19 +315,22 @@ export async function POST(request: Request) {
 
       // NEW: lista release per la sezione Main Releases & Highlights
       spotifyReleases,
-    };
+      };
 
+    const ENABLE_BEATSTATS = false;
     let beatstatsSummary: BeatstatsSummary | null = null;
-    try {
-      console.log("[scan-artist] starting Beatstats search for", spotifyArtist.name);
-      const beatstatsUrl = await findBeatstatsUrlByName(spotifyArtist.name);
-      if (beatstatsUrl) {
-        beatstatsSummary = await fetchBeatstatsSummary(beatstatsUrl);
-      }
-    } catch (err) {
-      console.error("[scan-artist] errore Beatstats integration", err);
-    }
 
+    if (ENABLE_BEATSTATS) {
+      console.log("[scan-artist] starting Beatstats search for", spotifyArtist.name);
+      try {
+        const beatstatsUrl = await findBeatstatsUrlByName(spotifyArtist.name);
+        if (beatstatsUrl) {
+          beatstatsSummary = await fetchBeatstatsSummary(beatstatsUrl);
+        }
+      } catch (err) {
+        console.error("[Beatstats] search request failed", err);
+      }
+    }
     const extraLogs: string[] = [];
 
     if (beatstatsSummary) {
@@ -324,6 +347,155 @@ export async function POST(request: Request) {
       );
     } else {
       extraLogs.push("> [SPOTIFY] Nessuna release trovata o errore nel fetch.");
+    }
+
+    // ===========================
+    // Salvataggio su Supabase (profilo + metriche)
+    // ===========================
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (!authError && user) {
+        const { data: profile, error: profileErr } = await supabase
+          .from("users_profile")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!profileErr && profile) {
+          const profileArtistId = profile.id as string;
+
+          const profileUpdate: Record<string, any> = {
+            artist_name: artist.name,
+            photo_url: artist.imageUrl,
+            spotify_id: artist.spotifyId,
+            spotify_url: artist.spotify_url,
+          };
+
+          const { error: profileUpdateErr } = await supabase
+            .from("users_profile")
+            .update(profileUpdate)
+            .eq("id", profileArtistId);
+
+          if (profileUpdateErr) {
+            console.error(
+              "[scan-artist] supabase profile update error",
+              profileUpdateErr
+            );
+          }
+
+          let adminSupabase = null;
+          try {
+            adminSupabase = getSupabaseAdmin();
+          } catch (adminInitErr) {
+            console.error(
+              "[scan-artist] supabase admin init error",
+              adminInitErr
+            );
+          }
+
+          if (adminSupabase) {
+            const artistPayload: Record<string, any> = {
+              id: profileArtistId,
+              user_id: userId ?? null,
+              artist_name:
+                artist.name || spotifyArtist.name || "Untitled artist",
+              spotify_id: artist.spotifyId ?? spotifyArtist.id ?? null,
+              spotify_url:
+                artist.spotify_url ?? spotifyArtist.external_urls?.spotify ?? null,
+              spotify_followers: artist.spotifyFollowers ?? null,
+              spotify_popularity: artist.spotifyPopularity ?? null,
+            };
+
+            console.log(
+              "[scan-artist] upserting artists payload",
+              artistPayload
+            );
+
+            const { error: artistUpsertError } = await adminSupabase
+              .from("artists")
+              .upsert(artistPayload, { onConflict: "id" });
+
+            if (artistUpsertError) {
+              console.error(
+                "[scan-artist] supabase ensure artist error",
+                artistUpsertError
+              );
+              return NextResponse.json(
+                {
+                  error: "failed to upsert artist",
+                  details: artistUpsertError,
+                },
+                { status: 500 }
+              );
+            }
+
+            if (spotifyReleases.length > 0) {
+              const releasesPayload = spotifyReleases.map((r, idx) => ({
+                artist_id: profileArtistId,
+                spotify_id: r.id,
+                title: r.title,
+                release_date: r.releaseDate ?? null,
+                cover_url: r.coverUrl ?? null,
+                spotify_url: r.spotifyUrl ?? null,
+                album_type: r.albumType ?? null,
+                position: idx,
+              }));
+
+              console.log(
+                "[scan-artist] upserting spotify releases count",
+                releasesPayload.length
+              );
+
+              const { error: releasesError } = await adminSupabase
+                .from("artist_spotify_releases")
+                .upsert(releasesPayload, {
+                  onConflict: "artist_id,spotify_id",
+                });
+
+              if (releasesError) {
+                console.error(
+                  "[scan-artist] errore salvataggio spotify releases",
+                  releasesError
+                );
+              }
+            }
+
+            const metricsPayload: Record<string, any> = {
+              artist_id: profileArtistId,
+              spotify_monthly_listeners: null,
+              spotify_streams_total: null,
+              spotify_streams_change: null,
+              spotify_followers: spotifyArtist.followers?.total ?? null,
+              spotify_popularity: spotifyArtist.popularity ?? null,
+              beatport_charts: null,
+              beatport_hype_charts: null,
+              shows_last_90_days: null,
+              shows_total: null,
+            };
+
+            const { error: metricsErr } = await adminSupabase
+              .from("artist_metrics_daily")
+              .insert(metricsPayload);
+
+            if (metricsErr) {
+              console.error(
+                "[scan-artist] supabase metrics insert error",
+                metricsErr
+              );
+            }
+          } else {
+            console.warn(
+              "[scan-artist] supabase metrics insert skipped (admin client missing)"
+            );
+          }
+        }
+      }
+    } catch (persistErr) {
+      console.error("[scan-artist] supabase persist error", persistErr);
     }
 
     const logs = [

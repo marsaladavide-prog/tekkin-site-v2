@@ -8,7 +8,7 @@ import type {
 } from "@/types/analyzer";
 
 type ProjectVersionForAi = {
-    id: string;
+  id: string;
   project_id: string;
   version_name: string | null;
   lufs: number | null;
@@ -56,8 +56,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => null);
+
     const versionId = body?.version_id as string | undefined;
     const force = Boolean(body?.force);
+    const question: string | undefined =
+      typeof body?.question === "string" && body.question.trim().length > 0
+        ? body.question.trim()
+        : undefined;
 
     if (!versionId) {
       return NextResponse.json(
@@ -65,7 +70,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    // 1. prendo i dati necessari della versione
+
+    // 1. Recupero dati versione
     const { data, error: versionError } = await supabase
       .from("project_versions")
       .select(
@@ -82,25 +88,25 @@ export async function POST(req: NextRequest) {
           "analyzer_ai_summary",
           "analyzer_ai_actions",
           "analyzer_ai_meta",
-      "fix_suggestions",
+          "fix_suggestions",
         ].join(", ")
       )
       .eq("id", versionId)
-      .single();
-
+      .maybeSingle();
 
     if (versionError || !data) {
       console.error("[ai-summary] Version not found:", versionError);
       return NextResponse.json(
-        { error: "Version non trovata" },
+        { error: "Versione non trovata" },
         { status: 404 }
       );
     }
 
-    const version: ProjectVersionForAi = data;
+    const version = data as unknown as ProjectVersionForAi;
 
-    // se ho già il risultato AI e non è richiesto force, riuso
+    // 2. Se non c'è question e ho già i dati AI, riuso (a meno di force)
     if (
+      !question &&
       !force &&
       (version.analyzer_ai_summary ||
         version.analyzer_ai_actions ||
@@ -112,7 +118,8 @@ export async function POST(req: NextRequest) {
           version_id: version.id,
           ai: {
             summary: version.analyzer_ai_summary ?? "",
-            actions: (version.analyzer_ai_actions ?? []) as AnalyzerAiAction[],
+            actions: (version.analyzer_ai_actions ??
+              []) as AnalyzerAiAction[],
             meta: (version.analyzer_ai_meta ?? {
               artistic_assessment: "",
               risk_flags: [],
@@ -135,7 +142,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. normalizzo LUFS e preparo mix_v1 "ripulito"
+    // 3. Normalizzo LUFS e preparo mix_v1 per il modello
     const rawMixV1: RawMixV1 =
       (version.analyzer_mix_v1 as RawMixV1 | null) ?? null;
 
@@ -156,22 +163,95 @@ export async function POST(req: NextRequest) {
           }
         : null;
 
-    // 3. preparo il payload da mandare al modello
     const payloadForModel = {
-version_id: version.id,
-  project_id: version.project_id,
-  version_name: version.version_name,
-  lufs: mainLufs,
-  analyzer_bpm: version.analyzer_bpm,
-  overall_score: version.overall_score,
-  feedback: version.feedback,
-  reference_ai: version.analyzer_reference_ai,
-  mix_v1: mixV1ForModel,
-  fix_suggestions: (version.fix_suggestions ?? []) as FixSuggestion[] | [],
+      version_id: version.id,
+      project_id: version.project_id,
+      version_name: version.version_name,
+      lufs: mainLufs,
+      analyzer_bpm: version.analyzer_bpm,
+      overall_score: version.overall_score,
+      feedback: version.feedback,
+      reference_ai: version.analyzer_reference_ai,
+      mix_v1: mixV1ForModel,
+      fix_suggestions: (version.fix_suggestions ?? []) as FixSuggestion[],
     };
 
-    // prompt in inglese: specifico che lufs top level è la fonte autorevole
-const systemPrompt = `
+    // 4. Modalità Q&A: se arriva una question, faccio solo risposta testuale e non salvo nulla
+    if (question) {
+      const qSystemPrompt = `
+Sei Tekkin Analyzer AI, assistente per il mix di musica minimal, deep house, tech house e affini.
+Ricevi:
+- Un JSON con i dati tecnici di una versione (loudness, BPM, Reference AI, mix_v1, fix_suggestions, ecc).
+- Una domanda precisa dell'artista su questo mix (voce, hi-hat, percussioni, dinamica, stereo, groove, ecc).
+
+Regole:
+- Rispondi SEMPRE in Italiano.
+- Sii pratico e specifico, come un producer esperto in studio.
+- Considera anche voce, hi-hats, percussioni, transitori, stereo e "realismo" del mix, non solo clap e kick.
+- Evita di ripetere in modo identico i testi di fix_suggestions o mix_v1.issues.
+- Se il problema del clap è già evidente, non fissarti solo su quello: collega la risposta al quadro generale del mix.
+- Limita la risposta a 2-4 paragrafi brevi, massimo 8-10 frasi totali.
+      `.trim();
+
+      const qUserPrompt = `
+Dati tecnici JSON da Tekkin Analyzer:
+
+${JSON.stringify(payloadForModel, null, 2)}
+
+Domanda dell'artista:
+${question}
+
+Rispondi in Italiano in modo diretto e pratico, riferendoti chiaramente a questo mix.
+      `.trim();
+
+      const openAiRes = await fetch(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openaiApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-4.1-mini",
+            messages: [
+              { role: "system", content: qSystemPrompt },
+              { role: "user", content: qUserPrompt },
+            ],
+            temperature: 0.5,
+          }),
+        }
+      );
+
+      if (!openAiRes.ok) {
+        const text = await openAiRes.text().catch(() => "");
+        console.error("[ai-summary][Q&A] OpenAI error:", openAiRes.status, text);
+        return NextResponse.json(
+          { error: "Errore chiamando Tekkin AI Q&A", detail: text || null },
+          { status: 502 }
+        );
+      }
+
+      const completion = await openAiRes.json().catch(() => null);
+      const rawContent: string | null =
+        completion?.choices?.[0]?.message?.content ?? null;
+
+      if (!rawContent) {
+        console.error("[ai-summary][Q&A] Nessun contenuto dal modello");
+        return NextResponse.json(
+          { error: "Risposta AI vuota" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json(
+        { answer: rawContent },
+        { status: 200 }
+      );
+    }
+
+    // 5. Modalità "coach" completa con JSON strutturato
+    const systemPrompt = `
 You are Tekkin AI, a specialist assistant for minimal / deep tech / tech house club tracks.
 
 You receive a JSON payload with:
@@ -196,69 +276,63 @@ VERY IMPORTANT:
 - If any loudness value inside mix_v1 (for example old "integrated_lufs") conflicts with "lufs", you MUST ignore the old value and follow "lufs".
 - The technical parts (reference_ai, mix_v1, issues, bands_status, fix_suggestions) are already correct: you do NOT need to reinvent the analysis.
 - Your job is to give a higher-level synthesis and a focused action plan, not to list again every small detail.
+- Always pay attention to voice presence (when present), hi-hat and percussive texture, realism / tridimensionality of the mix, and the overall dynamics / punch.
+- Avoid repeating identical suggestions (same wording or target instrument) across actions or summary lines.
+- When the suggestion touches on groove, explain how hi-hats / percussions and dynamics work together to create real movement.
 
 Your answer must be in ITALIAN, with a direct and professional tone, no fluff, no marketing hype.
 
 Your tasks:
 
-1) SUMMARY (max 6-7 lines)
+1) SUMMARY (max 4–5 lines)
    - In Italian.
-   - Explain clearly:
-     - Stato tecnico del mix/master (volume, bilanciamento, dinamica, tonalità generale).
+   - Spiega in modo diretto:
+     - Stato tecnico del mix/master (volume, bilanciamento, dinamica, tonalità).
      - Quanto è adatto al contesto club minimal / deep tech.
-     - Le 2-3 criticità principali che un producer deve sapere SUBITO.
-   - Non riscrivere tutti i numeri: usa solo quelli davvero rilevanti (es. LUFS, se troppo distante dal target; match di profilo se molto basso, ecc.).
+     - Le 2 criticità principali che il producer deve sapere SUBITO.
+   - Fai almeno un cenno a: voce (se presente), hi-hat/percussioni oppure stereo width.
+   - NON elencare tutti i dettagli tecnici: solo quelli che cambiano davvero la vita (es. LUFS troppo basso, profilo di genere molto lontano).
 
-2) ACTIONS (3 to 6 concrete actions, as a single aggregated plan)
-   You must act as a FIX AGGREGATOR:
-   - You receive mix_v1.issues, bands_status, and fix_suggestions.
-   - Do NOT simply repeat each small suggestion.
-   - Group related problems into 3–6 MACRO AREAS OF INTERVENTION that a producer would actually tackle in the studio.
+2) ACTIONS (massimo 4 AZIONI, non di più)
+   Devi agire come un FIX AGGREGATOR:
+   - Ricevi mix_v1.issues, bands_status e fix_suggestions.
+   - NON riscrivere tutte le micro-note.
+   - Raggruppa i problemi in 3–4 MACRO AREE DI INTERVENTO che un producer farebbe davvero in studio.
 
-   For each action:
-   - title: short (3-6 words), Italian, molto chiaro (es. "Aumenta il sub sotto 60 Hz").
-   - description: 2-3 frasi in Italiano, pratiche e specifiche (dove intervenire, range di frequenze orientativo, cosa controllare).
-   - focus_area: one of
-       "loudness" | "sub" | "lowmid" | "mid" | "high" | "stereo" | "structure" | "groove" | "arrangement" | "other"
+   Per ogni azione:
+   - title: 3–6 parole, in Italiano, chiarissimo (es. "Ripulisci accumulo low-mid").
+   - description: **massimo 2 frasi** in Italiano, pratiche e specifiche.
+   - focus_area: uno tra
+       "loudness" | "sub" | "lowmid" | "mid" | "high" | "stereo" | "stereo_high" | "vocals" | "hihats" | "percussions" | "transients" | "punch" | "structure" | "groove" | "arrangement" | "other"
    - priority: "low" | "medium" | "high"
-     Use "high" ONLY for le mosse che cambiano davvero il risultato in club (es. sub assente, mix troppo scuro, loudness troppo lontano dal target).
+     Metti "high" solo quando l’intervento cambia DAVVERO il risultato in club.
 
-   Use reference_ai.bands_status, mix_v1.issues and fix_suggestions to choose the priorities:
-   - If many bands are "high" in lowmid and several fix_suggestions mention boxy / accumulo low-mid, then one action should be "Riduci accumulo low-mid" with practical details.
-   - If match_ratio is very low and lufs_in_target = false, consider an action on global balance and/or loudness.
-
-   Le azioni NON DEVONO ripetere testualmente i suggerimenti tecnici già presenti in "fix_suggestions" o in mix_v1.issues.
-   Devono invece sintetizzare i problemi principali in MOSSE DI LIVELLO SUPERIORE che un producer esperto farebbe per preparare la traccia al mastering o al club testing.
-   Pensa in termini di "macro aree di intervento", non micro-dettagli.
-
-   Quando proponi un range di frequenze, usa range coerenti con i dati di reference_ai.bands_status.
-   Evita numeri inventati o troppo specifici.
+   Regole aggiuntive:
+   - Se fix_suggestions e mix_v1 dicono la stessa cosa, tu la scrivi UNA volta sola in forma di macro-mossa.
+   - Se hai già un’azione su clap/percussioni, non creare un’altra azione quasi identica.
+   - Se hai dubbi, meglio una azione in meno ma chiara che tante azioni ripetitive.
 
 3) META (AnalyzerAiMeta)
    - artistic_assessment:
-     Breve paragrafo in Italiano su quanto il pezzo è interessante o generico nella scena minimal / deep tech (NO giudizi offensivi).
+     Short paragraph in Italian about how interesting or generic the track is in the minimal / deep tech scene (no offensive judgements).
    - risk_flags:
-     Lista di codici sintetici SOLO se rilevanti, scegliendo tra:
+     List of short codes only if relevant, chosen from:
        "too_dark", "too_bright", "weak_sub", "harsh_highs",
        "weak_transients", "flat_stereo", "muddy_lowmid",
        "unbalanced_vocals", "weak_drop", "structure_confusing".
-     Non inventare altri codici.
    - predicted_rank_gain:
-     Numero (può essere decimale) che rappresenta quanto potrebbe crescere lo score / Tekkin Rank se l'action plan viene seguito (es. 1.5, 3.0, 5.0). Usa null se non hai abbastanza informazioni.
+     Number (can be decimal) that represents how much the score / Tekkin Rank could grow if the action plan is followed (es. 1.5, 3.0, 5.0). Use null if unsure.
    - label_fit:
-     Una frase corta in Italiano su che tipo di label o DJ context è più adatto (es. "adatta a label underground minimal / deep tech", "più vicina a sound tech house commerciale", ecc.). Può essere null se non è chiaro.
+     Short sentence in Italian about which type of label or DJ context fits best, or null if not clear.
    - structure_feedback:
-     Breve paragrafo in Italiano che commenta il flusso delle sezioni (intro, build, drop, break, outro) e quanto è comodo per i DJ (es. "intro abbastanza lunga per mixare", "drop poco marcato", "break troppo lungo", ecc.).
+     Short paragraph in Italian that comments the flow of sections (intro, build, drop, break, outro) and how DJ friendly it is.
 
 STYLE RULES (IMPORTANT):
-- Lo stile deve essere diretto, naturale, da tecnico musicale esperto, NON come un manuale o un algoritmo.
-- - Puoi usare valori o range tecnici (dB, zone di frequenza) SOLO se presenti o chiaramente deducibili dal payload (reference_ai, bands_status, mix_v1). 
-  Se il dato non esiste nel payload, non inventare numeri e usa descrizioni generali (es. “zona low-mid”, “parte alta brillante”).
-- Alterna il modo di iniziare le frasi, non usare sempre "Riduci", "Applica", "Incrementa".
-- Preferisci un tono discorsivo, chiaro, orientato alla pratica: cosa sentirebbe un producer? cosa manca nel club? cosa limita la resa?
-- Ogni azione deve sembrare un consiglio umano basato sull'esperienza ("valuta se...", "potrebbe aiutare...", "spesso in questo genere funziona...").
-- Non ripetere concetti già espressi nella stessa sezione.
-- Mantieni la lunghezza sotto controllo: 2–3 frasi per azione bastano.
+- Style must be direct, natural, like an experienced mix engineer.
+- Use technical values or ranges only when present or clearly implied.
+- Alternate the way you start sentences, do not always use "Riduci", "Applica", "Incrementa".
+- 2-3 sentences per action are enough.
+- Avoid duplicated concepts even with different wording.
 
 Output must be a single JSON object with this exact shape:
 
@@ -268,7 +342,7 @@ Output must be a single JSON object with this exact shape:
     {
       "title": "string",
       "description": "string",
-      "focus_area": "loudness" | "sub" | "lowmid" | "mid" | "high" | "stereo" | "structure" | "groove" | "arrangement" | "other",
+      "focus_area": "loudness" | "sub" | "lowmid" | "mid" | "high" | "stereo" | "stereo_high" | "vocals" | "hihats" | "percussions" | "transients" | "punch" | "structure" | "groove" | "arrangement" | "other",
       "priority": "low" | "medium" | "high"
     }
   ],
@@ -282,18 +356,14 @@ Output must be a single JSON object with this exact shape:
 }
 
 Respond ONLY with valid JSON. No markdown, no comments, no extra text.
-`;
-
-
-
+    `.trim();
 
     const userPrompt = `
 JSON payload from Tekkin Analyzer:
 
 ${JSON.stringify(payloadForModel, null, 2)}
-`;
+    `.trim();
 
-    // 4. chiamata al modello
     const openAiRes = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -346,21 +416,22 @@ ${JSON.stringify(payloadForModel, null, 2)}
       );
     }
 
-    // 5. sanitazione minima
     const summary = parsed.summary ?? "";
     const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
     const rawRiskFlags = parsed.meta?.risk_flags;
+
     const meta: AnalyzerAiMeta = {
       artistic_assessment: parsed.meta?.artistic_assessment ?? "",
       risk_flags: Array.isArray(rawRiskFlags)
-        ? rawRiskFlags.filter((flag): flag is string => typeof flag === "string")
+        ? rawRiskFlags.filter(
+            (flag): flag is string => typeof flag === "string"
+          )
         : [],
       predicted_rank_gain: parsed.meta?.predicted_rank_gain ?? null,
       label_fit: parsed.meta?.label_fit ?? null,
       structure_feedback: parsed.meta?.structure_feedback ?? null,
     };
 
-    // 6. salvo nel DB
     const { error: updateError } = await supabase
       .from("project_versions")
       .update({

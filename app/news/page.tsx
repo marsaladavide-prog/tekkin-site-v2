@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 export const dynamic = "force-dynamic";
 
 async function getInitial(filters: { q?: string; category?: string; source?: string }) {
-  const supabase = supabaseServer();
+  const supabase = await supabaseServer();
   let query = supabase
     .from("news")
     .select("id,title,slug,url,source,category,summary,created_at,image_url", {
@@ -34,16 +34,26 @@ async function getInitial(filters: { q?: string; category?: string; source?: str
   return { items: data || [], total: count ?? null };
 }
 
+type NewsPageSearchParams = {
+  q?: string;
+  category?: string;
+  source?: string;
+};
+
 export default async function NewsPage({
   searchParams,
 }: {
-  searchParams?: { q?: string; category?: string; source?: string };
+  // ⬅ qui: searchParams come Promise, compatibile col PageProps di Next
+  searchParams?: Promise<NewsPageSearchParams>;
 }) {
+  const resolved = (await searchParams) ?? {};
+
   const filters = {
-    q: (searchParams?.q || "").trim(),
-    category: (searchParams?.category || "").trim(),
-    source: (searchParams?.source || "").trim(),
+    q: (resolved.q || "").trim(),
+    category: (resolved.category || "").trim(),
+    source: (resolved.source || "").trim(),
   };
+
   const initial = await getInitial(filters);
 
   return (

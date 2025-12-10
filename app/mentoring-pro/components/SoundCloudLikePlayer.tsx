@@ -50,6 +50,7 @@ type SoundCloudLikePlayerProps = {
   artist?: string;
   genre?: string;
   initialComments?: CommentItem[];
+  artworkUrl?: string;
   allowRateChange?: boolean;
   allowLoop?: boolean;
 };

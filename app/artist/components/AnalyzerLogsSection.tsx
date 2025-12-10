@@ -1,7 +1,6 @@
 "use client";
 
 import { Info } from "lucide-react";
-import { AnalyzerCollapsibleSection } from "./AnalyzerCollapsibleSection";
 import { AnalyzerFixSuggestionsPanel } from "./AnalyzerFixSuggestionsPanel";
 import { getWarningBadgeClass } from "./analyzerDisplayUtils";
 import type {
@@ -37,8 +36,7 @@ export function AnalyzerLogsSection({
   feedbackText,
 }: AnalyzerLogsSectionProps) {
   return (
-    <AnalyzerCollapsibleSection title="Log Tekkin Analyzer e report completo">
-      <>
+    <div className="space-y-4">
         {warnings.length > 0 && (
           <section className="rounded-xl border border-white/12 bg-black/85 px-3.5 py-3">
             <div className="flex items-center gap-1.5">
@@ -164,7 +162,6 @@ export function AnalyzerLogsSection({
             </pre>
           </div>
         </div>
-      </>
-    </AnalyzerCollapsibleSection>
+    </div>
   );
 }

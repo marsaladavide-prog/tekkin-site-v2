@@ -1,7 +1,9 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Eye,
@@ -20,8 +22,7 @@ const gridPattern =
 
 export default function LoginPage() {
   const router = useRouter();
-  const params = useSearchParams();
-  const nextRoute = params.get("next") || "/mentoring-pro";
+  const [nextRoute, setNextRoute] = useState("/mentoring-pro");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -36,6 +37,12 @@ export default function LoginPage() {
   const canSubmit = emailValid && password.length >= 6 && !busy;
 
   // se gia loggato, vai a next
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setNextRoute(params.get("next") || "/mentoring-pro");
+  }, []);
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();

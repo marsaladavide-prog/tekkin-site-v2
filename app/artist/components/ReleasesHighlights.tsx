@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 type SpotifyRelease = {
   id: string;
   title: string;
@@ -11,38 +9,12 @@ type SpotifyRelease = {
   albumType: string | null; // "single", "album", "compilation", ecc
 };
 
-export function ReleasesHighlights() {
-  const [releases, setReleases] = useState<SpotifyRelease[]>([]);
-  const [loaded, setLoaded] = useState(false);
+type ReleasesHighlightsProps = {
+  releases: SpotifyRelease[];
+};
 
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const raw = localStorage.getItem("tekkin_artist_profile");
-      if (!raw) {
-        setLoaded(true);
-        return;
-      }
-
-      const profile = JSON.parse(raw);
-      const fromStorage = (profile.spotify_releases || []) as any[];
-
-      const mapped: SpotifyRelease[] = fromStorage.map((r) => ({
-        id: r.id,
-        title: r.title,
-        releaseDate: r.releaseDate,
-        coverUrl: r.coverUrl ?? null,
-        spotifyUrl: r.spotifyUrl ?? null,
-        albumType: r.albumType ?? null,
-      }));
-
-      setReleases(mapped);
-    } catch (err) {
-      console.error("Errore lettura spotify_releases da tekkin_artist_profile", err);
-    } finally {
-      setLoaded(true);
-    }
-  }, []);
+export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
+  const hasRealData = releases.length > 0;
 
   const gradientClasses = [
     "bg-gradient-to-br from-tekkin-primary via-black to-tekkin-accent",
@@ -63,7 +35,7 @@ export function ReleasesHighlights() {
     if (!rel.releaseDate) return "Spotify";
     try {
       const year = new Date(rel.releaseDate).getFullYear();
-      return `Spotify · ${year}`;
+      return `Spotify Жњ ${year}`;
     } catch {
       return "Spotify";
     }
@@ -74,8 +46,6 @@ export function ReleasesHighlights() {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  const hasDynamicReleases = loaded && releases.length > 0;
-
   return (
     <section className="mb-10">
       <div className="flex items-center justify-between mb-3">
@@ -83,7 +53,7 @@ export function ReleasesHighlights() {
           Main Releases & Highlights
         </h2>
         <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-500 dark:text-tekkin-muted">
-          <span>Sync: Spotify · Beatport</span>
+          <span>Sync: Spotify Жњ Beatport</span>
         </div>
       </div>
 
@@ -92,7 +62,7 @@ export function ReleasesHighlights() {
 
         <div className="overflow-x-auto pb-2">
           <div className="flex items-stretch gap-4 pt-4">
-            {hasDynamicReleases
+            {hasRealData
               ? releases.map((rel, idx) => {
                   const gradient =
                     gradientClasses[idx % gradientClasses.length];
@@ -165,7 +135,7 @@ export function ReleasesHighlights() {
                         Midnight Glitch
                       </p>
                       <p className="text-[11px] text-zinc-500 dark:text-tekkin-muted truncate">
-                        Tekkin Records · 2025
+                        Tekkin Records Жњ 2025
                       </p>
                     </div>
                   </div>

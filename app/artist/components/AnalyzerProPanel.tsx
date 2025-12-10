@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type {
   AnalyzerMetricsFields,
   AnalyzerResult,
@@ -22,134 +22,17 @@ import { evaluateTekkinStatus } from "@/lib/tekkinProfiles";
 import { AnalyzerOverviewSection } from "./AnalyzerOverviewSection";
 import { TekkinAiPlanSection } from "./TekkinAiPlanSection";
 import { AnalyzerDetailsSection } from "./AnalyzerDetailsSection";
-import { AnalyzerLogsSection } from "./AnalyzerLogsSection";
+import { AskAnalyzerAI } from "./AskAnalyzerAI";
 import type { AnalyzerReadinessIntent } from "./AnalyzerReadinessTag";
-import { getTekkinGenreLabel, TekkinGenreId } from "@/lib/constants/genres";
+import { sortByPriority } from "./analyzerActionUtils";
 import {
   formatBpm,
   getBrightnessLabel,
   getMatchBucket,
   getMixState,
+  getReferenceMatchPercent,
   getScoreLabel,
 } from "./analyzerDisplayUtils";
-
-const FIX_VISIBLE_LIMIT = 5;
-
-type FixPriority = "low" | "medium" | "high";
-
-const FIX_PRIORITY_ORDER: Record<FixPriority, number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
-
-function normalizeFixPriority(value?: string | null): FixPriority {
-  const normalized = (value ?? "medium").toLowerCase();
-  if (normalized === "high" || normalized === "low") {
-    return normalized;
-  }
-  return "medium";
-}
-
-function sortFixSuggestions<T extends { priority?: string | null }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const aScore = FIX_PRIORITY_ORDER[normalizeFixPriority(a.priority)];
-    const bScore = FIX_PRIORITY_ORDER[normalizeFixPriority(b.priority)];
-    if (aScore !== bScore) return aScore - bScore;
-    return 0;
-  });
-}
-
-function getReferenceGenreLabel(ref?: ReferenceAi | null): string | null {
-  if (!ref) return null;
-  if (ref.profile_label) return ref.profile_label;
-
-  if (ref.profile_key) {
-    try {
-      return getTekkinGenreLabel(ref.profile_key as TekkinGenreId) ?? ref.profile_key;
-    } catch {
-      return ref.profile_key;
-    }
-  }
-
-  return null;
-}
-
-function getReferenceMatchPercent(ref?: ReferenceAi | null): number | null {
-  if (!ref) return null;
-
-  if (typeof ref.model_match?.match_percent === "number") {
-    return Math.round(ref.model_match.match_percent);
-  }
-
-  if (typeof ref.match_ratio === "number") {
-    return Math.round(ref.match_ratio * 100);
-  }
-
-  return null;
-}
-
-function TekkinGenreMatchCard({ referenceAi }: { referenceAi?: ReferenceAi | null }) {
-  if (!referenceAi) return null;
-
-  const label = getReferenceGenreLabel(referenceAi);
-  const matchPercent = getReferenceMatchPercent(referenceAi);
-
-  if (!label && matchPercent == null) return null;
-
-  let matchTag: "weak" | "medium" | "strong" = "weak";
-  if (matchPercent != null) {
-    if (matchPercent >= 80) {
-      matchTag = "strong";
-    } else if (matchPercent >= 60) {
-      matchTag = "medium";
-    }
-  }
-
-  const tagLabel =
-    matchTag === "strong"
-      ? "Match forte"
-      : matchTag === "medium"
-      ? "Match medio"
-      : "Match debole";
-
-  return (
-    <section className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs md:text-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-white/60">
-            Genere tecnico probabile
-          </p>
-          {label && (
-            <p className="mt-1 text-sm font-semibold md:text-base text-white">
-              {label}
-            </p>
-          )}
-          <p className="mt-2 text-[11px] leading-snug text-white/70">
-            Questo match è basato solo sul profilo Tekkin (bande, loudness,
-            crest), non sui metadata né sul gusto musicale.
-          </p>
-        </div>
-
-        <div className="flex flex-col items-end gap-1">
-          {matchPercent != null && (
-            <div className="text-right">
-              <p className="text-xl font-bold leading-none md:text-2xl text-white">
-                {matchPercent}%
-              </p>
-              <p className="text-[10px] uppercase tracking-[0.16em] text-white/60">
-                match
-              </p>
-            </div>
-          )}
-          <span className="mt-1 inline-flex rounded-full bg-black/40 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-white/70">
-            {tagLabel}
-          </span>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 type ReadinessTag = {
   label: string;
@@ -237,7 +120,6 @@ type AnalyzerProPanelProps = {
   aiActions?: AnalyzerAiAction[] | null;
   aiMeta?: AnalyzerAiMeta | null;
   aiLoading?: boolean;
-  aiError?: string | null;
   onAskAi?: () => void;
 };
 
@@ -258,7 +140,6 @@ export function AnalyzerProPanel({
   aiActions,
   aiMeta,
   aiLoading,
-  aiError,
   onAskAi,
 }: AnalyzerProPanelProps) {
   const modeLabel = version.analyzer_mode || "Master";
@@ -270,12 +151,8 @@ export function AnalyzerProPanel({
   const mixState = getMixState(version.lufs);
   const scoreLabel = getScoreLabel(version.overall_score);
   const refAi = referenceAi ?? version.reference_ai ?? null;
-  const effectiveLufs =
-    version.lufs ?? mixV1?.metrics?.loudness?.integrated_lufs ?? null;
-
-  const [showAllFix, setShowAllFix] = useState(false);
   const fixSuggestions = version.fix_suggestions ?? [];
-  const sortedFixSuggestions = sortFixSuggestions(fixSuggestions);
+  const sortedFixSuggestions = sortByPriority(fixSuggestions);
 
   const modelMatch = refAi?.model_match || null;
   const matchPercent: number | null =
@@ -290,9 +167,6 @@ export function AnalyzerProPanel({
     overallScore: version.overall_score,
     referenceAi: refAi,
   });
-
-  const effectiveStructureBpm =
-    version.analyzer_bpm ?? mixV1?.metrics?.structure?.bpm ?? null;
 
   const analyzerKeyLabel =
     version.analyzer_key && version.analyzer_key.trim().length > 0
@@ -388,35 +262,72 @@ export function AnalyzerProPanel({
     version.analyzer_spectral_centroid_hz,
   ]);
 
-const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
+  const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
 
-  if (!hasAnalyzerData) {
-  return (
-    <section className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-6 text-sm">
-      <h3 className="text-base font-semibold">Lancia la tua prima analisi</h3>
-      <p className="mt-2 text-[13px] text-white/70">
-        Carica una versione audio qui sopra e clicca{" "}
-        <span className="font-semibold">“Analyze”</span>. Tekkin Analyzer PRO
-        ti restituirà:
-      </p>
-      <ul className="mt-2 list-disc pl-5 text-[13px] text-white/70">
-        <li>Tekkin Score (stato globale del brano).</li>
-        <li>Match Tekkin rispetto al genere scelto.</li>
-        <li>Piano d’azione con i 3 interventi principali.</li>
-      </ul>
-      <p className="mt-3 text-[12px] text-white/50">
-        Suggerimento: usa una bounce stereo del master o del premaster senza
-        limiter brickwall troppo aggressivo.
-      </p>
-    </section>
-  );
-}
+    if (!hasAnalyzerData) {
+    return (
+      <section className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-6 text-sm">
+        <h3 className="text-base font-semibold">Lancia la tua prima analisi</h3>
+        <p className="mt-2 text-[13px] text-white/70">
+          Carica una versione audio qui sopra e clicca{" "}
+          <span className="font-semibold">Analyze</span>. Tekkin Analyzer PRO ti
+          restituir?:
+        </p>
+        <ul className="mt-2 list-disc pl-5 text-[13px] text-white/70">
+          <li>Tekkin Score (stato globale del brano).</li>
+          <li>Match Tekkin rispetto al genere scelto.</li>
+          <li>Piano d'azione con i 3 interventi principali.</li>
+        </ul>
+        <p className="mt-3 text-[12px] text-white/50">
+          Suggerimento: usa una bounce stereo del master o del premaster senza
+          limiter brickwall troppo aggressivo.
+        </p>
+      </section>
+    );
+  }
 
   const feedbackText = version.feedback ?? "";
   const aiSummaryText = aiSummary ?? version.analyzer_ai_summary ?? null;
   const aiActionsList = aiActions ?? version.analyzer_ai_actions ?? null;
   const aiMetaData = aiMeta ?? version.analyzer_ai_meta ?? null;
   const { label: matchLabel, description: matchDescription } = getMatchBucket(matchPercent);
+  const issueHighlights = useMemo(() => {
+    const highlights: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (text?: string | null) => {
+      if (!text) return;
+      const trimmed = text.trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      highlights.push(trimmed);
+    };
+
+    for (const suggestion of sortedFixSuggestions) {
+      push(suggestion.issue);
+      if (highlights.length >= 3) {
+        return highlights;
+      }
+    }
+
+    for (const warning of warningsList) {
+      push(warning.message);
+      if (highlights.length >= 3) {
+        return highlights;
+      }
+    }
+
+    if (aiActionsList) {
+      for (const action of aiActionsList) {
+        push(action.title);
+        if (highlights.length >= 3) {
+          return highlights;
+        }
+      }
+    }
+
+    return highlights;
+  }, [sortedFixSuggestions, warningsList, aiActionsList]);
 
   const hasAiData =
     Boolean(aiSummaryText?.trim()) ||
@@ -437,9 +348,14 @@ const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
       }
     : null;
 
+  const handleGenerateAiForVersion = () => {
+    onAskAi?.();
+  };
+
   return (
     <section className="w-full rounded-2xl border border-white/10 bg-black/70 p-4 md:p-5 shadow-xl shadow-black/50">
-      <div className="space-y-6">
+      <div className="space-y-8">
+        {/* A. Overview compatta */}
         <AnalyzerOverviewSection
           versionName={version.version_name}
           createdAt={version.created_at}
@@ -454,14 +370,25 @@ const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
           lufs={version.lufs}
           bpm={version.analyzer_bpm}
           quickBullets={quickBullets}
+          issueHighlights={issueHighlights}
+          referenceAi={refAi}
+          matchPercent={matchPercent}
+          matchLabel={matchLabel}
+          matchDescription={matchDescription}
         />
-        <TekkinGenreMatchCard referenceAi={refAi} />
+
+        {/* B. Piano Tekkin AI */}
         <TekkinAiPlanSection
-          coach={aiCoach}
-          loadingAi={aiLoading}
-          error={aiError}
-          onGenerateAi={onAskAi}
+          aiCoach={aiCoach}
+          isGenerating={Boolean(aiLoading)}
+          hasAnalyzerResult={Boolean(analyzer)}
+          onGenerateAi={handleGenerateAiForVersion}
         />
+
+        {/* C. Q&A - UNA sola volta, qui */}
+        <AskAnalyzerAI versionId={version.id} />
+
+        {/* D. Dettaglio tecnico collassato */}
         <AnalyzerDetailsSection
           mixHealthScore={mixHealthScore}
           mixHealthBreakdownEntries={mixHealthBreakdownEntries}
@@ -480,17 +407,8 @@ const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
           matchLabel={matchLabel}
           matchDescription={matchDescription}
           readiness={readiness}
-        />
-        <AnalyzerLogsSection
+          mixV1={mixV1 ?? analyzer?.mix_v1 ?? null}
           warnings={warningsList}
-          quickBullets={quickBullets}
-          mixV1={mixV1}
-          effectiveLufs={effectiveLufs}
-          effectiveStructureBpm={effectiveStructureBpm}
-          fixSuggestions={sortedFixSuggestions}
-          showAllFix={showAllFix}
-          visibleFixLimit={FIX_VISIBLE_LIMIT}
-          onToggleFixSuggestions={() => setShowAllFix((prev) => !prev)}
           feedbackText={feedbackText}
         />
       </div>

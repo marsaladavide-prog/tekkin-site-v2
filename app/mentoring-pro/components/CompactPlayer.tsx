@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import { Play, Pause, Upload, Volume2, VolumeX, Download } from "lucide-react";
 
-export default function CompactPlayer(props) {
+type CompactPlayerProps = {
+  title?: string;
+};
+
+export default function CompactPlayer(props: CompactPlayerProps) {
   const { title = "Nuova traccia" } = props || {};
 
   const waveformRef = useRef<HTMLDivElement | null>(null);
@@ -32,7 +36,6 @@ export default function CompactPlayer(props) {
       barWidth: 2,
       barGap: 2,
       height: 80,
-      responsive: true,
     });
 
     ws.on("ready", () => {

@@ -1,8 +1,68 @@
 // app/api/profile/me/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { getSupabaseAdmin } from "@/app/api/artist/profile";
+import type { AdminSupabaseClient } from "@/types/supabase";
+
+function extractSpotifyId(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const normalized = url.split("?")[0];
+    const match = normalized.match(/artist\/([0-9A-Za-z]+)$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureArtistSync(
+  admin: AdminSupabaseClient,
+  userId: string,
+  spotifyUrl: string | null
+) {
+  await admin
+    .from("artist_sync_queue")
+    .upsert(
+      {
+        artist_id: userId,
+        status: "pending",
+        next_run_at: new Date().toISOString(),
+        last_error: null,
+      },
+      { onConflict: "artist_id" }
+    );
+
+  if (spotifyUrl) {
+    await admin
+      .from("artists")
+      .update({
+        spotify_url: spotifyUrl,
+        spotify_id: extractSpotifyId(spotifyUrl),
+      })
+      .eq("user_id", userId)
+      .limit(1);
+  }
+}
 
 export const runtime = "nodejs";
+
+const PROFILE_COLUMNS = `
+  id,
+  artist_name,
+  main_genres,
+  city,
+  country,
+  bio_short,
+  open_to_collab,
+  open_to_promo,
+  photo_url,
+  spotify_url,
+  instagram_url,
+  soundcloud_url,
+  beatport_url,
+  beatstats_url,
+  apple_music_url
+`;
 
 export async function GET() {
   try {
@@ -21,22 +81,30 @@ export async function GET() {
       );
     }
 
+    const defaultProfile = {
+      id: user.id,
+      auth_user_id: user.id,
+      artist_name: null,
+      main_genres: [],
+      city: null,
+      country: null,
+      bio_short: null,
+      open_to_collab: true,
+      open_to_promo: true,
+      photo_url: null,
+      spotify_url: null,
+      instagram_url: null,
+      soundcloud_url: null,
+      beatport_url: null,
+      beatstats_url: null,
+      apple_music_url: null,
+    };
+
     const { data, error } = await supabase
       .from("users_profile")
-      .select(
-        `
-        id,
-        artist_name,
-        main_genres,
-        city,
-        country,
-        bio_short,
-        open_to_collab,
-        open_to_promo
-      `
-      )
+      .select(PROFILE_COLUMNS)
       .eq("user_id", user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error("[GET /api/profile/me] supabase error:", error);
@@ -50,7 +118,7 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json(data, { status: 200 });
+    return NextResponse.json(data ?? defaultProfile, { status: 200 });
   } catch (err: any) {
     console.error("[GET /api/profile/me] unexpected error:", err);
     return NextResponse.json(
@@ -87,24 +155,53 @@ export async function PUT(req: NextRequest) {
       bio_short,
       open_to_collab,
       open_to_promo,
+      photo_url,
+      spotify_url,
+      instagram_url,
+      soundcloud_url,
+      beatport_url,
+      beatstats_url,
+      apple_music_url,
     } = body;
 
+    const normalizeString = (v: unknown) =>
+      typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+
+    const normalizeStringArray = (v: unknown) =>
+      Array.isArray(v) && v.length > 0 ? v : null;
+
+    const normalizeBoolean = (v: unknown, fallback: boolean) =>
+      typeof v === "boolean" ? v : fallback;
+
     const updatePayload: Record<string, any> = {
-      artist_name: artist_name ?? null,
-      main_genres: Array.isArray(main_genres) ? main_genres : null,
-      city: city ?? null,
-      country: country ?? null,
-      bio_short: bio_short ?? null,
-      open_to_collab:
-        typeof open_to_collab === "boolean" ? open_to_collab : true,
-      open_to_promo:
-        typeof open_to_promo === "boolean" ? open_to_promo : true,
+      artist_name: normalizeString(artist_name),
+      main_genres: normalizeStringArray(main_genres),
+      city: normalizeString(city),
+      country: normalizeString(country),
+      bio_short: normalizeString(bio_short),
+      open_to_collab: normalizeBoolean(open_to_collab, true),
+      open_to_promo: normalizeBoolean(open_to_promo, true),
+
+      // qui usiamo photo_url (colonna reale), NON artist_photo_url
+      photo_url: normalizeString(photo_url),
+
+      spotify_url: normalizeString(spotify_url),
+      instagram_url: normalizeString(instagram_url),
+      soundcloud_url: normalizeString(soundcloud_url),
+      beatport_url: normalizeString(beatport_url),
+      beatstats_url: normalizeString(beatstats_url),
+      apple_music_url: normalizeString(apple_music_url),
     };
 
-    const { error: updateError } = await supabase
+    const {
+      data: updated,
+      error: updateError,
+    } = await supabase
       .from("users_profile")
       .update(updatePayload)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .select(PROFILE_COLUMNS)
+      .maybeSingle();
 
     if (updateError) {
       console.error("[PUT /api/profile/me] supabase error:", updateError);
@@ -118,40 +215,44 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const { data: updated, error: selectError } = await supabase
+    const admin = getSupabaseAdmin();
+
+    if (updated) {
+      await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
+      return NextResponse.json(updated, { status: 200 });
+    }
+
+    const { data: inserted, error: insertError } = await admin
       .from("users_profile")
-      .select(
-        `
-        id,
-        artist_name,
-        main_genres,
-        city,
-        country,
-        bio_short,
-        open_to_collab,
-        open_to_promo
-      `
+      .upsert(
+        {
+          ...updatePayload,
+          id: user.id,
+          user_id: user.id,
+          auth_user_id: user.id,
+        },
+        { onConflict: "id" }
       )
-      .eq("user_id", user.id)
+      .select(PROFILE_COLUMNS)
       .single();
 
-    if (selectError) {
+    if (insertError) {
       console.error(
-        "[PUT /api/profile/me] select after update error:",
-        selectError
+        "[PUT /api/profile/me] admin supabase error:",
+        insertError
       );
       return NextResponse.json(
         {
-          error:
-            "Profilo aggiornato ma errore rileggendo i dati.",
-          detail: selectError.message,
-          code: selectError.code,
+          error: "Errore salvando il profilo.",
+          detail: insertError.message,
+          code: insertError.code,
         },
         { status: 500 }
       );
     }
 
-    return NextResponse.json(updated, { status: 200 });
+    await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
+    return NextResponse.json(inserted, { status: 200 });
   } catch (err: any) {
     console.error("[PUT /api/profile/me] unexpected error:", err);
     return NextResponse.json(

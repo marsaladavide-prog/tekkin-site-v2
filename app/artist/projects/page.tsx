@@ -4,6 +4,16 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
+
+type ProjectVersionRow = {
+  id: string;
+  version_name: string | null;
+  created_at: string;
+  overall_score: number | null;
+  lufs: number | null;
+  mix_type: TekkinMixType | null;
+};
 
 type ProjectRow = {
   id: string;
@@ -16,6 +26,7 @@ type ProjectRow = {
   description: string | null;
   latestVersionCreatedAt: string | null;
   version_count: number;
+  versions: ProjectVersionRow[];
 };
 
 type SignalArtist = {
@@ -34,7 +45,10 @@ const buildProjectsSelectQuery = (includeProjectInfo: boolean) => `
             project_versions (
               id,
               version_name,
-              created_at
+              created_at,
+              overall_score,
+              lufs,
+              mix_type
             )${includeProjectInfo ? `,
             cover_url,
             description` : ""}
@@ -47,6 +61,23 @@ const shouldExcludeProjectInfo = (error: {
   if (!error) return false;
   const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
   return message.includes("cover_url") || message.includes("description");
+};
+
+const MIX_TYPE_LABELS: Record<TekkinMixType, string> = {
+  master: "MASTER",
+  premaster: "PREMASTER",
+};
+
+const getMixTypeBadgeLabel = (mixType?: TekkinMixType | null) => {
+  if (!mixType) return null;
+  return MIX_TYPE_LABELS[mixType] ?? mixType.toUpperCase();
+};
+
+const normalizeMixType = (value?: string | null): TekkinMixType | null => {
+  if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) {
+    return value as TekkinMixType;
+  }
+  return null;
 };
 
 export default function ProjectsPage() {
@@ -116,17 +147,27 @@ export default function ProjectsPage() {
 
         const mapped: ProjectRow[] =
           data?.map((p: any) => {
-            const versions = (p.project_versions ?? []) as any[];
+            const rawVersions = (p.project_versions ?? []) as any[];
+            const sortedVersions: ProjectVersionRow[] = [...rawVersions]
+              .sort(
+                (a, b) =>
+                  new Date(b.created_at).getTime() -
+                  new Date(a.created_at).getTime()
+              )
+              .map((version) => ({
+                id: version.id,
+                version_name: version.version_name ?? null,
+                created_at: version.created_at,
+                overall_score:
+                  typeof version.overall_score === "number"
+                    ? version.overall_score
+                    : null,
+                lufs:
+                  typeof version.lufs === "number" ? version.lufs : null,
+                mix_type: normalizeMixType(version.mix_type ?? null),
+              }));
 
-            // se arrivano non ordinati, prendo comunque la piu recente
-            const latestVersion =
-              versions.length > 0
-                ? [...versions].sort(
-                    (a, b) =>
-                      new Date(b.created_at).getTime() -
-                      new Date(a.created_at).getTime()
-                  )[0]
-                : null;
+            const latestVersion = sortedVersions[0] ?? null;
 
             return {
               id: p.id,
@@ -138,7 +179,8 @@ export default function ProjectsPage() {
               cover_url: p.cover_url ?? null,
               description: p.description ?? null,
               latestVersionCreatedAt: latestVersion?.created_at ?? null,
-              version_count: versions.length,
+              version_count: sortedVersions.length,
+              versions: sortedVersions,
             };
           }) ?? [];
 
@@ -462,314 +504,419 @@ export default function ProjectsPage() {
       {!loading && hasProjects && (
         <div className="space-y-4">
           {projects.map((p, index) => {
-            const lastActivityDate = p.latestVersionCreatedAt ?? p.created_at;
+            const versions = p.versions;
+            const latestVersion = versions[0] ?? null;
+            const lastActivityDate =
+              latestVersion?.created_at ?? p.created_at;
             const lastActivityLabel = lastActivityDate
               ? new Date(lastActivityDate).toLocaleDateString("it-IT")
               : "n.d.";
-            const descriptionSnippet = p.description
-              ? p.description.length > 110
-                ? `${p.description.slice(0, 110).trim()}…`
-                : p.description
-              : "Nessuna descrizione disponibile.";
+            const summaryChunks: string[] = [];
+            if (latestVersion?.version_name) {
+              summaryChunks.push(latestVersion.version_name);
+            }
+            if (latestVersion?.lufs != null) {
+              summaryChunks.push(`${latestVersion.lufs.toFixed(1)} LUFS`);
+            }
+            if (latestVersion?.overall_score != null) {
+              summaryChunks.push(
+                `Tekkin ${latestVersion.overall_score.toFixed(1)}`
+              );
+            }
+            const summaryLine =
+              summaryChunks.length > 0
+                ? summaryChunks.join(" - ")
+                : "Versione piu recente non disponibile";
+            const versionCountLabel = `${versions.length} versione${versions.length === 1 ? "" : "i"}`;
+            const latestCreatedLabel = latestVersion?.created_at
+              ? new Date(latestVersion.created_at).toLocaleDateString("it-IT")
+              : "n.d.";
+
             return (
               <article
                 key={p.id}
-                className="rounded-2xl border border-white/5 bg-black/40 p-5 space-y-4"
+                className="rounded-2xl border border-white/5 bg-black/40 p-5 shadow-inner"
               >
-                <div className="relative h-36 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-black to-black/80">
-                  {p.cover_url ? (
-                    <img
-                      src={p.cover_url}
-                      alt={`Cover ${p.title}`}
-                      className="absolute inset-0 h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] uppercase tracking-[0.3em] text-white/40">
-                      <span>Cover mancante</span>
-                      <span>Aggiungi un artwork</span>
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/90"></div>
-                  <div className="absolute inset-0 flex flex-col justify-between p-4">
-                    <p className="text-xs text-white/70 leading-tight">
-                      {descriptionSnippet}
-                    </p>
-                    <div className="flex flex-wrap gap-3 text-[10px] uppercase tracking-[0.3em] text-white/60">
-                      <span>Ultima attività: {lastActivityLabel}</span>
-                      <span>Versioni: {p.version_count}</span>
-                    </div>
-                  </div>
-                </div>
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 pb-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-white/50">
-                    Project #{index + 1}
-                  </p>
-                  {editingProjectId === p.id ? (
-                    <form
-                      onSubmit={(event) => handleProjectTitleSubmit(event, p)}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      <input
-                        value={projectTitleDraft}
-                        onChange={(event) =>
-                          setProjectTitleDraft(event.target.value)
-                        }
-                        className="min-w-[220px] flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
-                        placeholder="Nuovo nome"
+                <div className="space-y-5">
+                  <div className="relative h-36 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900 via-black to-black/80">
+                    {p.cover_url ? (
+                      <img
+                        src={p.cover_url}
+                        alt={`Cover ${p.title}`}
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
-                      <button
-                        type="submit"
-                        disabled={projectTitleSaving}
-                        className="rounded-full px-3 py-1 text-xs font-semibold text-black bg-[var(--accent)] disabled:opacity-60"
-                      >
-                        {projectTitleSaving ? "Salvando..." : "Salva"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={cancelEditProject}
-                        className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                      >
-                        Annulla
-                      </button>
-                    </form>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-3">
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-[10px] uppercase tracking-[0.3em] text-white/40">
+                        <span>Cover mancante</span>
+                        <span>Aggiungi un artwork</span>
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/90"></div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 pb-3">
+                      <div className="min-w-0 space-y-2">
+                        <p className="text-[10px] uppercase tracking-[0.3em] text-white/50">
+                          Project #{index + 1}
+                        </p>
+                        {editingProjectId === p.id ? (
+                          <form
+                            onSubmit={(event) => handleProjectTitleSubmit(event, p)}
+                            className="flex flex-wrap items-center gap-2"
+                          >
+                            <input
+                              value={projectTitleDraft}
+                              onChange={(event) =>
+                                setProjectTitleDraft(event.target.value)
+                              }
+                              className="min-w-[220px] flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
+                              placeholder="Nuovo nome"
+                            />
+                            <button
+                              type="submit"
+                              disabled={projectTitleSaving}
+                              className="rounded-full px-3 py-1 text-xs font-semibold text-black bg-[var(--accent)] disabled:opacity-60"
+                            >
+                              {projectTitleSaving ? "Salvando..." : "Salva"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditProject}
+                              className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                            >
+                              Annulla
+                            </button>
+                          </form>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <Link
+                              href={`/artist/projects/${p.id}`}
+                              className="text-lg font-semibold text-white hover:underline"
+                            >
+                              {p.title}
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => startEditProject(p)}
+                              className="text-[11px] text-white/60 hover:text-[var(--accent)]"
+                            >
+                              Rinomina
+                            </button>
+                          </div>
+                        )}
+                        {editingProjectId === p.id && projectTitleError && (
+                          <p className="text-[11px] text-red-400">
+                            {projectTitleError}
+                          </p>
+                        )}
+                        {p.description && (
+                          <p className="text-[12px] text-white/60">
+                            {p.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-3 text-[11px] text-white/60">
+                          <span>Ultima attivita: {lastActivityLabel}</span>
+                          <span>{versionCountLabel}</span>
+                        </div>
+                      </div>
+                      <span className="inline-flex items-center rounded-full border border-white/15 px-3 py-1 text-xs uppercase tracking-wide text-white/80">
+                        {p.status ?? "UNKNOWN"}
+                      </span>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-[10px] uppercase tracking-[0.3em] text-white/50">
+                            Versione piu recente
+                          </p>
+                          {editingVersionProjectId === p.id ? (
+                            <form
+                              onSubmit={(event) =>
+                                handleVersionNameSubmit(event, p)
+                              }
+                              className="flex flex-wrap items-center gap-2"
+                            >
+                              <input
+                                value={versionNameDraft}
+                                onChange={(event) =>
+                                  setVersionNameDraft(event.target.value)
+                                }
+                                className="min-w-[180px] flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
+                                placeholder="Nuovo nome versione"
+                              />
+                              <button
+                                type="submit"
+                                disabled={versionNameSaving}
+                                className="rounded-full px-3 py-1 text-xs font-semibold text-black bg-[var(--accent)] disabled:opacity-60"
+                              >
+                                {versionNameSaving ? "Salvando..." : "Salva"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEditVersion}
+                                className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                              >
+                                Annulla
+                              </button>
+                            </form>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-lg font-semibold text-white">
+                                {latestVersion?.version_name ?? "n.a."}
+                              </span>
+                              {latestVersion?.mix_type && (
+                                <span className="rounded-full border border-white/15 px-3 py-0.5 text-[10px] uppercase tracking-[0.3em] text-white/70">
+                                  {getMixTypeBadgeLabel(latestVersion.mix_type)}
+                                </span>
+                              )}
+                              {p.latestVersionId && (
+                                <button
+                                  type="button"
+                                  onClick={() => startEditVersion(p)}
+                                  className="text-[11px] uppercase tracking-[0.3em] text-white/60 hover:text-[var(--accent)]"
+                                >
+                                  Rinomina versione
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {editingVersionProjectId === p.id && versionNameError && (
+                            <p className="text-[11px] text-red-400">
+                              {versionNameError}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-white/60">
+                          {latestVersion
+                            ? `Data: ${latestCreatedLabel}`
+                            : "Nessuna versione"}
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm text-white/70">{summaryLine}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 border-t border-white/5 pt-3">
                       <Link
                         href={`/artist/projects/${p.id}`}
-                        className="text-lg font-semibold text-white hover:underline"
+                        className="rounded-full border border-white/20 px-4 py-1 text-[11px] text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
                       >
-                        {p.title}
+                        Apri project
                       </Link>
                       <button
                         type="button"
-                        onClick={() => startEditProject(p)}
-                        className="text-[11px] text-white/60 hover:text-[var(--accent)]"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setConfirmProject(p);
+                        }}
+                        className="flex items-center justify-center rounded-full border border-red-500/40 px-3 py-1 text-[11px] text-red-400 hover:bg-red-500/10"
+                        aria-label={`Elimina ${p.title}`}
                       >
-                        Rinomina
-                      </button>
-                    </div>
-                  )}
-                  {editingProjectId === p.id && projectTitleError && (
-                    <p className="text-[11px] text-red-400">
-                      {projectTitleError}
-                    </p>
-                  )}
-                </div>
-                <span className="inline-flex items-center rounded-full border border-white/15 px-3 py-1 text-xs uppercase tracking-wide text-white/80">
-                  {p.status ?? "UNKNOWN"}
-                </span>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-                <div className="min-w-[220px] space-y-1">
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-white/50">
-                    Latest version
-                  </p>
-                  <p className="text-lg font-semibold text-white">
-                    {p.version_name ?? "n.a."}
-                  </p>
-                  <p className="text-[11px] text-white/60">
-                    {p.latestVersionId
-                      ? `ID: ${p.latestVersionId}`
-                      : "Nessuna versione disponibile"}
-                  </p>
-                </div>
-                <p className="text-xs text-white/60">
-                  Creato il {new Date(p.created_at).toLocaleDateString("it-IT")}
-                </p>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-white/5 pt-4">
-                <div className="min-w-0 space-y-2">
-                  {editingVersionProjectId === p.id ? (
-                    <form
-                      onSubmit={(event) => handleVersionNameSubmit(event, p)}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      <input
-                        value={versionNameDraft}
-                        onChange={(event) =>
-                          setVersionNameDraft(event.target.value)
-                        }
-                        className="min-w-[180px] flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
-                        placeholder="Nuovo nome versione"
-                      />
-                      <button
-                        type="submit"
-                        disabled={versionNameSaving}
-                        className="rounded-full px-3 py-1 text-xs font-semibold text-black bg-[var(--accent)] disabled:opacity-60"
-                      >
-                        {versionNameSaving ? "Salvando..." : "Salva"}
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={cancelEditVersion}
-                        className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        onClick={() => {
+                          setSignalProjectId(p.id);
+                          setSignalPanelProjectId((prev) =>
+                            prev === p.id ? null : p.id
+                          );
+                        }}
+                        className={`rounded-full px-4 py-1 text-[11px] font-semibold ${
+                          signalPanelProjectId === p.id
+                            ? "bg-white text-black"
+                            : "border border-white/20 text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        }`}
                       >
-                        Annulla
+                        {signalPanelProjectId === p.id
+                          ? "Chiudi Signal Tekkin"
+                          : "Signal Tekkin"}
                       </button>
-                    </form>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm text-white/80">
-                        {p.version_name ?? "n.a."}
-                      </span>
-                      {p.latestVersionId && (
-                        <button
-                          type="button"
-                          onClick={() => startEditVersion(p)}
-                          className="text-[11px] text-white/60 hover:text-[var(--accent)]"
-                        >
-                          Rinomina versione
-                        </button>
-                      )}
                     </div>
-                  )}
-                  {editingVersionProjectId === p.id && versionNameError && (
-                    <p className="text-[11px] text-red-400">{versionNameError}</p>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link
-                    href={`/artist/projects/${p.id}`}
-                    className="rounded-full border border-white/15 px-4 py-1 text-[11px] text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    Apri
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeleteError(null);
-                      setConfirmProject(p);
-                    }}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-500/40 text-red-400 hover:bg-red-500/10"
-                    aria-label={`Elimina ${p.title}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSignalProjectId(p.id);
-                      setSignalPanelProjectId((prev) =>
-                        prev === p.id ? null : p.id
-                      );
-                    }}
-                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${
-                      signalPanelProjectId === p.id
-                        ? "bg-white text-black"
-                        : "border border-white/20 text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    }`}
-                  >
-                    {signalPanelProjectId === p.id
-                      ? "Chiudi Signal Tekkin"
-                      : "Signal Tekkin 🔊"}
-                  </button>
-                </div>
-              </div>
-              {signalPanelProjectId === p.id && (
-                <form
-                  onSubmit={handleSendSignal}
-                  className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-gradient-to-br from-sky-500/10 via-blue-900/20 to-slate-900/70 p-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-[0.3em] text-white/60">
-                        Signal Tekkin · super funzione
-                      </p>
-                      <p className="text-sm font-semibold text-white">
-                        Promo & collab diretti agli artisti Discovery
-                      </p>
-                      <p className="text-[11px] text-white/50">
-                        Project: {p.title}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSignalPanelProjectId(null)}
-                      className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/60 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    >
-                      Chiudi
-                    </button>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="flex flex-col gap-1 text-[11px] font-semibold text-white/60">
-                      Artista Tekkin
-                      <select
-                        value={signalArtistId}
-                        onChange={(event) => setSignalArtistId(event.target.value)}
-                        disabled={signalLoadingArtists || signalArtists.length === 0}
-                        className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
-                      >
-                        {signalLoadingArtists && (
-                          <option value="">Caricamento artisti...</option>
+
+                    <details className="group mt-4 rounded-2xl border border-white/10 bg-black/40">
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-white transition hover:text-[var(--accent)]">
+                        <span>Versioni ({versions.length})</span>
+                        <span className="text-[11px] text-white/60">
+                          {versions.length
+                            ? "Piu recenti in cima"
+                            : "Ancora nessuna versione"}
+                        </span>
+                      </summary>
+                      <div className="space-y-3 px-4 pb-4 pt-2">
+                        {versions.length === 0 ? (
+                          <p className="text-[11px] text-white/60">
+                            Carica una versione per vedere i dati Tekkin.
+                          </p>
+                        ) : (
+                          versions.map((version) => {
+                            const versionDate = version.created_at
+                              ? new Date(
+                                  version.created_at
+                                ).toLocaleDateString("it-IT")
+                              : "n.d.";
+                            const lufsLabel =
+                              version.lufs != null
+                                ? `${version.lufs.toFixed(1)} LUFS`
+                                : "LUFS n.d.";
+                            const scoreLabel =
+                              version.overall_score != null
+                                ? `Tekkin ${version.overall_score.toFixed(1)}`
+                                : "Tekkin n.d.";
+                            const badge = getMixTypeBadgeLabel(version.mix_type);
+                            return (
+                              <div
+                                key={version.id}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/60 px-3 py-2 text-[11px] text-white/70"
+                              >
+                                <div className="min-w-0 space-y-1">
+                                  <p className="text-sm font-semibold text-white">
+                                    {version.version_name ?? "Versione senza nome"}
+                                  </p>
+                                  <p className="text-[10px] text-white/50">
+                                    {versionDate}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span>{lufsLabel}</span>
+                                  <span>{scoreLabel}</span>
+                                  {badge && (
+                                    <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] text-white/70">
+                                      {badge}
+                                    </span>
+                                  )}
+                                  <Link
+                                    href={`/artist/projects/${p.id}?version_id=${version.id}`}
+                                    className="rounded-full border border-white/15 px-3 py-1 text-[11px] text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                                  >
+                                    Apri
+                                  </Link>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSignalProjectId(p.id);
+                                      setSignalPanelProjectId((prev) =>
+                                        prev === p.id ? null : p.id
+                                      );
+                                    }}
+                                    className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                                  >
+                                    Signal Tekkin
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
                         )}
-                        {!signalLoadingArtists &&
-                          signalArtists.length === 0 && (
-                            <option value="">
-                              Nessun artista Tekkin disponibile al momento
-                            </option>
-                          )}
-                        {signalArtists.map((artist) => (
-                          <option key={artist.id} value={artist.id}>
-                            {artist.artist_name}
-                            {artist.main_genres?.[0]
-                              ? ` - ${artist.main_genres[0]}`
-                              : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="flex flex-col gap-1 text-[11px] font-semibold text-white/60">
-                      <span>Tipo di richiesta</span>
-                      <div className="flex gap-2">
-                        {(["collab", "promo"] as const).map((kind) => (
-                          <button
-                            key={kind}
-                            type="button"
-                            onClick={() => setSignalKind(kind)}
-                            className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                              signalKind === kind
-                                ? "bg-white text-black"
-                                : "border border-white/20 text-white/60"
-                            }`}
-                          >
-                            {kind === "collab" ? "Collab" : "Promo"}
-                          </button>
-                        ))}
                       </div>
-                    </div>
-                  </div>
-                  <label className="flex flex-col gap-2 text-[11px] font-semibold text-white/60">
-                    Messaggio (opzionale)
-                    <textarea
-                      value={signalMessage}
-                      onChange={(event) => setSignalMessage(event.target.value)}
-                      className="h-24 rounded-2xl bg-black/60 border border-white/10 p-3 text-sm text-white placeholder:text-white/40"
-                      placeholder="Descrivi in poche righe la release o l'opportunità"
-                    />
-                  </label>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="submit"
-                      disabled={
-                        signalSending ||
-                        !signalArtistId ||
-                        signalLoadingArtists ||
-                        signalArtists.length === 0
-                      }
-                      className="rounded-full px-5 py-2 text-sm font-semibold bg-[var(--accent)] text-black disabled:opacity-60"
-                    >
-                      {signalSending ? "Invio Signal..." : "Invia Signal"}
-                    </button>
-                    {signalFeedback && (
-                      <p className="text-[11px] text-emerald-300">{signalFeedback}</p>
+                    </details>
+
+                    {signalPanelProjectId === p.id && (
+                      <form
+                        onSubmit={handleSendSignal}
+                        className="mt-4 space-y-4 rounded-2xl border border-white/10 bg-gradient-to-br from-sky-500/10 via-blue-900/20 to-slate-900/70 p-4"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-[0.3em] text-white/60">
+                              Signal Tekkin super funzione
+                            </p>
+                            <p className="text-sm font-semibold text-white">
+                              Promo & collab diretti agli artisti Discovery
+                            </p>
+                            <p className="text-[11px] text-white/50">
+                              Project: {p.title}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSignalPanelProjectId(null)}
+                            className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/60 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                          >
+                            Chiudi
+                          </button>
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <label className="flex flex-col gap-1 text-[11px] font-semibold text-white/60">
+                            Artista Tekkin
+                            <select
+                              value={signalArtistId}
+                              onChange={(event) => setSignalArtistId(event.target.value)}
+                              disabled={signalLoadingArtists || signalArtists.length === 0}
+                              className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
+                            >
+                              {signalLoadingArtists && (
+                                <option value="">Caricamento artisti...</option>
+                              )}
+                              {!signalLoadingArtists &&
+                                signalArtists.length === 0 && (
+                                  <option value="">
+                                    Nessun artista Tekkin disponibile al momento
+                                  </option>
+                                )}
+                              {signalArtists.map((artist) => (
+                                <option key={artist.id} value={artist.id}>
+                                  {artist.artist_name}
+                                  {artist.main_genres?.[0]
+                                    ? ` - ${artist.main_genres[0]}`
+                                    : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="flex flex-col gap-1 text-[11px] font-semibold text-white/60">
+                            <span>Tipo di richiesta</span>
+                            <div className="flex gap-2">
+                              {(["collab", "promo"] as const).map((kind) => (
+                                <button
+                                  key={kind}
+                                  type="button"
+                                  onClick={() => setSignalKind(kind)}
+                                  className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                                    signalKind === kind
+                                      ? "bg-white text-black"
+                                      : "border border-white/20 text-white/60"
+                                  }`}
+                                >
+                                  {kind === "collab" ? "Collab" : "Promo"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <label className="flex flex-col gap-2 text-[11px] font-semibold text-white/60">
+                          Messaggio (opzionale)
+                          <textarea
+                            value={signalMessage}
+                            onChange={(event) => setSignalMessage(event.target.value)}
+                            className="h-24 rounded-2xl bg-black/60 border border-white/10 p-3 text-sm text-white placeholder:text-white/40"
+                            placeholder="Descrivi in poche righe la release o l'opportunita"
+                          />
+                        </label>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="submit"
+                            disabled={
+                              signalSending ||
+                              !signalArtistId ||
+                              signalLoadingArtists ||
+                              signalArtists.length === 0
+                            }
+                            className="rounded-full px-5 py-2 text-sm font-semibold bg-[var(--accent)] text-black disabled:opacity-60"
+                          >
+                            {signalSending ? "Invio Signal..." : "Invia Signal"}
+                          </button>
+                          {signalFeedback && (
+                            <p className="text-[11px] text-emerald-300">{signalFeedback}</p>
+                          )}
+                        </div>
+                        {signalArtistError && (
+                          <p className="text-[11px] text-red-400">{signalArtistError}</p>
+                        )}
+                      </form>
                     )}
                   </div>
-                  {signalArtistError && (
-                    <p className="text-[11px] text-red-400">{signalArtistError}</p>
-                  )}
-                </form>
-                )}
+                </div>
               </article>
             );
           })}

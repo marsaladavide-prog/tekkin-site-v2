@@ -8,6 +8,12 @@ type TekkinRankHighlightCardProps = {
   overrideLabel?: string | null;
 };
 
+function formatPercentChange(change?: number | null) {
+  if (change == null) return "+0%";
+  const sign = change >= 0 ? "+" : "";
+  return `${sign}${Math.round(change)}%`;
+}
+
 export function TekkinRankHighlightCard({
   overrideScore,
   overrideLabel,
@@ -32,15 +38,16 @@ export function TekkinRankHighlightCard({
 
   const { rank, metrics } = data;
 
-  const score = overrideScore ?? rank?.score ?? 0;
-  const label = overrideLabel ?? rank?.label ?? "In Growth";
+  const score = overrideScore ?? rank?.tekkin_score ?? 0;
+  const label = overrideLabel ?? rank?.level ?? "In Growth";
 
-  // metrica base, adattala ai nomi reali dei campi nel tuo hook
-  const spotifyStreams = metrics?.spotify_streams ?? 0;
-  const spotifyDelta = metrics?.spotify_change_label ?? "+0%";
+  const spotifyStreams = metrics?.spotify_streams_total ?? 0;
+  const spotifyDelta = formatPercentChange(metrics?.spotify_streams_change);
   const beatportCharts = metrics?.beatport_charts ?? 0;
-  const beatportHighlight = metrics?.beatport_highlight ?? "";
-  const showsCount = metrics?.shows_count_last_90 ?? 0;
+  const beatportHypeCount = metrics?.beatport_hype_charts ?? 0;
+  const beatportHighlight =
+    beatportHypeCount > 0 ? `${beatportHypeCount} Hype charts` : "";
+  const showsCount = metrics?.shows_last_90_days ?? 0;
 
   const scorePercent = Math.max(0, Math.min(100, score));
 

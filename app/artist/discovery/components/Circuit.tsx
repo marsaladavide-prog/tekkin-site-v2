@@ -11,11 +11,11 @@ import {
 type CircuitArtist = {
   id: string;
   artist_name: string;
-  main_genres: string[] | null;
+  main_genres: string[];
   city: string | null;
   country: string | null;
-  open_to_collab: boolean | null;
-  open_to_promo: boolean | null;
+  open_to_collab: boolean;
+  open_to_promo: boolean;
 };
 
 export function Circuit() {
@@ -34,8 +34,16 @@ export function Circuit() {
         if (onlyCollab) params.set("collab", "true");
         if (onlyPromo) params.set("promo", "true");
 
-        const res = await fetch(`/api/circuit/artists?${params.toString()}`);
-        const data = await res.json();
+        const res = await fetch(`/api/artist/discovery?${params.toString()}`);
+        const payload = await res.json();
+
+        if (!res.ok) {
+          console.error("Circuit load error", payload);
+          setArtists([]);
+          return;
+        }
+
+        const data = Array.isArray(payload?.artists) ? payload.artists : [];
         setArtists(data);
       } catch (err) {
         console.error("Circuit load error", err);

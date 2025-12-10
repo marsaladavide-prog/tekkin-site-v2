@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const from = parseInt(searchParams.get("from") || "0", 10);
   const to = from + parseInt(searchParams.get("limit") || "24", 10) - 1;
 
-  const supabase = supabaseServer();
+  const supabase = await supabaseServer();
 
   let query = supabase
     .from("news")

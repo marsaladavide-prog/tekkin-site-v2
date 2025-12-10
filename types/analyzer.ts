@@ -247,7 +247,13 @@ export type AnalyzerAiFocusArea =
   | "structure"
   | "groove"
   | "arrangement"
-  | "other";
+  | "other"
+  | "vocals"
+  | "hihats"
+  | "percussions"
+  | "stereo_high"
+  | "transients"
+  | "punch";
 
 export type AnalyzerAiPriority = "low" | "medium" | "high";
 

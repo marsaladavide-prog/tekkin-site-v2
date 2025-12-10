@@ -141,6 +141,7 @@ type VersionRow = AnalyzerMetricsFields & {
   analyzer_key?: string | null;
   analyzer_json?: AnalyzerResult | null;
   reference_ai?: ReferenceAi | null;
+  analyzer_reference_ai?: ReferenceAi | null;
 };
 
 type AudioPreviewState = {
@@ -153,6 +154,7 @@ type ProjectVersionRecord = AnalyzerMetricsFields & {
   version_name: string;
   created_at: string;
   audio_url: string | null;
+  reference_ai?: ReferenceAi | null;
   analyzer_reference_ai?: ReferenceAi | null;
   analyzer_mix_v1?: AnalyzerV1Result | null;
   analyzer_json?: AnalyzerResult | null;
@@ -755,9 +757,10 @@ const params = useParams<{ id: string }>();
         throw new Error(msg);
       }
 
-      if (data.project) {
+      const projectPayload = data?.project;
+      if (projectPayload) {
         setProject((prev) => {
-          const next = data.project ?? {};
+          const next = projectPayload ?? {};
           if (prev) {
             return {
               ...prev,
@@ -1582,7 +1585,7 @@ const params = useParams<{ id: string }>();
                           aiError={aiErrorByVersion[v.id] ?? null}
                           onAskAi={() => void handleGenerateAiForVersion(v.id)}
                           analyzerResult={v.analyzer_json ?? null}
-                          referenceAi={v.reference_ai ?? v.analyzer_reference_ai ?? null}
+                          referenceAi={v.reference_ai ?? null}
                         />
                       </div>
                     )}

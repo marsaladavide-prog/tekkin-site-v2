@@ -78,7 +78,10 @@ export type Database = {
         Update: Partial<ArtistInsert>;
       };
     };
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
   };
 };
 
-export type AdminSupabaseClient = SupabaseClient<Database>;
+export type AdminSupabaseClient = SupabaseClient;

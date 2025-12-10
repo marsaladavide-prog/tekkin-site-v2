@@ -1,7 +1,6 @@
 "use client";
 
 import { Activity, ChartBar, Gauge, Info } from "lucide-react";
-import { AnalyzerCollapsibleSection } from "./AnalyzerCollapsibleSection";
 import {
   formatBpm,
   formatNumber,
@@ -11,13 +10,17 @@ import {
   getBandWidthLabel,
   getConfidenceWidth,
   getMixHealthLabel,
+  getWarningBadgeClass,
 } from "./analyzerDisplayUtils";
 import type {
+  AnalyzerV1Result,
+  AnalyzerWarning,
   HarmonicBalanceReport,
   ReferenceAi,
   StereoWidthInfo,
 } from "@/types/analyzer";
 import type { TekkinReadinessResult } from "@/lib/tekkinProfiles";
+import { AnalyzerCollapsibleSection } from "./AnalyzerCollapsibleSection";
 
 type MixHealthEntry = {
   label: string;
@@ -48,6 +51,9 @@ type AnalyzerDetailsSectionProps = {
   matchLabel: string;
   matchDescription: string;
   readiness: TekkinReadinessResult;
+  mixV1?: AnalyzerV1Result | null;
+  warnings?: AnalyzerWarning[];
+  feedbackText?: string | null;
 };
 
 export function AnalyzerDetailsSection({
@@ -68,9 +74,22 @@ export function AnalyzerDetailsSection({
   matchLabel,
   matchDescription,
   readiness,
+  mixV1,
+  warnings = [],
+  feedbackText,
 }: AnalyzerDetailsSectionProps) {
+  const mixV1Structure = mixV1?.metrics?.structure ?? null;
+  const mixV1Loudness =
+    mixV1?.metrics?.loudness?.integrated_lufs ?? null;
+  const mixV1Issues = mixV1?.issues ?? [];
+
   return (
-    <AnalyzerCollapsibleSection title="Analisi tecnica dettagliata">
+    <AnalyzerCollapsibleSection
+      title="Analisi tecnica dettagliata"
+      subtitle="Mix Health, Confidence, spettro e report completo."
+      defaultOpen={false}
+    >
+      <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-white/15 bg-black/80 px-3.5 py-3">
           <div className="flex items-center justify-between">
@@ -434,6 +453,115 @@ export function AnalyzerDetailsSection({
           )}
         </section>
       )}
+
+      {mixV1 && (
+        <section className="mt-4 rounded-xl border border-white/12 bg-black/70 px-3.5 py-3">
+          <div className="flex items-center gap-1.5">
+            <Info className="h-4 w-4 text-sky-300" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+              Tekkin Analyzer V1 (legacy)
+            </span>
+          </div>
+          <div className="mt-3 grid gap-3 text-[11px] text-white/80 md:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-black/50 px-3 py-2">
+              <p className="text-[10px] uppercase text-white/50">Integrated LUFS</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1Loudness != null ? `${mixV1Loudness.toFixed(1)} LUFS` : "n.a."}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/50 px-3 py-2">
+              <p className="text-[10px] uppercase text-white/50">Structure BPM</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1Structure?.bpm != null ? `${mixV1Structure.bpm.toFixed(0)} BPM` : "n.a."}
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/50 px-3 py-2">
+              <p className="text-[10px] uppercase text-white/50">Bars totali</p>
+              <p className="text-sm font-semibold text-white">
+                {mixV1Structure?.bars_total != null
+                  ? mixV1Structure.bars_total
+                  : "n.a."}
+              </p>
+            </div>
+          </div>
+
+          {mixV1Issues.length > 0 ? (
+            <div className="mt-3 space-y-3 text-xs text-white/80">
+              {mixV1Issues.slice(0, 4).map((issue, index) => (
+                <div
+                  key={`${issue.issue}-${index}`}
+                  className="rounded-lg border border-white/15 bg-white/5 p-3"
+                >
+                  <p className="text-sm font-semibold text-white">{issue.issue}</p>
+                  <p className="mt-1 text-[11px] text-white/70">{issue.analysis}</p>
+                  {issue.suggestion && (
+                    <p className="mt-1 text-[11px] text-lime-200">
+                      Suggerimento: {issue.suggestion}
+                    </p>
+                  )}
+                </div>
+              ))}
+              {mixV1Issues.length > 4 && (
+                <p className="text-[10px] text-white/50">
+                  Mostrate solo le note principali del vecchio motore V1.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-[11px] text-white/60">
+              Nessun warning registrato dal motore V1 su questa versione.
+            </p>
+          )}
+        </section>
+      )}
+
+      {warnings.length > 0 && (
+        <section className="mt-4 rounded-xl border border-white/12 bg-black/80 px-3.5 py-3">
+          <div className="flex items-center gap-1.5">
+            <Info className="h-4 w-4 text-emerald-300" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-white/70">
+              Analyzer warnings
+            </span>
+          </div>
+          <div className="mt-3 space-y-2 text-[11px] text-white/80">
+            {warnings.map((warning, index) => (
+              <div
+                key={`${warning.code}-${index}`}
+                className="rounded-lg border border-white/15 bg-white/5 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-white">
+                    {warning.message}
+                  </p>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide ${getWarningBadgeClass(
+                      warning.severity
+                    )}`}
+                  >
+                    {warning.severity}
+                  </span>
+                </div>
+                <p className="text-[10px] text-white/60">Codice: {warning.code}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {feedbackText && feedbackText.trim().length > 0 && (
+        <section className="mt-4 rounded-xl border border-white/15 bg-black px-3.5 py-3">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-white/65">
+            <Info className="h-4 w-4 text-emerald-300" />
+            Report tecnico completo
+          </p>
+          <div className="max-h-72 overflow-y-auto rounded-lg bg-black/90 p-2">
+            <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-white/80">
+              {feedbackText}
+            </pre>
+          </div>
+        </section>
+      )}
+      </div>
     </AnalyzerCollapsibleSection>
   );
 }

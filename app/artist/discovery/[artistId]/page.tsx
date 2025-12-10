@@ -1,10 +1,13 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import { ArtistProfileHeader } from "@/app/artist/components/ArtistProfileHeader";
-import { TekkinRankHighlightCard } from "@/app/artist/components/TekkinRankHighlightCard";
+import { ReleasesHighlights } from "@/app/artist/components/ReleasesHighlights";
+import { TekkinRankSection } from "@/app/artist/components/TekkinRankSection";
+import { Artist, ArtistMetrics, ArtistRankView } from "@/types/tekkinRank";
+import { EditArtistProfileButton } from "../components/EditArtistProfileButton";
 
-type Artist = {
+const PUBLIC_SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+
+type DiscoveryArtist = {
   id: string;
   artist_name: string | null;
   artist_photo_url: string | null;
@@ -12,107 +15,63 @@ type Artist = {
   bio_short: string | null;
   city: string | null;
   country: string | null;
-  open_to_collab: boolean | null;
-  spotify_url: string | null;
-  instagram_username: string | null;
-  beatport_url: string | null;
-  presskit_link: string | null;
+  spotify_url?: string | null;
+  instagram_username?: string | null;
+  beatport_url?: string | null;
+  open_to_collab?: boolean | null;
+  presskit_link?: string | null;
+};
+
+type ArtistDetailResponse = {
+  artist: DiscoveryArtist | null;
+  metrics: ArtistMetrics | null;
+  rank: ArtistRankView["rank"];
+  releases?: {
+    id: string;
+    title: string;
+    release_date: string | null;
+    cover_url: string | null;
+    spotify_url: string | null;
+    album_type: string | null;
+  }[];
+  error?: string | null;
 };
 
 type Props = {
-  // Next 15 nel tuo setup si aspetta params come Promise
-  params: Promise<{ artistId: string }>;
+  params: Promise<{
+    artistId: string;
+  }>;
 };
 
-export default function ArtistDetailPage({ params }: Props) {
-  const [artist, setArtist] = useState<Artist | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+export default async function ArtistDetailPage({ params }: Props) {
+  const { artistId } = await params;
 
-  useEffect(() => {
-    let cancelled = false;
+  const detailRes = await fetch(
+    `${PUBLIC_SITE_URL}/api/artist/discovery/${artistId}`,
+    { cache: "no-store" }
+  );
 
-    async function load() {
-      try {
-        // qui risolviamo il Promise<{ artistId }>
-        const { artistId } = await params;
+  const detail = (await detailRes.json().catch(() => null)) as
+    | ArtistDetailResponse
+    | null;
 
-        if (!artistId) {
-          if (!cancelled) {
-            setErrorMsg("ID artista mancante.");
-            setLoading(false);
-          }
-          return;
-        }
+  const fetchError =
+    !detailRes.ok || !detail
+      ? detail?.error ?? "Errore caricando l'artista."
+      : null;
 
-        const res = await fetch(`/api/artist/discovery/${artistId}`);
-        let data: any = null;
-
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          console.error("Artist detail non JSON:", jsonErr);
-        }
-
-        if (!res.ok) {
-          console.error("Artist detail error:", {
-            status: res.status,
-            data,
-          });
-
-          if (!cancelled) {
-            const message =
-              data?.error ??
-              (res.status === 404
-                ? "Artista non trovato."
-                : "Errore caricando l'artista.");
-
-            setErrorMsg(message);
-            setLoading(false);
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          // la route restituisce { artist: {...} }
-          setArtist(data?.artist ?? null);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Artist detail unexpected error:", err);
-        if (!cancelled) {
-          setErrorMsg("Errore inatteso caricando l'artista.");
-          setLoading(false);
-        }
-      }
-    }
-
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [params]);
-
-  if (loading) {
-    return (
-      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
-        <p className="text-sm text-tekkin-muted">Caricamento artista...</p>
-      </main>
-    );
-  }
-
-  if (errorMsg) {
+  if (fetchError) {
     return (
       <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
         <div className="max-w-md text-center space-y-3">
           <h1 className="text-xl font-semibold text-tekkin-text">Errore</h1>
-          <p className="text-sm text-tekkin-muted">{errorMsg}</p>
+          <p className="text-sm text-tekkin-muted">{fetchError}</p>
         </div>
       </main>
     );
   }
 
+  const artist = detail?.artist;
   if (!artist) {
     return (
       <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
@@ -128,73 +87,94 @@ export default function ArtistDetailPage({ params }: Props) {
     );
   }
 
-  // generi visualizzabili
-  const displayGenres = Array.isArray(artist.main_genres)
-    ? artist.main_genres
-        .filter((g): g is string => Boolean(g))
-        .map((g) => g.replace(/_/g, " "))
-    : [];
+  const genres =
+    Array.isArray(artist.main_genres) && artist.main_genres.length > 0
+      ? artist.main_genres.filter(Boolean)
+      : [];
 
-  const mainGenreLabel = displayGenres[0] ?? null;
+  const mainGenreLabel = genres[0] ?? null;
+  const locationParts = [artist.city, artist.country].filter(Boolean);
+  const locationBase = locationParts.length > 0 ? locationParts.join(" · ") : null;
   const locationLabel =
-    [artist.city, artist.country].filter(Boolean).join(" · ") || null;
-
-  const locationWithCollab =
-    locationLabel && artist.open_to_collab
-      ? `${locationLabel} · Open to collab`
-      : locationLabel || (artist.open_to_collab ? "Open to collab" : null);
-
-  const instagramProfileUrl = artist.instagram_username
+    locationBase && artist.open_to_collab
+      ? `${locationBase} · Open to collab`
+      : locationBase || (artist.open_to_collab ? "Open to collab" : null);
+  const instagramUrl = artist.instagram_username
     ? `https://instagram.com/${artist.instagram_username}`
     : null;
+
+  const rankArtist: Artist = {
+    id: artist.id,
+    artist_name: artist.artist_name ?? "Artista Tekkin",
+    artist_photo_url: artist.artist_photo_url,
+    artist_genre: mainGenreLabel,
+    artist_link_source: undefined,
+    spotify_url: artist.spotify_url ?? null,
+    beatport_url: artist.beatport_url ?? null,
+  };
+
+  const rankView: ArtistRankView | null = detail.rank
+    ? {
+        artist: rankArtist,
+        rank: detail.rank,
+        metrics: detail.metrics,
+      }
+    : null;
+
+  const highlightReleases = (detail.releases ?? []).map((rel) => ({
+    id: rel.id,
+    title: rel.title,
+    releaseDate: rel.release_date ?? "",
+    coverUrl: rel.cover_url,
+    spotifyUrl: rel.spotify_url,
+    albumType: rel.album_type,
+  }));
 
   return (
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
       <div className="w-full max-w-5xl mx-auto space-y-8">
-        {/* Header artista + pulsanti esterni */}
         <ArtistProfileHeader
-          artistName={artist.artist_name || "Artista senza nome"}
+          artistName={artist.artist_name || "Artista Tekkin"}
           mainGenreLabel={mainGenreLabel}
-          locationLabel={locationWithCollab}
-          avatarUrl={artist.artist_photo_url ?? null}
+          locationLabel={locationLabel}
+          avatarUrl={artist.artist_photo_url}
           spotifyUrl={artist.spotify_url ?? null}
           beatportUrl={artist.beatport_url ?? null}
-          instagramUrl={instagramProfileUrl}
+          instagramUrl={instagramUrl}
           presskitUrl={artist.presskit_link ?? null}
-          onSendMessage={() => {
-            // TODO: apri modal DM / routing a sistema messaggi quando sarà pronto
-            console.log("Send message to artist", artist.id);
-          }}
         />
+        <div className="flex justify-center mt-3">
+          <EditArtistProfileButton artistId={artist.id} />
+        </div>
 
-        {/* Tekkin Rank highlight per questo artista */}
-        <TekkinRankHighlightCard />
+        <TekkinRankSection overrideData={rankView ?? undefined} />
 
-        {/* Generi extra se più di uno */}
-        {displayGenres.length > 1 && (
+        <section className="mt-6">
+          <ReleasesHighlights releases={highlightReleases} />
+        </section>
+
+        {genres.length > 1 && (
           <section className="space-y-2">
             <h2 className="text-xs font-mono uppercase tracking-[0.16em] text-tekkin-muted">
               Generi
             </h2>
             <div className="flex flex-wrap gap-2 text-[11px] font-mono">
-              {displayGenres.map((genre) => (
+              {genres.map((genre) => (
                 <span
                   key={genre}
                   className="px-3 py-1 rounded-full border border-tekkin-border text-tekkin-muted uppercase tracking-[0.14em]"
                 >
-                  {genre}
+                  {genre.replace(/_/g, " ")}
                 </span>
               ))}
             </div>
           </section>
         )}
 
-        {/* Bio */}
         <section className="space-y-3">
           <h2 className="text-xs font-mono uppercase tracking-[0.16em] text-tekkin-muted">
             Bio
           </h2>
-
           <p className="text-sm leading-relaxed text-tekkin-text/90 whitespace-pre-line">
             {artist.bio_short || "Nessuna bio inserita."}
           </p>

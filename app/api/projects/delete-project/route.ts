@@ -34,6 +34,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Project non trovato" }, { status: 404 });
     }
 
+    const cleanupTargets: Array<{ table: string; column: string }> = [
+      { table: "tasks", column: "project_id" },
+      { table: "discovery_requests", column: "project_id" },
+      { table: "discovery_tracks", column: "project_id" },
+      { table: "calendar_events", column: "related_project_id" },
+    ];
+
+    for (const target of cleanupTargets) {
+      const { error: cleanupError } = await supabase
+        .from(target.table)
+        .delete()
+        .eq(target.column, projectId);
+
+      if (
+        cleanupError &&
+        cleanupError.code !== "PGRST205" /* table missing: skip */
+      ) {
+        console.error(`Delete ${target.table} failed:`, cleanupError);
+        return NextResponse.json(
+          { error: "Impossibile eliminare il project" },
+          { status: 500 }
+        );
+      }
+    }
+
     const { error: deleteVersionsError } = await supabase
       .from("project_versions")
       .delete()

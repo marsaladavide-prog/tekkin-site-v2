@@ -27,7 +27,11 @@ export default function SettingsDrawer({ open, onClose }: Props) {
         .select("artist_name,photo_url,avatar_seed,avatar_variant,basic_completed,notifications")
         .eq("id", u.user.id)
         .single();
-      if (data) setForm({ notifications: true, ...data });
+      if (data)
+        setForm({
+          ...data,
+          notifications: data.notifications ?? true,
+        });
       setLoading(false);
     })();
   }, [open]);

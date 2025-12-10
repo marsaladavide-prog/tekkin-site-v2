@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 type ArtistProfileHeaderProps = {
+  artistId: string;
   artistName: string;
   mainGenreLabel?: string | null;
   locationLabel?: string | null;
@@ -17,6 +19,7 @@ type ArtistProfileHeaderProps = {
 };
 
 export function ArtistProfileHeader({
+  artistId,
   artistName,
   mainGenreLabel,
   locationLabel,
@@ -27,7 +30,16 @@ export function ArtistProfileHeader({
   presskitUrl,
   onSendMessage,
 }: ArtistProfileHeaderProps) {
+  const router = useRouter();
   const geo = [mainGenreLabel, locationLabel].filter(Boolean).join(" · ");
+
+  const handleSendMessage = () => {
+    if (onSendMessage) {
+      onSendMessage();
+      return;
+    }
+    router.push(`/artist/messages?with=${artistId}`);
+  };
 
   return (
     <header className="text-center mb-8">
@@ -72,7 +84,7 @@ export function ArtistProfileHeader({
             {/* SEND MESSAGE */}
             <button
               type="button"
-              onClick={onSendMessage}
+              onClick={handleSendMessage}
               className="flex items-center gap-2 bg-tekkin-accent hover:bg-tekkin-accent/80 text-black font-bold py-1.5 px-5 rounded-full text-xs transition-all shadow-[0_0_15px_rgba(34,211,238,0.4)]"
             >
               <svg
