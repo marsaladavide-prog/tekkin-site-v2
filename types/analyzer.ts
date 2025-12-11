@@ -244,16 +244,16 @@ export type AnalyzerAiFocusArea =
   | "mid"
   | "high"
   | "stereo"
-  | "structure"
-  | "groove"
-  | "arrangement"
-  | "other"
+  | "stereo_high"
   | "vocals"
   | "hihats"
   | "percussions"
-  | "stereo_high"
   | "transients"
-  | "punch";
+  | "punch"
+  | "structure"
+  | "groove"
+  | "arrangement"
+  | "other";
 
 export type AnalyzerAiPriority = "low" | "medium" | "high";
 

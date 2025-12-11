@@ -1582,7 +1582,6 @@ const params = useParams<{ id: string }>();
                           }
                           aiMeta={ai?.meta ?? v.analyzer_ai_meta ?? null}
                           aiLoading={aiLoadingVersionId === v.id}
-                          aiError={aiErrorByVersion[v.id] ?? null}
                           onAskAi={() => void handleGenerateAiForVersion(v.id)}
                           analyzerResult={v.analyzer_json ?? null}
                           referenceAi={v.reference_ai ?? null}

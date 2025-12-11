@@ -30,7 +30,6 @@ import {
   getBrightnessLabel,
   getMatchBucket,
   getMixState,
-  getReferenceMatchPercent,
   getScoreLabel,
 } from "./analyzerDisplayUtils";
 
@@ -90,10 +89,6 @@ function computeReadinessTag(params: {
     intent: "bad",
   };
 }
-
-
-
-
 
 type VersionRow = AnalyzerMetricsFields & {
   id: string;
@@ -264,19 +259,19 @@ export function AnalyzerProPanel({
 
   const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
 
-    if (!hasAnalyzerData) {
+  if (!hasAnalyzerData) {
     return (
       <section className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-6 text-sm">
         <h3 className="text-base font-semibold">Lancia la tua prima analisi</h3>
         <p className="mt-2 text-[13px] text-white/70">
           Carica una versione audio qui sopra e clicca{" "}
           <span className="font-semibold">Analyze</span>. Tekkin Analyzer PRO ti
-          restituir?:
+          restituirà:
         </p>
         <ul className="mt-2 list-disc pl-5 text-[13px] text-white/70">
           <li>Tekkin Score (stato globale del brano).</li>
           <li>Match Tekkin rispetto al genere scelto.</li>
-          <li>Piano d'azione con i 3 interventi principali.</li>
+          <li>Piano d&apos;azione con i 3 interventi principali.</li>
         </ul>
         <p className="mt-3 text-[12px] text-white/50">
           Suggerimento: usa una bounce stereo del master o del premaster senza
@@ -286,11 +281,34 @@ export function AnalyzerProPanel({
     );
   }
 
+  // 1 - variabili di testo AI
   const feedbackText = version.feedback ?? "";
   const aiSummaryText = aiSummary ?? version.analyzer_ai_summary ?? null;
   const aiActionsList = aiActions ?? version.analyzer_ai_actions ?? null;
   const aiMetaData = aiMeta ?? version.analyzer_ai_meta ?? null;
-  const { label: matchLabel, description: matchDescription } = getMatchBucket(matchPercent);
+
+  // 2 - flag se c’è davvero qualcosa di utile lato AI
+  const hasAiData =
+    Boolean(aiSummaryText?.trim()) ||
+    Boolean(aiActionsList?.length) ||
+    Boolean(
+      aiMetaData &&
+        (aiMetaData.artistic_assessment?.trim() ||
+          aiMetaData.label_fit?.trim() ||
+          aiMetaData.structure_feedback?.trim() ||
+          aiMetaData.risk_flags.length > 0)
+    );
+
+  // 3 - oggetto coach unico
+  const aiCoach: AnalyzerAiCoach | null = hasAiData
+    ? {
+        summary: aiSummaryText ?? "",
+        actions: aiActionsList ?? [],
+        meta: aiMetaData ?? EMPTY_AI_META,
+      }
+    : null;
+
+  // 4 - highlight problemi principali
   const issueHighlights = useMemo(() => {
     const highlights: string[] = [];
     const seen = new Set<string>();
@@ -329,24 +347,8 @@ export function AnalyzerProPanel({
     return highlights;
   }, [sortedFixSuggestions, warningsList, aiActionsList]);
 
-  const hasAiData =
-    Boolean(aiSummaryText?.trim()) ||
-    Boolean(aiActionsList?.length) ||
-    Boolean(
-      aiMetaData &&
-        (aiMetaData.artistic_assessment?.trim() ||
-          aiMetaData.label_fit?.trim() ||
-          aiMetaData.structure_feedback?.trim() ||
-          aiMetaData.risk_flags.length > 0)
-    );
-
-  const aiCoach: AnalyzerAiCoach | null = hasAiData
-    ? {
-        summary: aiSummaryText ?? "",
-        actions: aiActionsList ?? [],
-        meta: aiMetaData ?? EMPTY_AI_META,
-      }
-    : null;
+  const { label: matchLabel, description: matchDescription } =
+    getMatchBucket(matchPercent);
 
   const handleGenerateAiForVersion = () => {
     onAskAi?.();
@@ -385,10 +387,10 @@ export function AnalyzerProPanel({
           onGenerateAi={handleGenerateAiForVersion}
         />
 
-        {/* C. Q&A - UNA sola volta, qui */}
+        {/* C. Q&A */}
         <AskAnalyzerAI versionId={version.id} />
 
-        {/* D. Dettaglio tecnico collassato */}
+        {/* D. Dettaglio tecnico */}
         <AnalyzerDetailsSection
           mixHealthScore={mixHealthScore}
           mixHealthBreakdownEntries={mixHealthBreakdownEntries}
