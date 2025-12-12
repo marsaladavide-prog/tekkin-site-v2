@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from reference_models import fetch_genre_model
 from model_math import compute_model_match
+from reference_ai import evaluate_track_with_reference, load_reference_db
 
 # motore v3.6
 from analyze_master_web import analyze_to_text, extract_metrics_from_report
@@ -27,6 +28,13 @@ if not ANALYZER_SECRET:
     raise RuntimeError("TEKKIN_ANALYZER_SECRET non impostata nell'ambiente")
 
 app = FastAPI()
+
+reference_db: dict[str, Any] | None = None
+try:
+    reference_db = load_reference_db("reference_db.json")
+except Exception as exc:
+    print("[reference_ai] reference_db not available:", exc)
+    reference_db = None
 
 
 def debug_non_finite(obj, path: str = "root"):
@@ -224,7 +232,7 @@ async def analyze(request: Request, payload: AnalyzePayload):
 
         report = analysis["report"]
         fix_suggestions = analysis.get("fix_suggestions", [])
-        reference_ai = analysis.get("reference_ai")
+        reference_ai = analysis.get("reference_ai") or {}
         meters = analysis.get("meters", {})
 
         # 5. estraggo i numeri principali dal report
@@ -246,6 +254,43 @@ async def analyze(request: Request, payload: AnalyzePayload):
         extras = analyze_v4_extras(y_mono, y_stereo, sr, loudness_stats=loudness_stats)
         safe_extras = sanitize_non_finite(extras)
         print("[analyzer] v4 extras:", safe_extras)
+
+        reference_ai_pack = safe_extras.get("essentia_features") or {}
+        reference_ai_rhythm = reference_ai_pack.get("rhythm") or {}
+        reference_ai_tonal = reference_ai_pack.get("tonal") or {}
+        reference_ai_loudness = reference_ai_pack.get("loudness") or {}
+        reference_ai_spectral = reference_ai_pack.get("spectral") or {}
+        reference_ai_stereo = reference_ai_pack.get("stereo") or {}
+        reference_ai_debug_values = {
+            "bpm": reference_ai_rhythm.get("bpm"),
+            "key": reference_ai_tonal.get("key"),
+            "integrated_lufs": reference_ai_loudness.get("integrated_lufs"),
+            "spectral_centroid_hz": reference_ai_spectral.get("centroid_hz"),
+            "spectral_flatness": reference_ai_spectral.get("flatness"),
+            "stereo_global_correlation": reference_ai_stereo.get("global_correlation"),
+        }
+        reference_ai_metrics = {
+            "lufs_integrated": reference_ai_loudness.get("integrated_lufs"),
+            "crest_factor": reference_ai_spectral.get("crest_factor_db"),
+            "tonal_balance": {},
+        }
+        reference_ai_extras = {
+            "bpm": reference_ai_rhythm.get("bpm"),
+            "key": reference_ai_tonal.get("key"),
+            "spectral_centroid_hz": reference_ai_spectral.get("centroid_hz"),
+            "spectral_rolloff_hz": reference_ai_spectral.get("rolloff_hz"),
+            "spectral_bandwidth_hz": reference_ai_spectral.get("bandwidth_hz"),
+            "spectral_flatness": reference_ai_spectral.get("flatness"),
+            "zero_crossing_rate": reference_ai_spectral.get("zero_crossing_rate"),
+            "low_db": reference_ai_spectral.get("low_db"),
+            "lowmid_db": reference_ai_spectral.get("lowmid_db"),
+            "mid_db": reference_ai_spectral.get("mid_db"),
+            "high_db": reference_ai_spectral.get("high_db"),
+            "air_db": reference_ai_spectral.get("air_db"),
+            "stereo_global_correlation": reference_ai_stereo.get("global_correlation"),
+            "stereo_lr_balance_db": reference_ai_stereo.get("lr_balance_db"),
+            "stereo_band_widths_db": reference_ai_stereo.get("band_widths_db"),
+        }
 
         # 7. Tekkin Analyzer V1: mix, bilanci, stereo, struttura
         mix_v1_result = None
@@ -289,10 +334,90 @@ async def analyze(request: Request, payload: AnalyzePayload):
                 print("[analyzer-ai] errore calcolo model_match:", repr(e))
                 model_match = None
 
-        if reference_ai is not None and model_match is not None:
-            reference_ai["model_match"] = model_match
+        print("[PY-ANALYZER] reference_ai Essentia values:", reference_ai_debug_values)
+        reference_ai_eval = None
+        if reference_db is not None:
+            try:
+                reference_ai_eval = evaluate_track_with_reference(
+                    db=reference_db,
+                    metrics=reference_ai_metrics,
+                    extras=reference_ai_extras,
+                    genre_model=model,
+                    public_output=True,
+                )
+            except Exception as e:
+                print("[reference_ai] evaluation failed:", repr(e))
 
+        reference_ai_public: dict[str, Any] | None = None
+        if reference_ai:
+            sanitized = {
+                key: value
+                for key, value in reference_ai.items()
+                if key
+                not in {
+                    "reference_db",
+                    "similar_tracks",
+                    "guessed_genre",
+                    "genre_confidence",
+                    "model_match",
+                }
+            }
+            adjustments_payload = (
+                reference_ai_eval.get("adjustments") if reference_ai_eval else None
+            )
+            sanitized["adjustments"] = adjustments_payload
+            warnings_payload = reference_ai.get("warnings")
+            if warnings_payload is not None:
+                sanitized["warnings"] = warnings_payload
+            sanitized["debug"] = {"essentia_values": reference_ai_debug_values}
+            sanitized["model_match"] = None
+            reference_ai_public = sanitized
+
+        reference_ai = reference_ai_public
         print("[analyzer-api] reference_ai debug:", reference_ai)
+
+        analysis_pro = {
+            "rhythm": {
+                "bpm": reference_ai_rhythm.get("bpm"),
+                "confidence": reference_ai_rhythm.get("bpm_conf"),
+                "beats": reference_ai_rhythm.get("beats"),
+                "tempo_curve": reference_ai_rhythm.get("tempo_curve"),
+            },
+            "tonal": {
+                "key": reference_ai_tonal.get("key"),
+                "scale": reference_ai_tonal.get("scale"),
+                "key_confidence": reference_ai_tonal.get("key_conf"),
+                "tonal_strength": reference_ai_tonal.get("tonal_strength"),
+            },
+            "loudness": {
+                "integrated_lufs": reference_ai_loudness.get("integrated_lufs"),
+                "lra": reference_ai_loudness.get("lra"),
+                "momentary_loudness": reference_ai_loudness.get("momentary_loudness"),
+                "short_term_loudness": reference_ai_loudness.get("short_term_loudness"),
+                "true_peak_db": reference_ai_loudness.get("true_peak_db"),
+            },
+            "spectral": {
+                "centroid_hz": reference_ai_spectral.get("centroid_hz"),
+                "rolloff_hz": reference_ai_spectral.get("rolloff_hz"),
+                "bandwidth_hz": reference_ai_spectral.get("bandwidth_hz"),
+                "flatness": reference_ai_spectral.get("flatness"),
+                "mfcc_mean": reference_ai_spectral.get("mfcc_mean"),
+                "mfcc_std": reference_ai_spectral.get("mfcc_std"),
+                "low_db": reference_ai_spectral.get("low_db"),
+                "lowmid_db": reference_ai_spectral.get("lowmid_db"),
+                "mid_db": reference_ai_spectral.get("mid_db"),
+                "high_db": reference_ai_spectral.get("high_db"),
+                "air_db": reference_ai_spectral.get("air_db"),
+                "zero_crossing_rate": reference_ai_spectral.get("zero_crossing_rate"),
+            },
+            "stereo": {
+                "global_correlation": reference_ai_stereo.get("global_correlation"),
+                "lr_balance_db": reference_ai_stereo.get("lr_balance_db"),
+                "is_mono": reference_ai_stereo.get("is_mono"),
+                "band_widths_db": reference_ai_stereo.get("band_widths_db"),
+            },
+            "confidence": safe_extras.get("confidence"),
+        }
 
         # 9. Mix health score + confidence mix_health
         loudness_stats_safe = safe_extras.get("loudness_stats")
@@ -315,22 +440,24 @@ async def analyze(request: Request, payload: AnalyzePayload):
             "overall_score": overall,
             "feedback": report,
             "fix_suggestions": fix_suggestions,
-            "reference_ai": reference_ai,
-            "bpm": safe_extras.get("bpm"),
-            "spectral_centroid_hz": safe_extras.get("spectral_centroid_hz"),
-            "spectral_rolloff_hz": safe_extras.get("spectral_rolloff_hz"),
-            "spectral_bandwidth_hz": safe_extras.get("spectral_bandwidth_hz"),
-            "spectral_flatness": safe_extras.get("spectral_flatness"),
-            "zero_crossing_rate": safe_extras.get("zero_crossing_rate"),
-            "spectral": safe_extras.get("spectral"),
-            "key": safe_extras.get("key"),
-            "confidence": confidence_data,
-            "warnings": safe_extras.get("warnings"),
-            "harmonic_balance": safe_extras.get("harmonic_balance"),
-            "stereo_width": safe_extras.get("stereo_width"),
-            "mix_health_score": mix_health_score,
-            # nuovo blocco: Tekkin Analyzer Mix V1
-            "mix_v1": mix_v1_result.model_dump() if mix_v1_result is not None else None,
+        "reference_ai": reference_ai,
+        "bpm": safe_extras.get("bpm"),
+        "spectral_centroid_hz": safe_extras.get("spectral_centroid_hz"),
+        "spectral_rolloff_hz": safe_extras.get("spectral_rolloff_hz"),
+        "spectral_bandwidth_hz": safe_extras.get("spectral_bandwidth_hz"),
+        "spectral_flatness": safe_extras.get("spectral_flatness"),
+        "zero_crossing_rate": safe_extras.get("zero_crossing_rate"),
+        "spectral": safe_extras.get("spectral"),
+          "key": safe_extras.get("key"),
+          "confidence": confidence_data,
+          "warnings": safe_extras.get("warnings"),
+          "harmonic_balance": safe_extras.get("harmonic_balance"),
+          "stereo_width": safe_extras.get("stereo_width"),
+          "essentia_features": safe_extras.get("essentia_features"),
+          "analysis_pro": analysis_pro,
+          "mix_health_score": mix_health_score,
+        # nuovo blocco: Tekkin Analyzer Mix V1
+        "mix_v1": mix_v1_result.model_dump() if mix_v1_result is not None else None,
         }
 
         # 11. debug per capire eventuali NaN / inf

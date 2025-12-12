@@ -56,22 +56,31 @@ FEATURE_KEYS = [
 ]
 
 
+def _to_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_feature_vector(metrics: Dict[str, Any], extras: Dict[str, Any]) -> Dict[str, float]:
     tonal = metrics.get("tonal_balance", {}) or {}
 
     feature_vector = {
-        "lufs_integrated": float(metrics.get("lufs_integrated")),
-        "crest_factor": float(metrics.get("crest_factor")),
-        "sub_ratio": float(tonal.get("sub", 0.0)),
-        "low_ratio": float(tonal.get("low", 0.0)),
-        "lowmid_ratio": float(tonal.get("lowmid", 0.0)),
-        "mid_ratio": float(tonal.get("mid", 0.0)),
-        "high_ratio": float(tonal.get("high", 0.0)),
-        "air_ratio": float(tonal.get("air", 0.0)),
-        "spectral_centroid_hz": float(extras.get("spectral_centroid_hz", 0.0)),
-        "spectral_rolloff_hz": float(extras.get("spectral_rolloff_hz", 0.0)),
-        "zero_crossing_rate": float(extras.get("zero_crossing_rate", 0.0)),
-        "bpm": float(extras.get("bpm", 0.0)),
+        "lufs_integrated": _to_optional_float(metrics.get("lufs_integrated")),
+        "crest_factor": _to_optional_float(metrics.get("crest_factor")),
+        "sub_ratio": _to_optional_float(tonal.get("sub")),
+        "low_ratio": _to_optional_float(tonal.get("low")),
+        "lowmid_ratio": _to_optional_float(tonal.get("lowmid")),
+        "mid_ratio": _to_optional_float(tonal.get("mid")),
+        "high_ratio": _to_optional_float(tonal.get("high")),
+        "air_ratio": _to_optional_float(tonal.get("air")),
+        "spectral_centroid_hz": _to_optional_float(extras.get("spectral_centroid_hz")),
+        "spectral_rolloff_hz": _to_optional_float(extras.get("spectral_rolloff_hz")),
+        "zero_crossing_rate": _to_optional_float(extras.get("zero_crossing_rate")),
+        "bpm": _to_optional_float(extras.get("bpm")),
     }
 
     return feature_vector

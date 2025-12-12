@@ -1,0 +1,30 @@
+# Node / Next
+node_modules
+.next
+npm-debug.log
+yarn.lock
+pnpm-lock.yaml
+
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Python virtual envs
+.tekkin-analyzer-venv
+.tekkin-analyzer-venv-linux
+.tekkin-analyzer-venv-essentia
+.venv
+venv
+
+# Build / temp / huge folders
+dist
+build
+.tmp
+refs_audio
+refs_audio_full

@@ -41,3 +41,17 @@ __pycache__/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Python venvs (local)
+.tekkin-analyzer-venv-essentia/
+.tekkin-analyzer-venv-linux/
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

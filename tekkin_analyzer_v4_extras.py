@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Union
 
-import librosa
 import numpy as np
 
+try:
+    import essentia
+    import essentia.standard as es
+    _ESSENTIA_AVAILABLE: bool = True
+    print(f"[PY-ANALYZER] Essentia IMPORTED: {essentia.__version__}")
+except Exception as exc:  # pragma: no cover - guard when Essentia missing
+    essentia = None
+    es = None
+    _ESSENTIA_AVAILABLE: bool = False
+    print(f"[PY-ANALYZER] Essentia NOT AVAILABLE: {exc}")
 
 N_FFT = 4096
 HOP_LENGTH = 1024
-ONSET_HOP = 512
 STEREO_BANDS = [
     ("low", 20, 120),
     ("mid", 120, 3000),
@@ -22,272 +30,115 @@ SPECTRAL_BANDS = [
     ("high", 2000, 10000),
     ("air", 10000, 16000),
 ]
-DANCE_TARGET_BPM = 128.0
-def _db_from_power(value: float) -> float:
-    """Convertiamo energia (potenza) in dB evitando log(0)."""
-    return 10.0 * math.log10(max(value, 1e-12))
-
-
-def _build_stft_power(
-    y: np.ndarray,
-    sr: int,
-    n_fft: int = N_FFT,
-    hop_length: int = HOP_LENGTH,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Calcola lo STFT e restituisce la potenza media per frequenza."""
-    if y.size == 0:
-        return np.zeros(0), np.zeros(0)
-    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length, window="hann"))
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-    power = S**2
-    return power, freqs
-
-
-def _normalize_vector(v: np.ndarray) -> np.ndarray:
-    norm = np.linalg.norm(v)
-    if norm == 0:
-        return v
-    return v / norm
-
-
-def _rotate_profile(profile: np.ndarray, steps: int) -> np.ndarray:
-    return np.roll(profile, steps)
-
-
-def _trim_to_signal(y: np.ndarray, top_db: float = 60.0) -> np.ndarray:
-    if y.size == 0:
-        return y
-    trimmed, _ = librosa.effects.trim(y.astype(np.float32, copy=False), top_db=top_db)
-    return trimmed if trimmed.size > 0 else y
+MAX_BPM_ANALYSIS_SECONDS = 240.0
 
 
 def _bounded_confidence(value: float) -> float:
     return float(max(0.0, min(1.0, value)))
 
 
-def _tempo_from_autocorrelation(
-    y: np.ndarray, sr: int, hop_length: int = ONSET_HOP
-) -> Union[float, None]:
-    if y.size == 0 or sr <= 0:
-        return None
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
-    if onset_env.size < 4:
-        return None
-    ac = librosa.autocorrelate(onset_env, max_size=len(onset_env))
-    if ac.size < 4:
-        return None
-    min_lag = max(1, int((sr / hop_length) * 60.0 / 160.0))
-    max_lag = min(len(ac) - 1, int((sr / hop_length) * 60.0 / 72.0))
-    if min_lag >= max_lag:
-        return None
-    segment = ac[min_lag : max_lag + 1]
-    if segment.size == 0:
-        return None
-    best_idx = int(np.argmax(segment))
-    best_lag = min_lag + best_idx
-    if best_lag == 0:
-        return None
-    return 60.0 * sr / (best_lag * hop_length)
-
-def _select_tempo_candidate(
-    candidates: List[Union[float, None]]
-) -> Union[float, None]:
-    """
-    Sceglie il BPM combinando i candidati in modo robusto.
-
-    - Filtra i None e i valori non positivi.
-    - Se i candidati sono vicini tra loro (es. 129 e 130),
-      fa la media e poi estimate_bpm li arrotonderà all'intero.
-    - Altrimenti usa la mediana, che è piu robusta a outlier.
-    """
-    valid = [c for c in candidates if c is not None and c > 0]
-    if not valid:
-        return None
-
-    valid_arr = np.array(valid, dtype=float)
-
-    # Se la differenza tra minimo e massimo è piccola, uso la media
-    if valid_arr.size >= 2 and (valid_arr.max() - valid_arr.min()) <= 1.5:
-        return float(valid_arr.mean())
-
-    # Altrimenti uso la mediana
-    return float(np.median(valid_arr))
+def _db_from_power(value: float) -> float:
+    return 10.0 * math.log10(max(value, 1e-12))
 
 
-
-def estimate_bpm(
-    y: np.ndarray, sr: int, max_duration_seconds: float = 240.0
-) -> Tuple[Union[float, None], float]:
-    if y.size == 0 or sr <= 0:
-        return None, 0.0
-
-    max_samples = int(max_duration_seconds * sr)
-    y_for_bpm = y if y.size <= max_samples else y[:max_samples]
-    y_trimmed = _trim_to_signal(y_for_bpm, top_db=60.0)
-    if y_trimmed.size == 0:
-        y_trimmed = y_for_bpm
-
-    total_seconds = max(1.0, len(y_trimmed) / sr)
-
-    tempo, beats = librosa.beat.beat_track(y=y_trimmed, sr=sr, trim=False)
-    tempo_librosa = float(tempo) if tempo > 0 else None
-    if tempo_librosa is not None and tempo_librosa < 90:
-        tempo_librosa *= 2.0
-
-    autocorr_tempo = _tempo_from_autocorrelation(y_trimmed, sr)
-    bpm_candidate = _select_tempo_candidate([tempo_librosa, autocorr_tempo])
-    if bpm_candidate is None or bpm_candidate <= 0:
-        return None, 0.0
-
-    final_bpm = int(round(bpm_candidate))
-    beat_density = len(beats) / total_seconds if total_seconds > 0 else 0.0
-    confidence = _bounded_confidence(min(1.0, beat_density / 2.5 + 0.1))
-    return float(final_bpm), confidence
+def _trim_to_max_duration(
+    signal: np.ndarray, sr: int, max_seconds: float
+) -> np.ndarray:
+    if signal.size == 0 or sr <= 0:
+        return signal
+    max_samples = int(max_seconds * sr)
+    if max_samples <= 0:
+        return signal
+    return signal if signal.size <= max_samples else signal[:max_samples]
 
 
-def compute_spectral_features(y: np.ndarray, sr: int) -> Tuple[Dict[str, float], Dict[str, Any]]:
-    if y.size == 0 or sr <= 0:
-        base = {
-            "spectral_centroid_hz": 0.0,
-            "spectral_rolloff_hz": 0.0,
-            "spectral_bandwidth_hz": 0.0,
-            "spectral_flatness": 0.0,
-            "zero_crossing_rate": 0.0,
-            "low_db": -120.0,
-            "lowmid_db": -120.0,
-            "mid_db": -120.0,
-            "high_db": -120.0,
-            "air_db": -120.0,
-        }
-        return base, {"power": np.zeros(0), "freqs": np.zeros(0)}
-
-    power, freqs = _build_stft_power(y, sr)
-    mag = np.mean(np.sqrt(power), axis=1) + 1e-12
-    mag_sum = float(np.sum(mag))
-
-    if mag_sum > 0:
-        centroid = float(np.sum(freqs * mag) / mag_sum)
-    else:
-        centroid = 0.0
-
-    cum = np.cumsum(mag)
-    thresh = 0.95 * mag_sum
-    idx_roll = np.searchsorted(cum, thresh)
-    if idx_roll >= freqs.size:
-        idx_roll = freqs.size - 1
-
-    rolloff = float(freqs[idx_roll]) if freqs.size > 0 else 0.0
-
-    if mag_sum > 0:
-        bandwidth = float(math.sqrt(np.sum(((freqs - centroid) ** 2) * mag) / mag_sum))
-    else:
-        bandwidth = 0.0
-
-    log_mag = np.log(mag)
-    g_mean = float(np.exp(np.mean(log_mag)))
-    a_mean = float(np.mean(mag))
-    flatness = float(g_mean / (a_mean + 1e-12))
-    zc = np.mean(y[1:] * y[:-1] < 0.0)
-
-    bands = SPECTRAL_BANDS
-
-    band_energy: Dict[str, float] = {}
-    power_db = 10.0 * np.log10(power + 1e-12)
-    for label, fmin, fmax in bands:
-        mask = (freqs >= fmin) & (freqs < fmax)
-        if not np.any(mask):
-            band_energy[label] = -120.0
-            continue
-        band_energy[label] = float(np.mean(power_db[mask]))
-
-    return (
-        {
-            "spectral_centroid_hz": round(centroid, 2),
-            "spectral_rolloff_hz": round(rolloff, 2),
-            "spectral_bandwidth_hz": round(bandwidth, 2),
-            "spectral_flatness": round(flatness, 4),
-            "zero_crossing_rate": round(float(zc), 4),
-            "low_db": round(band_energy["low"], 2),
-            "lowmid_db": round(band_energy["lowmid"], 2),
-            "mid_db": round(band_energy["mid"], 2),
-            "high_db": round(band_energy["high"], 2),
-            "air_db": round(band_energy["air"], 2),
-        },
-        {"power": power, "freqs": freqs},
-    )
-
-
-def detect_key(y: np.ndarray, sr: int) -> Tuple[Union[str, None], float]:
-    if y.size == 0 or sr <= 0:
-        return None, 0.0
-
-    hop_length = 2048
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
-    if chroma.size == 0:
-        return None, 0.0
-
-    rms_energy = librosa.feature.rms(y=y, frame_length=4096, hop_length=hop_length)[0]
-    mask = rms_energy > 1e-7
-    if not np.any(mask):
-        return None, 0.0
-
-    chroma_trimmed = chroma[:, mask]
-    if chroma_trimmed.size == 0:
-        return None, 0.0
-
-    chroma_mean = np.mean(chroma_trimmed, axis=1)
-    if not np.any(chroma_mean > 0):
-        return None, 0.0
-
-    chroma_norm = _normalize_vector(chroma_mean)
-    major_template = np.array(
-        [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
-        dtype=float,
-    )
-    minor_template = np.array(
-        [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
-        dtype=float,
-    )
-
-    best_score = -1.0
-    best_key: Union[str, None] = None
-    notes = [
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B",
-    ]
-
-    for idx in range(12):
-        major_profile = _normalize_vector(_rotate_profile(major_template, idx))
-        minor_profile = _normalize_vector(_rotate_profile(minor_template, idx))
-        major_score = float(np.dot(chroma_norm, major_profile))
-        minor_score = float(np.dot(chroma_norm, minor_profile))
-        if major_score > best_score:
-            best_score = major_score
-            best_key = f"{notes[idx]}maj"
-        if minor_score > best_score:
-            best_score = minor_score
-            best_key = f"{notes[idx]}min"
-
-    confidence = _bounded_confidence(best_score)
-    return best_key, confidence
-
-
-def _compute_crest_factor(y: np.ndarray) -> float:
-    if y.size == 0:
+def _zero_crossing_rate(signal: np.ndarray) -> float:
+    if signal.size < 2:
         return 0.0
-    peak = float(np.max(np.abs(y))) + 1e-12
-    rms = math.sqrt(float(np.mean(y**2))) + 1e-12
+    crossings = np.sum(signal[:-1] * signal[1:] < 0)
+    return float(crossings) / max(1, signal.size - 1)
+
+
+def _compute_crest_factor(signal: np.ndarray) -> float:
+    if signal.size == 0:
+        return 0.0
+    peak = float(np.max(np.abs(signal))) + 1e-12
+    rms = math.sqrt(float(np.mean(signal**2))) + 1e-12
     return 20.0 * math.log10(peak / rms)
+
+
+def _pad_frame(frame: Any, target_size: int) -> np.ndarray:
+    arr = np.asarray(frame, dtype=np.float32)
+    if arr.size >= target_size:
+        return arr[:target_size]
+    return np.pad(arr, (0, target_size - arr.size))
+
+
+def _sequence_to_float_list(value: Any) -> list[float] | None:
+    if value is None:
+        return None
+    try:
+        array = np.asarray(value, dtype=float)
+    except Exception:
+        return None
+    if array.size == 0:
+        return None
+    return [float(x) for x in array]
+
+
+def _safe_float(
+    value: Any, guard: Callable[[float], bool] | None = None
+) -> float | None:
+    try:
+        candidate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if guard and not guard(candidate):
+        return None
+    return candidate
+
+
+def _compute_band_rms_numpy(
+    signal: np.ndarray, sr: int, fmin: float, fmax: float, n_fft: int
+) -> float:
+    if signal.size == 0 or sr <= 0 or n_fft <= 0:
+        return 0.0
+    fft_size = max(4, min(len(signal), n_fft))
+    window = np.hanning(fft_size)
+    padded = signal if signal.size >= fft_size else np.pad(signal, (0, fft_size - signal.size))
+    spectrum = np.fft.rfft(padded * window)
+    freqs = np.fft.rfftfreq(fft_size, 1.0 / sr)
+    mask = (freqs >= fmin) & (freqs < fmax)
+    if not np.any(mask):
+        return 0.0
+    power = np.mean(np.abs(spectrum[mask]) ** 2)
+    return math.sqrt(max(power, 1e-18))
+
+
+def _compute_band_rms_essentia(
+    signal: np.ndarray, sr: int, fmin: float, fmax: float, n_fft: int, hop_length: int
+) -> float:
+    if es is None:
+        raise RuntimeError("Essentia not initialized")
+    windowing = es.Windowing(type="hann")
+    spectrum = es.Spectrum(size=n_fft)
+    freq_bins = np.linspace(0, sr / 2, n_fft // 2 + 1)
+    mask = (freq_bins >= fmin) & (freq_bins < fmax)
+    if not np.any(mask):
+        return 0.0
+    total_power = 0.0
+    frames = 0
+    for frame in es.FrameGenerator(signal, frameSize=n_fft, hopSize=hop_length):
+        windowed = windowing(_pad_frame(frame, n_fft))
+        mag = np.array(spectrum(windowed))
+        selected = mag[mask]
+        if selected.size == 0:
+            continue
+        total_power += float(np.mean(selected**2))
+        frames += 1
+    if frames == 0:
+        return 0.0
+    return math.sqrt(total_power / frames)
 
 
 def _compute_band_rms(
@@ -298,12 +149,12 @@ def _compute_band_rms(
     n_fft: int = N_FFT,
     hop_length: int = HOP_LENGTH,
 ) -> float:
-    power, freqs = _build_stft_power(signal, sr, n_fft=n_fft, hop_length=hop_length)
-    mask = (freqs >= fmin) & (freqs < fmax)
-    if not np.any(mask):
-        return 0.0
-    band_power = float(np.mean(power[mask]))
-    return math.sqrt(max(band_power, 1e-18))
+    if _ESSENTIA_AVAILABLE:
+        try:
+            return _compute_band_rms_essentia(signal, sr, fmin, fmax, n_fft, hop_length)
+        except Exception:
+            pass
+    return _compute_band_rms_numpy(signal, sr, fmin, fmax, n_fft)
 
 
 def _width_db(side_rms: float, mid_rms: float) -> float:
@@ -322,19 +173,15 @@ def _build_stereo_width(y_stereo: np.ndarray, sr: int) -> Dict[str, Any]:
             "lr_balance_db": 0.0,
             "band_widths_db": {"low": 0.0, "mid": 0.0, "high": 0.0},
         }
-
     left, right = y_stereo[0], y_stereo[1]
     min_len = min(len(left), len(right))
     left = left[:min_len]
     right = right[:min_len]
-
     corr_num = float(np.sum(left * right))
     corr_den = math.sqrt(float(np.sum(left**2) * np.sum(right**2))) + 1e-12
     global_corr = corr_num / corr_den if corr_den > 0 else 0.0
-
     mid = (left + right) * 0.5
     side = (left - right) * 0.5
-
     band_widths: Dict[str, float] = {}
     total_side_energy = 0.0
     for label, fmin, fmax in STEREO_BANDS:
@@ -342,12 +189,10 @@ def _build_stereo_width(y_stereo: np.ndarray, sr: int) -> Dict[str, Any]:
         side_rms = _compute_band_rms(side, sr, fmin, fmax)
         band_widths[label] = round(_width_db(side_rms, mid_rms), 2)
         total_side_energy += side_rms
-
     left_rms = math.sqrt(float(np.mean(left**2)) + 1e-12)
     right_rms = math.sqrt(float(np.mean(right**2)) + 1e-12)
     lr_balance_db = 20.0 * math.log10((left_rms + 1e-6) / (right_rms + 1e-6))
     is_mono = total_side_energy < 1e-3
-
     return {
         "is_mono": is_mono,
         "global_correlation": round(global_corr, 3),
@@ -362,7 +207,7 @@ def _build_warnings(
     spectral_flatness: float,
     crest_db: float,
     stereo_width: Dict[str, Any],
-    loudness_stats: dict[str, float] | None = None,
+    loudness_stats: Dict[str, float] | None = None,
 ) -> List[Dict[str, Union[str, float]]]:
     warnings: List[Dict[str, Union[str, float]]] = []
     max_amp = float(np.max(np.abs(y))) if y.size else 0.0
@@ -467,6 +312,309 @@ def _build_warnings(
     return warnings
 
 
+def _default_rhythm_block() -> Dict[str, Any]:
+    return {"bpm": None, "bpm_conf": None, "beats": None, "tempo_curve": None}
+
+
+def _default_tonal_block() -> Dict[str, Any]:
+    return {"key": None, "scale": None, "key_conf": None, "tonal_strength": None, "hpcp_stats": None}
+
+
+def _default_loudness_block() -> Dict[str, Any]:
+    return {
+        "integrated_lufs": None,
+        "lra": None,
+        "momentary_loudness": None,
+        "short_term_loudness": None,
+        "true_peak_db": None,
+    }
+
+
+def _default_spectral_block(signal: np.ndarray) -> Dict[str, Any]:
+    return {
+        "centroid_hz": None,
+        "rolloff_hz": None,
+        "bandwidth_hz": None,
+        "flatness": None,
+        "mfcc_mean": None,
+        "mfcc_std": None,
+        "low_db": None,
+        "lowmid_db": None,
+        "mid_db": None,
+        "high_db": None,
+        "air_db": None,
+        "zero_crossing_rate": _zero_crossing_rate(signal),
+        "crest_factor_db": None,
+    }
+
+
+def _collect_hpcp_stats(signal: np.ndarray, sr: int) -> dict[str, list[float]] | None:
+    if es is None or signal.size == 0 or sr <= 0:
+        return None
+    freq_bins = np.linspace(0, sr / 2, N_FFT // 2 + 1)
+    hpcp_algo = es.HPCP(sampleRate=sr, size=12)
+    windowing = es.Windowing(type="hann")
+    spectrum = es.Spectrum(size=N_FFT)
+    collected: List[np.ndarray] = []
+    for frame in es.FrameGenerator(signal, frameSize=N_FFT, hopSize=HOP_LENGTH):
+        windowed = windowing(_pad_frame(frame, N_FFT))
+        mag = np.array(spectrum(windowed))
+        if mag.size != freq_bins.size:
+            continue
+        raw = hpcp_algo(mag, freq_bins)
+        arr = np.asarray(raw, dtype=float)
+        if arr.size == 0:
+            continue
+        collected.append(arr)
+    if not collected:
+        return None
+    stack = np.vstack(collected)
+    return {
+        "mean": [float(v) for v in stack.mean(axis=0)],
+        "std": [float(v) for v in stack.std(axis=0)],
+    }
+
+
+def _extract_rhythm_block(signal: np.ndarray, sr: int) -> Dict[str, Any]:
+    block = _default_rhythm_block()
+    if es is None or signal.size == 0 or sr <= 0:
+        return block
+    trimmed = _trim_to_max_duration(signal, sr, MAX_BPM_ANALYSIS_SECONDS)
+    rhythm_extractor = es.RhythmExtractor2013(method="multifeature")
+    result = rhythm_extractor(trimmed)
+    bpm_value = _safe_float(result[0], lambda v: v > 0) if len(result) > 0 else None
+    if bpm_value is not None:
+        block["bpm"] = float(bpm_value)
+    conf_raw = _safe_float(result[2]) if len(result) > 2 else None
+    block["bpm_conf"] = (
+        _bounded_confidence(conf_raw / 5.0) if conf_raw is not None else 0.0
+    )
+    block["beats"] = _sequence_to_float_list(result[1]) if len(result) > 1 else None
+    block["tempo_curve"] = _sequence_to_float_list(result[3]) if len(result) > 3 else None
+    print(
+        "[PY-ANALYZER] build_essentia_features: rhythm block computed, "
+        f"bpm={block['bpm']}, conf={block['bpm_conf']}"
+    )
+    return block
+
+
+def _extract_tonal_block(signal: np.ndarray, sr: int) -> Dict[str, Any]:
+    block = _default_tonal_block()
+    if es is None or signal.size == 0 or sr <= 0:
+        return block
+    key_extractor = es.KeyExtractor()
+    key, scale, strength = key_extractor(signal)
+    if not key:
+        return block
+    scale_label = (scale or "").lower()
+    key_suffix = "maj" if scale_label.startswith("maj") else "min"
+    key_value = f"{key}{key_suffix}"
+    block["key"] = key_value
+    block["scale"] = scale
+    if strength is not None:
+        confidence = _bounded_confidence(float(strength))
+        block["key_conf"] = confidence
+        block["tonal_strength"] = float(strength)
+    block["hpcp_stats"] = _collect_hpcp_stats(signal, sr)
+    print(
+        "[PY-ANALYZER] build_essentia_features: tonal block computed, "
+        f"key={block['key']}, conf={block['key_conf']}"
+    )
+    return block
+
+
+def _extract_loudness_block(signal: np.ndarray, sr: int) -> Dict[str, Any]:
+    block = _default_loudness_block()
+    if es is None or signal.size == 0 or sr <= 0:
+        return block
+    loudness_meter = es.LoudnessEBUR128(sampleRate=sr)
+    trimmed = _trim_to_max_duration(signal, sr, MAX_BPM_ANALYSIS_SECONDS)
+    result = loudness_meter(trimmed)
+    values = [float(v) for v in result if isinstance(v, (int, float))]
+    if values:
+        block["integrated_lufs"] = values[0]
+    if len(values) > 1:
+        block["lra"] = values[1]
+    if len(values) > 2:
+        block["momentary_loudness"] = values[2]
+    if len(values) > 3:
+        block["short_term_loudness"] = values[3]
+    if len(values) > 4:
+        block["true_peak_db"] = values[4]
+    print(
+        "[PY-ANALYZER] build_essentia_features: loudness block computed, "
+        f"integrated={block['integrated_lufs']}"
+    )
+    return block
+
+
+def _extract_spectral_block(signal: np.ndarray, sr: int) -> Dict[str, Any]:
+    if es is None or signal.size == 0 or sr <= 0:
+        return {}
+    crest_value = round(_compute_crest_factor(signal), 2)
+    frame_size = N_FFT
+    hop_size = HOP_LENGTH
+    bins = frame_size // 2 + 1
+    freq_bins = np.linspace(0, sr / 2, bins)
+    windowing = es.Windowing(type="hann")
+    spectrum = es.Spectrum(size=frame_size)
+    melbands = es.MelBands(
+        sampleRate=sr,
+        inputSize=bins,
+        numberBands=40,
+        lowFrequencyBound=20.0,
+        highFrequencyBound=max(20000.0, sr / 2),
+    )
+    mfcc_algo = es.MFCC(numberCoefficients=13, inputSize=bins)
+    centroids = 0.0
+    rolloff_total = 0.0
+    bandwidth_total = 0.0
+    flatness_total = 0.0
+    power_accum = np.zeros(bins)
+    mfcc_frames: List[np.ndarray] = []
+    processed = 0
+    for frame in es.FrameGenerator(signal, frameSize=frame_size, hopSize=hop_size):
+        windowed = windowing(_pad_frame(frame, frame_size))
+        mag = np.array(spectrum(windowed))
+        if mag.size != bins:
+            continue
+        processed += 1
+        power = mag**2
+        power_accum += power
+        mag_sum = float(np.sum(mag))
+        centroid = float(np.sum(freq_bins * mag) / mag_sum) if mag_sum > 0 else 0.0
+        centroids += centroid
+        cumsum = np.cumsum(mag)
+        threshold = 0.95 * mag_sum
+        idx = np.searchsorted(cumsum, threshold)
+        idx = min(idx, bins - 1)
+        rolloff = float(freq_bins[idx]) if bins > 0 else 0.0
+        rolloff_total += rolloff
+        if mag_sum > 0:
+            bandwidth = float(
+                math.sqrt(np.sum(((freq_bins - centroid) ** 2) * mag) / mag_sum)
+            )
+        else:
+            bandwidth = 0.0
+        bandwidth_total += bandwidth
+        log_mag = np.log(mag + 1e-12)
+        g_mean = float(np.exp(np.mean(log_mag)))
+        a_mean = float(np.mean(mag))
+        flatness_total += float(g_mean / (a_mean + 1e-12))
+        try:
+            mel = melbands(mag)
+            mfcc_result = mfcc_algo(mel)
+        except Exception:
+            continue
+        coeffs = (
+            mfcc_result[0]
+            if isinstance(mfcc_result, tuple) and len(mfcc_result) > 0
+            else mfcc_result
+        )
+        coeffs_array = np.asarray(coeffs, dtype=float)
+        if coeffs_array.size == 13:
+            mfcc_frames.append(coeffs_array)
+    if processed == 0:
+        return {}
+    centroid_avg = centroids / processed
+    rolloff_avg = rolloff_total / processed
+    bandwidth_avg = bandwidth_total / processed
+    flatness_avg = flatness_total / processed
+    power_avg = power_accum / processed
+    power_db = 10.0 * np.log10(power_avg + 1e-12)
+    band_values: Dict[str, float] = {}
+    for label, fmin, fmax in SPECTRAL_BANDS:
+        mask = (freq_bins >= fmin) & (freq_bins < fmax)
+        if not np.any(mask):
+            band_values[label] = -120.0
+        else:
+            band_values[label] = float(np.mean(power_db[mask]))
+    if mfcc_frames:
+        stack = np.vstack(mfcc_frames)
+        mfcc_mean = [float(value) for value in stack.mean(axis=0)]
+        mfcc_std = [float(value) for value in stack.std(axis=0)]
+    else:
+        mfcc_mean = [0.0] * 13
+        mfcc_std = [0.0] * 13
+    block = {
+        "centroid_hz": round(centroid_avg, 2),
+        "rolloff_hz": round(rolloff_avg, 2),
+        "bandwidth_hz": round(bandwidth_avg, 2),
+        "flatness": round(flatness_avg, 4),
+        "mfcc_mean": [round(value, 3) for value in mfcc_mean],
+        "mfcc_std": [round(value, 3) for value in mfcc_std],
+        "low_db": round(band_values["low"], 2),
+        "lowmid_db": round(band_values["lowmid"], 2),
+        "mid_db": round(band_values["mid"], 2),
+        "high_db": round(band_values["high"], 2),
+        "air_db": round(band_values["air"], 2),
+        "zero_crossing_rate": _zero_crossing_rate(signal),
+        "crest_factor_db": crest_value,
+    }
+    print(
+        "[PY-ANALYZER] build_essentia_features: spectral block computed, "
+        f"centroid={block['centroid_hz']}, rolloff={block['rolloff_hz']}"
+    )
+    return block
+
+
+def _prepare_stereo_signal(
+    y_stereo: np.ndarray | None, y_mono: np.ndarray
+) -> np.ndarray:
+    if y_stereo is None:
+        return np.stack([y_mono, y_mono])
+    arr = np.asarray(y_stereo, dtype=np.float32)
+    if arr.ndim == 1:
+        arr = arr[np.newaxis, :]
+    if arr.shape[0] == 1:
+        arr = np.vstack([arr[0], arr[0]])
+    elif arr.shape[0] > 2:
+        arr = arr[:2]
+    left, right = arr[0], arr[1]
+    min_len = min(len(left), len(right))
+    return np.stack([left[:min_len], right[:min_len]])
+
+
+def build_essentia_features(
+    y_mono: np.ndarray,
+    sr: int,
+    y_stereo: np.ndarray | None,
+    sr_stereo: int | None,
+) -> Dict[str, Any]:
+    stereo_signal = _prepare_stereo_signal(y_stereo, y_mono)
+    stereo_sr = sr_stereo if sr_stereo and sr_stereo > 0 else sr
+    pack: Dict[str, Any] = {
+        "rhythm": _default_rhythm_block(),
+        "tonal": _default_tonal_block(),
+        "loudness": _default_loudness_block(),
+        "spectral": _default_spectral_block(y_mono),
+        "stereo": _build_stereo_width(stereo_signal, stereo_sr),
+    }
+    if not _ESSENTIA_AVAILABLE or y_mono.size == 0 or sr <= 0:
+        print("[PY-ANALYZER] build_essentia_features: Essentia unavailable, using defaults")
+        return pack
+    signal = y_mono.astype(np.float32, copy=False)
+    try:
+        pack["rhythm"] = _extract_rhythm_block(signal, sr)
+    except Exception as exc:
+        print(f"[PY-ANALYZER] build_essentia_features: rhythm block failed ({exc})")
+    try:
+        pack["loudness"] = _extract_loudness_block(signal, sr)
+    except Exception as exc:
+        print(f"[PY-ANALYZER] build_essentia_features: loudness block failed ({exc})")
+    try:
+        spectral_results = _extract_spectral_block(signal, sr)
+        if spectral_results:
+            pack["spectral"].update(spectral_results)
+    except Exception as exc:
+        print(f"[PY-ANALYZER] build_essentia_features: spectral block failed ({exc})")
+    try:
+        pack["tonal"] = _extract_tonal_block(signal, sr)
+    except Exception as exc:
+        print(f"[PY-ANALYZER] build_essentia_features: tonal block failed ({exc})")
+    return pack
+
+
 def analyze_v4_extras(
     y_mono: np.ndarray,
     y_stereo: np.ndarray,
@@ -474,134 +622,78 @@ def analyze_v4_extras(
     loudness_stats: dict[str, float] | None = None,
 ) -> Dict[str, Any]:
     duration = float(len(y_mono) / sr) if sr > 0 else 0.0
-
-    mid_signal = y_mono
-    if y_stereo.ndim == 2:
-        left, right = y_stereo[0], y_stereo[1]
-        min_len = min(left.size, right.size)
-        left = left[:min_len]
-        right = right[:min_len]
-        mid_signal = (left + right) * 0.5
-
-    bpm_value, bpm_confidence = estimate_bpm(mid_signal, sr)
-    spectral_features, _ = compute_spectral_features(y_mono, sr)
-    key_value, key_confidence = detect_key(mid_signal, sr)
-    crest_db = _compute_crest_factor(y_mono)
-    stereo_width = _build_stereo_width(y_stereo, sr)
-    spectral_confidence = _bounded_confidence(1.0 - spectral_features["spectral_flatness"])
-
-    band_ratios = stereo_width.get("band_widths_ratio", {})
-    avg_ratio = (
-        sum(band_ratios.values()) / len(band_ratios)
-        if band_ratios
-        else 0.0
+    essentia_features = build_essentia_features(
+        y_mono=y_mono, sr=sr, y_stereo=y_stereo, sr_stereo=sr
     )
+    print("[PY-ANALYZER] analyze_v4_extras: mapping essentia_features -> legacy fields")
+    rhythm_block = essentia_features.get("rhythm", {})
+    tonal_block = essentia_features.get("tonal", {})
+    spectral_block = essentia_features.get("spectral", {})
+    loudness_block = essentia_features.get("loudness", {})
+    stereo_width = essentia_features.get("stereo", {})
 
-    # Un avg_ratio intorno a 0.2 - 0.3 è normale per minimal / tech
-    width_score = _bounded_confidence(avg_ratio / 0.35)
-
-    corr = float(stereo_width.get("global_correlation", 0.0))
-    # Correlazione molto vicina a 1 abbassa un po' la confidence
-    corr_score = _bounded_confidence(1.0 - max(0.0, corr - 0.1))
-
-    stereo_confidence = _bounded_confidence(0.6 * width_score + 0.4 * corr_score)
-
-
-    target_lufs = -8.5
-    integrated_lufs = loudness_stats.get("integrated_lufs") if loudness_stats else None
-    if integrated_lufs is not None:
-        loudness_confidence = _bounded_confidence(
-            1.0
-            - min(1.0, abs(integrated_lufs - target_lufs) / 8.0)
-        )
-    else:
-        loudness_confidence = 0.5
+    crest_db = float(spectral_block.get("crest_factor_db") or 0.0)
+    spectral_flatness = float(spectral_block.get("flatness") or 0.0)
+    spectral_confidence = None
+    stereo_confidence = None
+    loudness_confidence = None
 
     warnings = _build_warnings(
         duration=duration,
         y=y_mono,
-        spectral_flatness=spectral_features["spectral_flatness"],
+        spectral_flatness=spectral_flatness,
         crest_db=crest_db,
         stereo_width=stereo_width,
         loudness_stats=loudness_stats,
     )
 
-    harmonic_tilt = spectral_features["lowmid_db"] - spectral_features["high_db"]
-    low_end_coherence = max(
-        0.0,
-        1.0
-        - min(
-            1.0,
-            abs(spectral_features["low_db"] - spectral_features["lowmid_db"]) / 12.0,
-        ),
-    )
-    hi_end_diff = spectral_features["high_db"] - spectral_features["air_db"]
-    hi_end_harshness = max(
-        0.0,
-        min(
-            1.0,
-            (hi_end_diff / 8.0) + (spectral_features["spectral_flatness"] * 0.4),
-        ),
-    )
-
-    short_min = loudness_stats.get("short_lufs_min") if loudness_stats else None
-    short_max = loudness_stats.get("short_lufs_max") if loudness_stats else None
-    short_std = loudness_stats.get("short_lufs_std") if loudness_stats else None
-    lra = max(0.0, (short_max - short_min) if short_min is not None and short_max is not None else 0.0)
-    dynamics_score = 0.5
-    if short_min is not None and short_max is not None:
-        dynamics_score = max(0.0, 1.0 - min(1.0, abs(lra - 7.5) / 8.0))
-    if short_std is not None and short_std < 0.25:
-        dynamics_score *= max(0.0, short_std / 0.25)
-    dynamics_score = _bounded_confidence(dynamics_score)
-    dynamics_obj = {
-        "score": round(dynamics_score * 100.0, 1),
-        "lra": round(lra, 2),
-        "short_term_std": round(short_std or 0.0, 2),
-        "crest_factor_db": round(crest_db, 2),
+    spectral_output = {
+        "spectral_centroid_hz": spectral_block.get("centroid_hz"),
+        "spectral_rolloff_hz": spectral_block.get("rolloff_hz"),
+        "spectral_bandwidth_hz": spectral_block.get("bandwidth_hz"),
+        "spectral_flatness": spectral_block.get("flatness"),
+        "zero_crossing_rate": spectral_block.get("zero_crossing_rate"),
+        "low_db": spectral_block.get("low_db"),
+        "lowmid_db": spectral_block.get("lowmid_db"),
+        "mid_db": spectral_block.get("mid_db"),
+        "high_db": spectral_block.get("high_db"),
+        "air_db": spectral_block.get("air_db"),
     }
 
-    loudness_stats_output: dict[str, Union[float, None]] = {}
-    if loudness_stats:
-        for key, value in loudness_stats.items():
-            if value is None:
-                loudness_stats_output[key] = None
-            else:
-                loudness_stats_output[key] = round(float(value), 3)
+    loudness_stats_output: Dict[str, Union[float, None]] = {}
+    for key, value in loudness_block.items():
+        loudness_stats_output[key] = None if value is None else round(float(value), 3)
 
-    harmonic_balance = {
-        "tilt_db": round(harmonic_tilt, 2),
-        "low_end_definition": round(low_end_coherence * 100.0, 1),
-        "hi_end_harshness": round(hi_end_harshness * 100.0, 1),
-    }
-
-    return {
+    result = {
         "duration_seconds": duration,
-        "bpm": bpm_value,
-        "bpm_confidence": bpm_confidence,
-        "key": key_value,
-        "key_confidence": key_confidence,
-        "spectral": spectral_features,
-        "spectral_centroid_hz": spectral_features["spectral_centroid_hz"],
-        "spectral_rolloff_hz": spectral_features["spectral_rolloff_hz"],
-        "spectral_bandwidth_hz": spectral_features["spectral_bandwidth_hz"],
-        "spectral_flatness": spectral_features["spectral_flatness"],
-        "zero_crossing_rate": spectral_features["zero_crossing_rate"],
-        "spectral_low_db": spectral_features["low_db"],
-        "spectral_lowmid_db": spectral_features["lowmid_db"],
-        "spectral_mid_db": spectral_features["mid_db"],
-        "spectral_high_db": spectral_features["high_db"],
-        "spectral_air_db": spectral_features["air_db"],
-        "harmonic_balance": harmonic_balance,
+        "bpm": rhythm_block.get("bpm"),
+        "bpm_confidence": rhythm_block.get("bpm_conf"),
+        "key": tonal_block.get("key"),
+        "key_confidence": tonal_block.get("key_conf"),
+        "spectral": spectral_output,
+        "spectral_centroid_hz": spectral_output["spectral_centroid_hz"],
+        "spectral_rolloff_hz": spectral_output["spectral_rolloff_hz"],
+        "spectral_bandwidth_hz": spectral_output["spectral_bandwidth_hz"],
+        "spectral_flatness": spectral_output["spectral_flatness"],
+        "zero_crossing_rate": spectral_output["zero_crossing_rate"],
+        "spectral_low_db": spectral_output["low_db"],
+        "spectral_lowmid_db": spectral_output["lowmid_db"],
+        "spectral_mid_db": spectral_output["mid_db"],
+        "spectral_high_db": spectral_output["high_db"],
+        "spectral_air_db": spectral_output["air_db"],
         "stereo_width": stereo_width,
-        "dynamics": dynamics_obj,
+        "dynamics": None,
         "loudness_stats": loudness_stats_output or None,
+        "harmonic_balance": None,
         "confidence": {
-            "bpm": bpm_confidence,
-            "key": key_confidence,
+            "bpm": rhythm_block.get("bpm_conf") or 0.0,
+            "key": tonal_block.get("key_conf") or 0.0,
             "lufs": loudness_confidence,
             "spectral": spectral_confidence,
             "stereo": stereo_confidence,
         },
         "warnings": warnings,
+        "essentia_features": essentia_features,
     }
+
+    return result

@@ -9,7 +9,7 @@
 "start": "next start",
    "lint": "next lint",
 "dev:next": "next dev --turbopack",
-"dev:analyzer": "cross-env TEKKIN_ANALYZER_SECRET=4fu4fugb4utbu4ndsauinufru48fsoi48845nfu python -m uvicorn tekkin_analyzer_api:app --host 0.0.0.0 --port 8000"
+  "dev:analyzer": "docker run --rm -p 8000:8000 -e TEKKIN_ANALYZER_SECRET=4fu4fugb4utbu4ndsauinufru48fsoi48845nfu tekkin-analyzer"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",
