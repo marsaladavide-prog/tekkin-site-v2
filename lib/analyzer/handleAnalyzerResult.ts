@@ -1,4 +1,5 @@
 import type { AnalyzerResult } from "@/types/analyzer";
+import type { BandKey, BandsNorm } from "@/lib/reference/types";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -8,6 +9,29 @@ function isFiniteNumber(x: unknown): x is number {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
+}
+
+const BAND_KEYS: BandKey[] = ["sub", "low", "lowmid", "mid", "presence", "high", "air"];
+
+export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm {
+  const spectralRaw = (result as unknown as AnyRecord)?.spectral as AnyRecord | undefined;
+  if (!spectralRaw || typeof spectralRaw !== "object") {
+    return {};
+  }
+
+  const bandNormRaw = spectralRaw.band_norm as AnyRecord | undefined;
+  if (!bandNormRaw || typeof bandNormRaw !== "object") {
+    return {};
+  }
+
+  const normalized: BandsNorm = {};
+  for (const key of BAND_KEYS) {
+    const value = bandNormRaw[key];
+    if (isFiniteNumber(value)) {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
 }
 
 /**
@@ -71,6 +95,21 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
     return merged;
   })();
 
+  const waveformPeaks =
+    Array.isArray(result.waveform_peaks) && result.waveform_peaks.length
+      ? result.waveform_peaks.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      : null;
+
+  const waveformDuration =
+    typeof result.waveform_duration === "number" && Number.isFinite(result.waveform_duration)
+      ? result.waveform_duration
+      : null;
+
+  const waveformBands = (() => {
+    const wb = (result as unknown as AnyRecord)?.waveform_bands;
+    return wb && typeof wb === "object" ? (wb as AnalyzerResult["waveform_bands"]) : null;
+  })();
+
   return {
     // metri principali
     lufs: lufs ?? null,
@@ -112,5 +151,9 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
     fix_suggestions: fixSuggestions,
     arrays_blob_path: arraysBlobPath,
     arrays_blob_size_bytes: arraysBlobSize,
+    waveform_peaks: waveformPeaks,
+    waveform_duration: waveformDuration,
+    waveform_bands: waveformBands,
+    analyzer_bands_norm: extractBandsNormFromAnalyzer(result),
   };
 }

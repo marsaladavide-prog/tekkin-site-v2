@@ -1,11 +1,12 @@
-# Dockerfile per TEKKIN ANALYZER con Essentia
+FROM python:3.10-slim-bullseye
 
-FROM python:3.10-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Dipendenze di sistema richieste da Essentia
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
+    pkg-config \
     libyaml-dev \
     libfftw3-dev \
     libavcodec-dev \
@@ -16,18 +17,14 @@ RUN apt-get update && apt-get install -y \
     libeigen3-dev \
     libsamplerate0-dev \
     libsndfile1-dev \
-    && rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    libgomp1 \
+  && rm -rf /var/lib/apt/lists/*
 
-
-# Directory di lavoro
 WORKDIR /app
-
-# Copio tutto il progetto dentro il container
 COPY . /app
 
-# Installo requirements analyzer + Essentia
 RUN pip install --no-cache-dir -r tekkin_analyzer_requirements.txt \
-    && pip install --no-cache-dir essentia
+  && pip install --no-cache-dir essentia
 
-# Comando di avvio dell analyzer
 CMD ["python", "-m", "uvicorn", "tekkin_analyzer_api:app", "--host", "0.0.0.0", "--port", "8000"]

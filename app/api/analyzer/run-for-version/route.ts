@@ -158,6 +158,9 @@ const payload = {
       feedback,
       fix_suggestions,
       reference_ai,
+      waveform_peaks,
+      waveform_duration,
+      waveform_bands,
     } = result;
 
     const analyzerBpm =
@@ -177,10 +180,16 @@ const payload = {
         analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
         fix_suggestions: fix_suggestions ?? null,
         analyzer_reference_ai: reference_ai ?? null,
+        waveform_peaks: Array.isArray(waveform_peaks) ? waveform_peaks : null,
+        waveform_duration:
+          typeof waveform_duration === "number" && Number.isFinite(waveform_duration)
+            ? waveform_duration
+            : null,
+        waveform_bands: waveform_bands ?? null,
       })
       .eq("id", version.id)
       .select(
-        "id, version_name, created_at, audio_url, lufs, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai, fix_suggestions"
+        "id, version_name, created_at, audio_url, lufs, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai, fix_suggestions, waveform_peaks, waveform_duration, waveform_bands"
       )
       .single();
 

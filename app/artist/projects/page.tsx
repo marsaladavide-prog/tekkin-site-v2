@@ -1,12 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type TouchEvent,
+} from "react";
 import { Download, MoreVertical, Pause, Play, Search, Settings, Trash2 } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/client";
 import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
+import type { WaveformBands } from "@/types/analyzer";
 
 type ProjectVersionRow = {
   id: string;
@@ -21,6 +31,7 @@ type ProjectVersionRow = {
 
   waveform_peaks?: number[] | null;
   waveform_duration?: number | null;
+  waveform_bands?: WaveformBands | null;
 };
 
 type ProjectRow = {
@@ -37,25 +48,34 @@ type ProjectRow = {
   versions: ProjectVersionRow[];
 };
 
-const buildProjectsSelectQuery = (includeProjectInfo: boolean) => `
-  id,
-  title,
-  status,
-  created_at,
-  project_versions (
+const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBands: boolean) => {
+  const versionFields = [
+    "id",
+    "version_name",
+    "created_at",
+    "overall_score",
+    "lufs",
+    "mix_type",
+    "audio_url",
+    "waveform_peaks",
+    "waveform_duration",
+    includeWaveformBands ? "waveform_bands" : null,
+  ]
+    .filter(Boolean)
+    .join(",\n    ");
+
+  return `
     id,
-    version_name,
+    title,
+    status,
     created_at,
-    overall_score,
-    lufs,
-    mix_type,
-    audio_url,
-    waveform_peaks,
-    waveform_duration
-  )${includeProjectInfo ? `,
-  cover_url,
-  description` : ""}
-`;
+    project_versions (
+      ${versionFields}
+    )${includeProjectInfo ? `,
+    cover_url,
+    description` : ""}
+  `;
+};
 
 const shouldExcludeProjectInfo = (error: { message?: string | null; details?: string | null } | null) => {
   if (!error) return false;
@@ -80,204 +100,232 @@ const formatTime = (secs: number) => {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
-type CachedPeaks = { peaks: number[]; duration: number; ts: number };
-const waveformPeaksCache = new Map<string, CachedPeaks>();
-const MAX_IN_MEMORY = 40;
-const PEAKS_STORAGE_PREFIX = "tekkin:wavesurfer:peaks:v2:";
-
-const hashKey = (s: string) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return (h >>> 0).toString(16);
-};
-const storageKey = (k: string) => PEAKS_STORAGE_PREFIX + hashKey(k);
-
-const readPeaksFromStorage = (key: string): CachedPeaks | null => {
-  const mem = waveformPeaksCache.get(key);
-  if (mem) return mem;
-
-  try {
-    const raw = localStorage.getItem(storageKey(key));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedPeaks;
-    if (!parsed?.peaks?.length || !Number.isFinite(parsed.duration)) return null;
-    waveformPeaksCache.set(key, parsed);
-    return parsed;
-  } catch {
-    return null;
-  }
+type WaveformCanvasProps = {
+  peaks: number[];
+  progressRatio: number;
+  height?: number;
 };
 
-const writePeaksToStorage = (key: string, value: CachedPeaks) => {
-  waveformPeaksCache.set(key, value);
+const WaveformBandsContext = createContext<WaveformBands | null>(null);
+WaveformBandsContext.displayName = "WaveformBandsContext";
 
-  if (waveformPeaksCache.size > MAX_IN_MEMORY) {
-    const oldest = [...waveformPeaksCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-    if (oldest) waveformPeaksCache.delete(oldest[0]);
-  }
+function WaveformCanvas({ peaks, progressRatio, height = 70 }: WaveformCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformBands = useContext(WaveformBandsContext);
 
-  try {
-    localStorage.setItem(storageKey(key), JSON.stringify(value));
-  } catch {
-    // ignore
-  }
-};
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let frameId: number | null = null;
 
-function WaveformPreview(props: {
-  audioUrl?: string | null;
-  cacheKey: string;
-  serverPeaks?: number[] | null;
-  serverDuration?: number | null;
+    const drawWaveform = () => {
+      if (!canvas) return;
+      const parent = canvas.parentElement;
+      const cssWidth = Math.max(1, parent?.clientWidth ?? canvas.getBoundingClientRect().width ?? 1);
+      const cssHeight = Math.max(1, height);
 
-  isActive: boolean;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
+
+      if (cssWidth <= 0 || cssHeight <= 0) return;
+
+      const dpr = typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+      const deviceWidth = Math.max(1, Math.round(cssWidth * dpr));
+      const deviceHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+      canvas.width = deviceWidth;
+      canvas.height = deviceHeight;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, deviceWidth, deviceHeight);
+
+      if (!peaks.length) return;
+
+      const widthSteps = Math.max(1, Math.round(cssWidth));
+      const progressRatioClamped = Math.max(0, Math.min(1, progressRatio));
+      const progressLimit = Math.max(0, Math.min(widthSteps, Math.round(widthSteps * progressRatioClamped)));
+      const cssStep = cssWidth / widthSteps;
+      const halfHeight = deviceHeight / 2;
+
+      type ColumnData = {
+        amplitude: number;
+        baseColor: string;
+        progressColor: string;
+      };
+
+      const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+      const clampByte = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+      const mixRgb = (a: [number, number, number], b: [number, number, number], t: number) => {
+        const ratio = clamp01(t);
+        return [
+          a[0] * (1 - ratio) + b[0] * ratio,
+          a[1] * (1 - ratio) + b[1] * ratio,
+          a[2] * (1 - ratio) + b[2] * ratio,
+        ] as [number, number, number];
+      };
+
+      const RED: [number, number, number] = [239, 68, 68];
+      const YELLOW: [number, number, number] = [250, 204, 21];
+      const MAGENTA: [number, number, number] = [168, 85, 247];
+
+      const hasBandData =
+        waveformBands &&
+        Array.isArray(waveformBands.sub) &&
+        waveformBands.sub.length > 0 &&
+        Array.isArray(waveformBands.mid) &&
+        waveformBands.mid.length > 0 &&
+        Array.isArray(waveformBands.high) &&
+        waveformBands.high.length > 0;
+
+      const sampleCount = peaks.length;
+      const mapBandValue = (band: number[] | undefined, sampleIndex: number) => {
+        if (!band || !band.length || sampleCount <= 0) {
+          return 0;
+        }
+        const ratio = sampleCount > 1 ? sampleIndex / (sampleCount - 1) : 0;
+        const idx = Math.min(band.length - 1, Math.floor(ratio * (band.length - 1)));
+        return clamp01(band[idx] ?? 0);
+      };
+
+      const buildSpectrumColor = (
+        energies: { sub: number; mid: number; high: number },
+        opacity: number,
+        darken: boolean
+      ) => {
+        const totalSubHigh = Math.max(1e-6, energies.sub + energies.high);
+        const highWeight = energies.high / totalSubHigh;
+        const baseMix = mixRgb(RED, YELLOW, highWeight);
+        const midInfluence = clamp01(energies.mid) * 0.65;
+        const midMix = mixRgb(baseMix, MAGENTA, midInfluence);
+        const brightness = darken ? 0.55 : 1;
+        const finalRgb: [number, number, number] = [
+          clampByte(midMix[0] * brightness),
+          clampByte(midMix[1] * brightness),
+          clampByte(midMix[2] * brightness),
+        ];
+        return `rgba(${finalRgb[0]}, ${finalRgb[1]}, ${finalRgb[2]}, ${opacity})`;
+      };
+
+      const columns: ColumnData[] = [];
+      for (let i = 0; i < widthSteps; i += 1) {
+        const sampleIndex =
+          sampleCount > 1
+            ? Math.min(sampleCount - 1, Math.floor((i / widthSteps) * sampleCount))
+            : 0;
+        const peakValue = peaks[sampleIndex] ?? 0;
+        const amplitude = Math.min(1, Math.max(0, Math.abs(peakValue)));
+
+        let baseColor = "rgba(107, 114, 128, 0.35)";
+        let progressColor = "#22d3ee";
+        if (hasBandData && waveformBands) {
+          const energies = {
+            sub: mapBandValue(waveformBands.sub, sampleIndex),
+            mid: mapBandValue(waveformBands.mid, sampleIndex),
+            high: mapBandValue(waveformBands.high, sampleIndex),
+          };
+          baseColor = buildSpectrumColor(energies, 0.35, true);
+          progressColor = buildSpectrumColor(energies, 1, false);
+        }
+
+        columns.push({ amplitude, baseColor, progressColor });
+      }
+
+      const drawRange = (limit: number, useProgressColors: boolean) => {
+        const safeLimit = Math.min(limit, columns.length);
+        ctx.lineWidth = Math.max(1, dpr);
+        ctx.lineCap = "round";
+
+        for (let i = 0; i < safeLimit; i += 1) {
+          const column = columns[i];
+          const lineHeight = Math.max(1, column.amplitude * deviceHeight);
+          const startY = halfHeight - lineHeight / 2;
+          const endY = halfHeight + lineHeight / 2;
+          const cssX = (i + 0.5) * cssStep;
+          const drawX = cssX * dpr;
+          ctx.beginPath();
+          ctx.strokeStyle = useProgressColors ? column.progressColor : column.baseColor;
+          ctx.moveTo(drawX, startY);
+          ctx.lineTo(drawX, endY);
+          ctx.stroke();
+        }
+      };
+
+      drawRange(widthSteps, false);
+      if (progressLimit > 0) {
+        drawRange(progressLimit, true);
+      }
+    };
+
+    const scheduleDraw = () => {
+      if (frameId != null) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(drawWaveform);
+    };
+
+    scheduleDraw();
+
+    const cleanup: (() => void)[] = [];
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(scheduleDraw);
+      observer.observe(canvas.parentElement ?? canvas);
+      cleanup.push(() => observer.disconnect());
+    } else if (typeof window !== "undefined") {
+      const handleResize = () => scheduleDraw();
+      window.addEventListener("resize", handleResize);
+      cleanup.push(() => window.removeEventListener("resize", handleResize));
+    }
+
+    return () => {
+      if (frameId != null) cancelAnimationFrame(frameId);
+      cleanup.forEach((fn) => fn());
+    };
+  }, [height, peaks, progressRatio, waveformBands]);
+
+  return <canvas ref={canvasRef} className="h-full w-full block" style={{ height }} aria-hidden />;
+}
+
+type WaveformPreviewLiteProps = {
+  peaks?: number[] | null;
+  progressRatio: number;
   isPlaying: boolean;
-  progressRatio: number; // 0..1
-
+  timeLabel: string;
   onTogglePlay: () => void;
   onSeekRatio: (ratio: number) => void;
-}) {
-  const {
-    audioUrl,
-    cacheKey,
-    serverPeaks,
-    serverDuration,
-    isPlaying,
-    progressRatio,
-    onTogglePlay,
-    onSeekRatio,
-  } = props;
+  bands?: WaveformBands | null;
+};
 
+function WaveformPreviewLite({
+  peaks,
+  progressRatio,
+  isPlaying,
+  timeLabel,
+  onTogglePlay,
+  onSeekRatio,
+  bands,
+}: WaveformPreviewLiteProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const waveRef = useRef<any>(null);
+  const hasPeaks = Array.isArray(peaks) && peaks.length > 0;
+  const normalizedProgress = Math.max(0, Math.min(1, progressRatio));
 
-  const [trackDuration, setTrackDuration] = useState(0);
-  const [ready, setReady] = useState(false);
-
-  const applyFit = useCallback(() => {
-    const wave = waveRef.current;
-    const wrap = wrapRef.current;
-    if (!wave || !wrap) return;
-
-    const d = wave.getDuration?.() ?? 0;
-    if (!d) return;
-
-    const pxPerSec = Math.max(1, Math.floor(wrap.clientWidth / d));
-    try {
-      wave.zoom(pxPerSec);
-      const drawer = wave.drawer;
-      if (drawer?.wrapper) drawer.wrapper.scrollLeft = 0;
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const ensureWave = useCallback(async () => {
-    if (waveRef.current) return;
-    if (!audioUrl || !containerRef.current) return;
-
-    const cached = readPeaksFromStorage(cacheKey);
-
-    const hasServerPeaks =
-      Array.isArray(serverPeaks) &&
-      serverPeaks.length > 0 &&
-      typeof serverDuration === "number" &&
-      Number.isFinite(serverDuration) &&
-      serverDuration > 0;
-
-    const initialPeaks =
-      cached ||
-      (hasServerPeaks ? { peaks: serverPeaks as number[], duration: serverDuration as number, ts: Date.now() } : null);
-
-    if (!cached && hasServerPeaks && initialPeaks) writePeaksToStorage(cacheKey, initialPeaks);
-
-    containerRef.current.replaceChildren();
-
-    const WaveSurfer = (await import("wavesurfer.js")).default;
-
-    // tipizzazione wavesurfer spesso non combacia con la versione reale, qui teniamo tutto safe con any
-    const wave = (WaveSurfer as any).create({
-      container: containerRef.current,
-      height: 96,
-      waveColor: "#6b7280",
-      progressColor: "#6b7280",
-      cursorColor: "transparent",
-      cursorWidth: 0,
-      normalize: false,
-      interact: false,
-      dragToSeek: false,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
-    } as any);
-
-    waveRef.current = wave;
-
-    // wavesurfer load peaks: spesso vuole array di canali, quindi incapsuliamo
-    try {
-      if (initialPeaks) {
-        wave.load(audioUrl, [initialPeaks.peaks] as any, initialPeaks.duration as any);
-      } else {
-        wave.load(audioUrl);
-      }
-    } catch {
-      wave.load(audioUrl);
-    }
-
-    wave.on("ready", () => {
-      const d = wave.getDuration?.() || 0;
-      setTrackDuration(d);
-      setReady(true);
-      requestAnimationFrame(applyFit);
-
-      if (!cached && !hasServerPeaks) {
-        try {
-          const d2 = wave.getDuration?.() || 0;
-          const exported = (wave as any).exportPeaks?.(1500) as number[][] | number[] | undefined;
-          const flat = Array.isArray(exported) && Array.isArray((exported as any)[0]) ? (exported as any)[0] : exported;
-          if (Array.isArray(flat) && flat.length && d2 > 0) {
-            writePeaksToStorage(cacheKey, { peaks: flat, duration: d2, ts: Date.now() });
-          }
-        } catch {
-          // ignore
-        }
-      }
-    });
-  }, [audioUrl, cacheKey, serverPeaks, serverDuration, applyFit]);
-
-  useEffect(() => {
-    void ensureWave();
+  const seekFromPointer = (clientX: number | null) => {
     const container = containerRef.current;
+    if (!container || clientX === null) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const x = clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, x / rect.width));
+    onSeekRatio(ratio);
+  };
 
-    return () => {
-      if (waveRef.current) {
-        waveRef.current.destroy?.();
-        waveRef.current = null;
-      }
-      if (container) container.replaceChildren();
-      setTrackDuration(0);
-      setReady(false);
-    };
-  }, [ensureWave]);
+  const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    seekFromPointer(event.clientX);
+  };
 
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => applyFit());
-    ro.observe(el);
-
-    window.addEventListener("orientationchange", applyFit);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("orientationchange", applyFit);
-    };
-  }, [applyFit]);
-
-  const ratio = Number.isFinite(progressRatio) ? Math.max(0, Math.min(1, progressRatio)) : 0;
-  const timeLabel = trackDuration ? `${formatTime(ratio * trackDuration)} / ${formatTime(trackDuration)}` : "00:00 / --:--";
-
-  if (!audioUrl) return <div className="p-1 text-xs text-white/60">Audio non disponibile.</div>;
+  const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    seekFromPointer(event.touches[0]?.clientX ?? null);
+  };
 
   return (
     <div className="p-0">
@@ -292,31 +340,20 @@ function WaveformPreview(props: {
         </button>
 
         <div
-          ref={wrapRef}
-          className="relative flex-1 min-w-0 overflow-hidden rounded-[18px] bg-[#0a0c12]"
-          onMouseDown={(e) => {
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const nextRatio = Math.max(0, Math.min(1, x / Math.max(1, rect.width)));
-            onSeekRatio(nextRatio);
-          }}
+          ref={containerRef}
+          className="relative flex-1 min-w-0 overflow-hidden rounded-[18px] bg-[#0a0c12] cursor-pointer"
+          style={{ height: 70 }}
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
           title="Clicca per spostarti nella traccia"
         >
-          <div ref={containerRef} className="h-24 w-full pointer-events-none" />
-
-          {/* overlay progresso (VERO) */}
-          <div
-            className="pointer-events-none absolute inset-y-0 left-0 bg-cyan-400/20"
-            style={{ width: `${ratio * 100}%` }}
-          />
-          <div
-            className="pointer-events-none absolute inset-y-2 w-[2px] bg-cyan-300/80"
-            style={{ left: `${ratio * 100}%` }}
-          />
-
-          {!ready && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
-              loading waveform...
+          {hasPeaks ? (
+            <WaveformBandsContext.Provider value={bands ?? null}>
+              <WaveformCanvas peaks={peaks as number[]} progressRatio={normalizedProgress} height={70} />
+            </WaveformBandsContext.Provider>
+          ) : (
+            <div className="flex h-full items-center justify-center text-[11px] text-white/40">
+              waveform non pronta
             </div>
           )}
 
@@ -331,14 +368,21 @@ function WaveformPreview(props: {
   );
 }
 
-const getSignedAudioUrl = async (supabase: ReturnType<typeof createClient>, path: string | null) => {
+
+async function getSignedAudioUrl(
+  supabase: ReturnType<typeof createClient>,
+  path: string | null
+): Promise<string | null> {
   if (!path) return null;
+
   const lower = path.toLowerCase();
   if (lower.startsWith("http://") || lower.startsWith("https://")) return path;
 
   const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 3600);
-  return error || !data?.signedUrl ? null : data.signedUrl;
-};
+  if (error || !data?.signedUrl) return null;
+
+  return data.signedUrl;
+}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -350,6 +394,7 @@ export default function ProjectsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const allowProjectInfoSelectRef = useRef(true);
+  const waveformBandsSelectableRef = useRef(true);
   const [q, setQ] = useState("");
   const [sortMode, setSortMode] = useState<"recent" | "score">("recent");
 
@@ -383,16 +428,29 @@ export default function ProjectsPage() {
 
         const supabase = createClient();
 
-        const fetchProjects = async (includeProjectInfo: boolean) =>
-          supabase.from("projects").select(buildProjectsSelectQuery(includeProjectInfo)).order("created_at", { ascending: false });
+        const fetchProjects = async (includeProjectInfo: boolean, includeWaveformBands: boolean) =>
+          supabase
+            .from("projects")
+            .select(buildProjectsSelectQuery(includeProjectInfo, includeWaveformBands))
+            .order("created_at", { ascending: false });
 
         let includeProjectInfo = allowProjectInfoSelectRef.current;
-        let selectResult = await fetchProjects(includeProjectInfo);
+        let includeWaveformBands = waveformBandsSelectableRef.current;
+        let selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
+
+        if (selectResult.error) {
+          const message = `${selectResult.error.message ?? ""} ${selectResult.error.details ?? ""}`.toLowerCase();
+          if (includeWaveformBands && message.includes("waveform_bands")) {
+            includeWaveformBands = false;
+            waveformBandsSelectableRef.current = false;
+            selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
+          }
+        }
 
         if (selectResult.error && includeProjectInfo && shouldExcludeProjectInfo(selectResult.error)) {
           includeProjectInfo = false;
           allowProjectInfoSelectRef.current = false;
-          selectResult = await fetchProjects(includeProjectInfo);
+          selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
         }
 
         const { data, error } = selectResult;
@@ -413,6 +471,18 @@ export default function ProjectsPage() {
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                 .map(async (version) => {
                   const rawPath = typeof version.audio_url === "string" ? version.audio_url : null;
+                  const durationRaw = version.waveform_duration;
+                  const durationNum =
+                    typeof durationRaw === "number"
+                      ? durationRaw
+                      : typeof durationRaw === "string"
+                      ? Number.parseFloat(durationRaw)
+                      : null;
+
+                  const safeDuration =
+                    typeof durationNum === "number" && Number.isFinite(durationNum) && durationNum > 0
+                      ? durationNum
+                      : null;
 
                   return {
                     id: version.id,
@@ -426,7 +496,8 @@ export default function ProjectsPage() {
                     audio_url: await getSignedAudioUrl(supabase, rawPath),
 
                     waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
-                    waveform_duration: typeof version.waveform_duration === "number" ? version.waveform_duration : null,
+                    waveform_duration: safeDuration,
+                    waveform_bands: version.waveform_bands ?? null,
                   } as ProjectVersionRow;
                 })
             );
@@ -490,7 +561,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="w-full max-w-6xl mx-auto py-8">
+    <div className="w-full max-w-6xl mx-auto pt-8 pb-28">
       <div className="flex items-center justify-between mb-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">Projects</h1>
@@ -572,13 +643,33 @@ export default function ProjectsPage() {
 
             const serverPeaks = previewVersion?.waveform_peaks ?? null;
             const serverDuration = previewVersion?.waveform_duration ?? null;
-            const cacheKey = previewVersion?.audio_path ?? previewVersion?.id ?? p.id;
 
-            const isActive = !!audioForPreview && player.audioUrl === audioForPreview && player.versionId === previewVersionId;
+            if (process.env.NODE_ENV !== "production") {
+              console.log("[WF]", p.title, previewVersionId, {
+                hasPeaks: Array.isArray(serverPeaks),
+                peaksLen: Array.isArray(serverPeaks) ? serverPeaks.length : null,
+                duration: serverDuration,
+              });
+            }
+
+            const isActive =
+              !!audioForPreview &&
+              player.audioUrl === audioForPreview &&
+              player.versionId === previewVersionId;
+
             const progressRatio =
               isActive && Number.isFinite(player.duration) && player.duration > 0
                 ? player.currentTime / player.duration
                 : 0;
+            const durationForLabel =
+              typeof serverDuration === "number" &&
+              Number.isFinite(serverDuration) &&
+              serverDuration > 0
+                ? serverDuration
+                : isActive && Number.isFinite(player.duration) && player.duration > 0
+                ? player.duration
+                : null;
+            const timeLabel = durationForLabel ? formatTime(durationForLabel) : "--:--";
 
             const versionCountLabel = `${versions.length} versione${versions.length === 1 ? "" : "i"}`;
 
@@ -617,7 +708,10 @@ export default function ProjectsPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 space-y-2">
                         <div className="flex items-center gap-2">
-                          <Link href={`/artist/projects/${p.id}`} className="truncate text-lg font-semibold text-white hover:underline">
+                          <Link
+                            href={`/artist/projects/${p.id}`}
+                            className="truncate text-lg font-semibold text-white hover:underline"
+                          >
                             {p.title}
                           </Link>
                           <span className="rounded-full border border-white/12 bg-white/5 px-2 py-0.5 text-[11px] text-white/75">
@@ -628,7 +722,10 @@ export default function ProjectsPage() {
                         {parameterChips.length > 0 && (
                           <div className="flex flex-wrap items-center gap-2 text-[10px]">
                             {parameterChips.map((chip) => (
-                              <span key={chip} className="rounded-full border border-teal-500/40 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-200">
+                              <span
+                                key={chip}
+                                className="rounded-full border border-teal-500/40 bg-teal-500/10 px-2 py-0.5 text-[10px] font-semibold text-teal-200"
+                              >
                                 {chip}
                               </span>
                             ))}
@@ -638,7 +735,10 @@ export default function ProjectsPage() {
                         {statChips.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1 text-[10px] text-white/65">
                             {statChips.map((chip) => (
-                              <span key={chip} className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]">
+                              <span
+                                key={chip}
+                                className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]"
+                              >
                                 {chip}
                               </span>
                             ))}
@@ -675,54 +775,55 @@ export default function ProjectsPage() {
                         </button>
                       </div>
                     </div>
+                    {audioForPreview ? (
+                      <WaveformPreviewLite
+                        peaks={serverPeaks}
+                        progressRatio={progressRatio}
+                        isPlaying={isActive && player.isPlaying}
+                        timeLabel={timeLabel}
+                        onTogglePlay={() => {
+                          if (!audioForPreview || !previewVersionId) return;
 
-                    <WaveformPreview
-                      audioUrl={audioForPreview}
-                      cacheKey={cacheKey}
-                      serverPeaks={serverPeaks}
-                      serverDuration={serverDuration}
-                      isActive={isActive}
-                      isPlaying={isActive && player.isPlaying}
-                      progressRatio={progressRatio}
-                      onTogglePlay={() => {
-                        if (!audioForPreview || !previewVersionId) return;
+                          if (isActive) {
+                            if (player.isPlaying) player.pause();
+                            else player.play();
+                            return;
+                          }
 
-                        if (isActive) {
-                          if (player.isPlaying) player.pause();
-                          else player.play();
-                          return;
-                        }
-
-                        player.play({
-                          projectId: p.id,
-                          versionId: previewVersionId,
-                          title: p.title,
-                          subtitle: previewVersion?.version_name ?? undefined,
-                          audioUrl: audioForPreview,
-                          duration: serverDuration ?? undefined,
-                        });
-                      }}
-                      onSeekRatio={(ratio) => {
-                        if (!audioForPreview || !previewVersionId) return;
-
-                        if (isActive) {
-                          player.seekToRatio(ratio);
-                          return;
-                        }
-
-                        player.playAtRatio(
-                          {
+                          player.play({
                             projectId: p.id,
                             versionId: previewVersionId,
                             title: p.title,
                             subtitle: previewVersion?.version_name ?? undefined,
                             audioUrl: audioForPreview,
                             duration: serverDuration ?? undefined,
-                          },
-                          ratio
-                        );
-                      }}
-                    />
+                          });
+                        }}
+                        onSeekRatio={(r) => {
+                          if (!audioForPreview || !previewVersionId) return;
+
+                          if (isActive) {
+                            player.seekToRatio(r);
+                            return;
+                          }
+
+                          player.playAtRatio(
+                            {
+                              projectId: p.id,
+                              versionId: previewVersionId,
+                              title: p.title,
+                              subtitle: previewVersion?.version_name ?? undefined,
+                              audioUrl: audioForPreview,
+                              duration: serverDuration ?? undefined,
+                            },
+                            r
+                          );
+                        }}
+                        bands={previewVersion?.waveform_bands ?? null}
+                      />
+                    ) : (
+                      <div className="p-1 text-xs text-white/60">Audio non disponibile.</div>
+                    )}
 
                     <div className="flex flex-wrap items-center gap-2 pt-2">
                       <Link

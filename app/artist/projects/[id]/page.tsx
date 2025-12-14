@@ -293,37 +293,29 @@ function WaveformPreview({
     const cached = readPeaksFromStorage(cacheKey);
     containerRef.current.innerHTML = '';
 
-    const WaveSurfer = (await import("wavesurfer.js")).default;
-    const wave = WaveSurfer.create(
-      {
-        container: containerRef.current,
-        height: 90,
-        waveColor: "#6b7280",
-        progressColor: "#22d3ee",
-        cursorColor: "#8efacb",
-        cursorWidth: 1,
-        normalize: true,
-        partialRender: true,
-        dragToSeek: true,
-        fillParent: true,
-        removeMediaElementOnDestroy: true,
-      } as any
-    );
+    const WaveSurfer = (await import('wavesurfer.js')).default;
+    const wave = WaveSurfer.create({
+      container: containerRef.current,
+      height: 90,
+      waveColor: '#6b7280',
+      progressColor: '#22d3ee',
+      cursorColor: '#8efacb',
+      cursorWidth: 1,
+      normalize: true,
+      responsive: true,
+      partialRender: true,
+      dragToSeek: true,
+      fillParent: true,
+      pixelRatio: 1,
+      removeMediaElementOnDestroy: true,
+    });
 
     waveRef.current = wave;
+    if (cached) wave.load(audioUrl, cached.peaks, cached.duration);
+    else wave.load(audioUrl);
 
-    if (cached) {
-      wave.load(
-        audioUrl,
-        [Float32Array.from(cached.peaks)],
-        cached.duration
-      );
-    } else {
-      wave.load(audioUrl);
-    }
-
-    wave.on("ready", () => {
-      const d = wave.getDuration() || 0;
+    wave.on('ready', async () => {
+      const d = wave.getDuration();
       setDuration(d);
       setProgress(0);
       setPlaying(false);
@@ -332,14 +324,7 @@ function WaveformPreview({
 
       if (!cached) {
         try {
-          const d2 = wave.getDuration() || 0;
-          if (d2 > 0) {
-            const exported = wave.exportPeaks?.() as number[][] | undefined;
-            const flat = Array.isArray(exported?.[0]) ? exported![0] : null;
-            if (flat && flat.length) {
-              writePeaksToStorage(cacheKey, { peaks: flat, duration: d2, ts: Date.now() });
-            }
-          }
+          writePeaksToStorage(cacheKey, { peaks, duration: d, ts: Date.now() });
         } catch {
           // ignore
         }
@@ -353,6 +338,7 @@ function WaveformPreview({
       setProgress(Math.min(1, wave.getCurrentTime() / d));
     });
 
+    wave.on('seek', (ratio: number) => setProgress(ratio));
     wave.on('play', () => setPlaying(true));
     wave.on('pause', () => setPlaying(false));
     wave.on('finish', () => {
@@ -1503,6 +1489,7 @@ export default function ProjectDetailPage() {
                             <WaveformPreview
                               audioUrl={audioState.url}
                               cacheKey={v.audio_url ?? v.id}
+                              className="w-full"
                               waveHeight={120}
                             />
                           ) : audioState?.error ? (

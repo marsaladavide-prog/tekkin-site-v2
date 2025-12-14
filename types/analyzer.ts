@@ -93,6 +93,13 @@ export type AnalyzerSpectrumDetails = {
   zero_crossing_rate: number;
 };
 
+export type WaveformBands = {
+  sub: number[];
+  mid: number[];
+  high: number[];
+  duration: number;
+};
+
 export type HarmonicBalanceReport = {
   tilt_db: number;
   low_end_definition: number;
@@ -353,6 +360,9 @@ export interface AnalyzerResult {
   loudness_stats?: LoudnessStats | null;
   arrays_blob_path?: string | null;
   arrays_blob_size_bytes?: number | null;
+  waveform_peaks?: number[] | null;
+  waveform_duration?: number | null;
+  waveform_bands?: WaveformBands | null;
 }
 
 // ❌ Legacy types rimossi: tonality, stereo_image, sub_clarity, hi_end, reference_db, model_match

@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import subprocess
 import tempfile
 from datetime import datetime
 from typing import Any, Dict, Tuple
@@ -141,6 +142,201 @@ def _is_arraylike(value: Any) -> bool:
 
 def _is_scalar_number(value: Any) -> bool:
     return isinstance(value, (float, int, np.floating, np.integer))
+
+
+def _load_with_ffmpeg(audio_path: str) -> tuple[np.ndarray, int]:
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    tmp_path = tmp_file.name
+    tmp_file.close()
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                audio_path,
+                "-ac",
+                "1",
+                "-ar",
+                "44100",
+                tmp_path,
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+        return sf.read(tmp_path, always_2d=True)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _compute_peaks_from_samples(
+    samples: np.ndarray, sr: int, target_points: int
+) -> tuple[list[float], float] | None:
+    if sr <= 0:
+        return None
+
+    mono = np.mean(samples, axis=1) if samples.ndim > 1 else samples
+    abs_samples = np.abs(np.ascontiguousarray(mono, dtype=np.float32))
+    total = abs_samples.shape[0]
+    if total == 0:
+        return None
+
+    points = max(1, target_points)
+    peaks: list[float] = []
+    for index in range(points):
+        start = int(math.floor((index * total) / points))
+        end = int(math.floor(((index + 1) * total) / points))
+        if start >= total:
+            start = total - 1
+            end = total
+        if end <= start:
+            end = min(total, start + 1)
+        window = abs_samples[start:end] if end > start else abs_samples[start : start + 1]
+        if window.size == 0:
+            peaks.append(0.0)
+            continue
+        peaks.append(float(np.max(window)))
+
+    max_peak = max(peaks) if peaks else 0.0
+    if max_peak <= 0:
+        normalized = [0.0 for _ in peaks]
+    else:
+        normalized = [min(1.0, max(0.0, peak / max_peak)) for peak in peaks]
+
+    duration_seconds = float(total) / float(sr)
+    return normalized, duration_seconds
+
+
+def _max_downsample(values: np.ndarray, target_points: int) -> list[float]:
+    total = values.shape[0]
+    if target_points <= 0:
+        return []
+
+    points = max(1, target_points)
+    result: list[float] = []
+    for index in range(points):
+        start = int(math.floor((index * total) / points)) if total > 0 else 0
+        end = int(math.floor(((index + 1) * total) / points)) if total > 0 else 0
+        if total > 0 and start >= total:
+            start = total - 1
+            end = total
+        if end <= start:
+            end = min(total, start + 1) if total > 0 else start + 1
+        window = values[start:end] if end > start else values[start : start + 1]
+        if window.size == 0:
+            result.append(0.0)
+            continue
+        result.append(float(np.max(window)))
+
+    # pad if we somehow collected fewer points
+    while len(result) < points:
+        result.append(0.0)
+
+    return result
+
+
+def _normalize_envelope(envelope: list[float]) -> list[float]:
+    if not envelope:
+        return []
+    max_val = max(envelope)
+    if not math.isfinite(max_val) or max_val <= 0:
+        return [0.0] * len(envelope)
+    normalized: list[float] = []
+    for value in envelope:
+        ratio = value / max_val
+        normalized.append(float(max(0.0, min(1.0, ratio))))
+    return normalized
+
+
+def generate_waveform_bands(
+    audio_path: str, target_points: int = 2000
+) -> dict[str, Any] | None:
+    if not audio_path:
+        return None
+
+    try:
+        y_mono, _, sr = load_audio_for_analyzer(audio_path)
+    except Exception as exc:
+        logger.warning("[waveform] bands load failed: %s", exc)
+        return None
+
+    if y_mono.size == 0 or sr <= 0:
+        return None
+
+    try:
+        stft = librosa.stft(y_mono, n_fft=2048, hop_length=512, center=True)
+        magnitude = np.abs(stft)
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=2048)
+    except Exception as exc:
+        logger.warning("[waveform] bands STFT failed: %s", exc)
+        return None
+
+    if magnitude.size == 0:
+        return None
+
+    frame_count = magnitude.shape[1]
+    if frame_count == 0 or freqs.size == 0:
+        return None
+
+    mask_sub = (freqs >= 20) & (freqs < 120)
+    mask_mid = (freqs >= 120) & (freqs < 6000)
+    mask_high = (freqs >= 6000) & (freqs < 18000)
+
+    def band_energy(mask: np.ndarray) -> np.ndarray:
+        if not mask.any():
+            return np.zeros(frame_count, dtype=np.float32)
+        return np.sum(magnitude[mask, :], axis=0)
+
+    sub_energy = band_energy(mask_sub)
+    mid_energy = band_energy(mask_mid)
+    high_energy = band_energy(mask_high)
+
+    downsample_points = max(1, target_points)
+    sub_envelope = _max_downsample(sub_energy, downsample_points)
+    mid_envelope = _max_downsample(mid_energy, downsample_points)
+    high_envelope = _max_downsample(high_energy, downsample_points)
+
+    normalized = {
+        "sub": _normalize_envelope(sub_envelope),
+        "mid": _normalize_envelope(mid_envelope),
+        "high": _normalize_envelope(high_envelope),
+        "duration": float(y_mono.shape[0]) / float(sr),
+    }
+
+    return normalized
+
+
+def generate_waveform_peaks(
+    audio_path: str, target_points: int = 2000
+) -> tuple[list[float], float] | None:
+    if not audio_path:
+        return None
+
+    try:
+        samples, sr = sf.read(audio_path, always_2d=True)
+    except Exception:
+        try:
+            samples, sr = _load_with_ffmpeg(audio_path)
+        except Exception as exc:
+            logger.warning("[waveform] failed to decode %s: %s", audio_path, exc)
+            return None
+
+    computed = _compute_peaks_from_samples(samples, sr, target_points)
+    if not computed:
+        logger.warning("[waveform] peak generation failed for %s", audio_path)
+        return None
+
+    peaks, duration_seconds = computed
+    if not peaks:
+        logger.warning("[waveform] no peaks produced for %s", audio_path)
+        return None
+
+    return peaks, duration_seconds
 
 
 def compute_loudness_ebu_r128_full_track(y_stereo: np.ndarray, sr: int) -> dict[str, Any]:
@@ -529,6 +725,28 @@ async def analyze(request: Request, payload: AnalyzePayload):
             "arrays_blob_path": None,
             "arrays_blob_size_bytes": None,
         }
+
+        # --- Waveform peaks (robusto) ---
+        try:
+            mono_for_peaks = y_mono.reshape(-1, 1)
+            computed = _compute_peaks_from_samples(mono_for_peaks, sr, target_points=2000)
+            if computed:
+                peaks, waveform_duration = computed
+                if peaks:
+                    result["waveform_peaks"] = peaks
+                if math.isfinite(waveform_duration) and waveform_duration > 0:
+                    result["waveform_duration"] = float(waveform_duration)
+            else:
+                logger.warning("[waveform] peaks computation returned None")
+        except Exception as exc:
+            logger.warning("[waveform] peaks computation failed: %s", exc)
+
+        try:
+            bands = generate_waveform_bands(tmp_path, target_points=2000)
+            if bands:
+                result["waveform_bands"] = bands
+        except Exception as exc:
+            logger.warning("[waveform] bands computation failed: %s", exc)
 
         arrays_blob = _extract_arrays_blob(result, payload.project_id, payload.version_id)
         arrays_blob_path = None

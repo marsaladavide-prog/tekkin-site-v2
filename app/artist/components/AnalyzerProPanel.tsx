@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AnalyzerMetricsFields,
   AnalyzerResult,
@@ -11,6 +11,8 @@ import type {
   AnalyzerAiCoach,
   AnalyzerAiMeta,
 } from "@/types/analyzer";
+import type { GenreReference, BandsNorm } from "@/lib/reference/types";
+import { compareBandsToGenre, type BandCompare } from "@/lib/reference/compareBandsToGenre";
 
 import type {
   TekkinReadiness,
@@ -97,12 +99,25 @@ type VersionRow = AnalyzerMetricsFields & {
   analyzer_profile_key?: string | null;
   analyzer_mode?: string | null;
   analyzer_key?: string | null;
+  analyzer_bands_norm?: BandsNorm | null;
   fix_suggestions?: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
   analyzer_json?: AnalyzerResult | null;
   analyzer_ai_summary?: string | null;
   analyzer_ai_actions?: AnalyzerAiAction[] | null;
   analyzer_ai_meta?: AnalyzerAiMeta | null;
+};
+
+type AnalyzerProPanelProps = {
+  version: VersionRow;
+  aiSummary?: string | null;
+  aiActions?: AnalyzerAiAction[] | null;
+  aiMeta?: AnalyzerAiMeta | null;
+  aiLoading?: boolean;
+  onAskAi?: () => void;
+  analyzerResult?: AnalyzerResult | null;
+  referenceAi?: ReferenceAi | null;
+  reference?: GenreReference | null;
 };
 
 
@@ -124,6 +139,7 @@ export function AnalyzerProPanel({
   onAskAi,
   analyzerResult,
   referenceAi,
+  reference,
 }: AnalyzerProPanelProps) {
   const modeLabel = version.analyzer_mode || "Master";
   const profileLabel = version.analyzer_profile_key || "Minimal / Deep Tech";
@@ -159,6 +175,85 @@ export function AnalyzerProPanel({
       : null;
 
   const analyzer = (analyzerResult ?? version.analyzer_json ?? null) as AnalyzerResult | null;
+  const analyzerBandsNorm: BandsNorm | null = useMemo(() => {
+    const fromAnalyzer = (analyzer as unknown as { spectral?: { band_norm?: BandsNorm } } | null)?.spectral?.band_norm;
+    if (fromAnalyzer && typeof fromAnalyzer === "object") {
+      return fromAnalyzer as BandsNorm;
+    }
+    const fromVersion = (version as { analyzer_bands_norm?: BandsNorm | null }).analyzer_bands_norm;
+    if (fromVersion && typeof fromVersion === "object") {
+      return fromVersion as BandsNorm;
+    }
+    return null;
+  }, [analyzer, version]);
+
+  const normalizeProfileKey = (raw: string | null | undefined): string | null => {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const normalized = trimmed.toLowerCase().replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
+    return normalized || null;
+  };
+
+  const rawProfileKey =
+    (analyzer as unknown as { analysis_scope?: { profile_key?: string | null } | null })
+      ?.analysis_scope?.profile_key ??
+    (analyzer as unknown as { profile_key?: string | null })?.profile_key ??
+    (refAi as unknown as { profile_key?: string | null })?.profile_key ??
+    version.analyzer_profile_key ??
+    null;
+
+  const profileKey = normalizeProfileKey(rawProfileKey);
+
+  const [genreRef, setGenreRef] = useState<GenreReference | null>(reference ?? null);
+  const [genreRefError, setGenreRefError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (reference) {
+      setGenreRef(reference);
+      setGenreRefError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function run() {
+      setGenreRef(null);
+      setGenreRefError(null);
+
+      if (!profileKey) {
+        setGenreRefError("Missing profile_key");
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/reference/${encodeURIComponent(profileKey)}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => null);
+          throw new Error(j?.error || `Failed (${res.status})`);
+        }
+        const data = (await res.json()) as GenreReference;
+        if (!cancelled) setGenreRef(data);
+      } catch (e: any) {
+        if (!cancelled) setGenreRefError(e?.message || "Failed to load reference");
+      }
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [profileKey, reference]);
+
+  const effectiveRef = reference ?? genreRef;
+
+  const bandsCompare: BandCompare[] | null = useMemo(() => {
+    if (!effectiveRef) return null;
+    return compareBandsToGenre(analyzerBandsNorm ?? null, effectiveRef);
+  }, [analyzerBandsNorm, effectiveRef]);
   const mixHealthScore =
     typeof analyzer?.mix_health_score === "number" ? analyzer.mix_health_score : null;
   const harmonicBalance = analyzer?.harmonic_balance ?? null;
@@ -369,6 +464,83 @@ export function AnalyzerProPanel({
           matchDescription={matchDescription}
         />
 
+        <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold">Genre Compare</div>
+              <div className="text-xs text-zinc-400">Artist vs reference range (p10 to p90)</div>
+            </div>
+            <div className="text-xs text-zinc-500">{profileKey ?? "n.a."}</div>
+          </div>
+
+          {!analyzerBandsNorm && (
+            <div className="mt-4 rounded-md border border-zinc-800 p-3 text-sm text-zinc-400">
+              Legacy analysis. Re-run analyzer to unlock this comparison.
+            </div>
+          )}
+
+          {genreRefError && (
+            <div className="mt-4 rounded-md border border-zinc-800 p-3 text-sm text-zinc-400">
+              Reference not available: {genreRefError}
+            </div>
+          )}
+
+          {!bandsCompare && !genreRefError && analyzerBandsNorm && (
+            <div className="mt-4 text-sm text-zinc-400">Loading reference…</div>
+          )}
+
+          {bandsCompare && (
+            <div className="mt-4 grid grid-cols-1 gap-2">
+              {bandsCompare.map((b) => {
+                const p10 = b.p10 ?? 0;
+                const p90 = b.p90 ?? 1;
+                const artist = b.artist ?? 0;
+
+                const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+                const left = clamp01(p10) * 100;
+                const width = clamp01(p90 - p10) * 100;
+                const dot = clamp01(artist) * 100;
+
+                const statusColor =
+                  b.status === "ok"
+                    ? "text-emerald-400"
+                    : b.status === "warn"
+                    ? "text-yellow-400"
+                    : b.status === "off"
+                    ? "text-red-400"
+                    : "text-zinc-500";
+
+                return (
+                  <div
+                    key={b.key}
+                    className="flex items-center gap-3 rounded-md border border-zinc-800 px-3 py-2"
+                  >
+                    <div className="w-20 text-xs uppercase tracking-wide text-zinc-400">
+                      {b.key}
+                    </div>
+
+                    <div className="relative h-2 flex-1 rounded bg-zinc-900">
+                      <div
+                        className="absolute top-0 h-2 rounded bg-zinc-700/70"
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                      />
+                      <div
+                        className="absolute -top-1 h-4 w-[2px] bg-white/90"
+                        style={{ left: `${dot}%` }}
+                        title={`artist=${b.artist ?? "n/a"}`}
+                      />
+                    </div>
+
+                    <div className={`w-16 text-right text-xs ${statusColor}`}>
+                      {b.status}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         {/* B. Piano Tekkin AI */}
         <TekkinAiPlanSection
           aiCoach={aiCoach}
@@ -401,6 +573,7 @@ export function AnalyzerProPanel({
   readiness={readiness}
   warnings={warningsList}
   feedbackText={feedbackText}
+  bandsCompare={bandsCompare}
 />
       </div>
     </section>

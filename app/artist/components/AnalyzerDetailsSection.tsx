@@ -19,6 +19,7 @@ import type {
   ReferenceAiBandStatus,
   StereoWidthInfo,
 } from "@/types/analyzer";
+import type { BandCompare } from "@/lib/reference/compareBandsToGenre";
 import type { TekkinReadinessResult } from "@/lib/tekkinProfiles";
 import { AnalyzerCollapsibleSection } from "./AnalyzerCollapsibleSection";
 
@@ -53,6 +54,7 @@ type AnalyzerDetailsSectionProps = {
   readiness: TekkinReadinessResult;
   warnings?: AnalyzerWarning[];
   feedbackText?: string | null;
+  bandsCompare?: BandCompare[] | null;
 };
 
 function normalizeBandStatus(raw: unknown): ReferenceAiBandStatus | null {
@@ -103,7 +105,25 @@ export function AnalyzerDetailsSection({
   readiness,
   warnings = [],
   feedbackText,
+  bandsCompare,
 }: AnalyzerDetailsSectionProps) {
+  const hasBandsCompare = Array.isArray(bandsCompare) && bandsCompare.length > 0;
+
+  const getCompareBadgeClass = (status: BandCompare["status"]): string => {
+    switch (status) {
+      case "ok":
+        return "bg-emerald-600/30 text-emerald-300";
+      case "warn":
+        return "bg-amber-500/25 text-amber-200";
+      case "off":
+        return "bg-red-600/30 text-red-200";
+      case "no_reference":
+      case "no_value":
+      default:
+        return "bg-white/10 text-white/70";
+    }
+  };
+
   return (
     <AnalyzerCollapsibleSection
       title="Analisi tecnica dettagliata"
@@ -438,6 +458,32 @@ export function AnalyzerDetailsSection({
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {hasBandsCompare && (
+              <div className="mt-2 rounded-xl border border-border/40 bg-black/30 p-3 text-[11px]">
+                <p className="mb-2 font-semibold uppercase tracking-wide opacity-70">
+                  Bande vs genere (percentili)
+                </p>
+                <div className="grid grid-cols-7 gap-2">
+                  {bandsCompare!.map((band) => (
+                    <div key={band.key} className="flex flex-col items-center">
+                      <span className="uppercase text-[10px] opacity-70">{band.key}</span>
+                      <span className="text-[11px]">
+                        {band.artist != null ? `${(band.artist * 100).toFixed(0)}%` : "n.a."}
+                      </span>
+                      <span className="text-[10px] text-white/60">
+                        {band.p10 != null && band.p90 != null
+                          ? `${(band.p10 * 100).toFixed(0)}–${(band.p90 * 100).toFixed(0)}%`
+                          : "no ref"}
+                      </span>
+                      <span className={`mt-0.5 px-1.5 py-0.5 rounded-full text-[9px] ${getCompareBadgeClass(band.status)}`}>
+                        {band.status}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

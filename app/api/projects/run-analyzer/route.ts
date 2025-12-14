@@ -180,6 +180,9 @@ export async function POST(req: NextRequest) {
       "analyzer_json",
       // Se NON hai questa colonna, rimuovila da qui
       "analysis_pro",
+      "waveform_peaks",
+      "waveform_duration",
+      "waveform_bands",
     ];
 
     const getPayload = (includeKey: boolean, includeArrays: boolean) => {
