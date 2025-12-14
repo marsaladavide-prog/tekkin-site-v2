@@ -16,67 +16,48 @@ export async function POST(req: NextRequest) {
 
     if (authError || !user) {
       console.error("[run-analyzer] Auth error:", authError);
-      return NextResponse.json(
-        { error: "Non autenticato" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
 
     const requestBody = await req.json().catch(() => null);
-    const versionId = requestBody?.version_id as string | undefined;
+    const versionId =
+      typeof requestBody?.version_id === "string" && requestBody.version_id.trim()
+        ? requestBody.version_id.trim()
+        : null;
 
     if (!versionId) {
-      return NextResponse.json(
-        { error: "version_id mancante" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "version_id mancante" }, { status: 400 });
     }
 
-    // 1. recupero la versione
+    // 1) Recupero versione
     const { data: version, error: versionError } = await supabase
       .from("project_versions")
       .select("id, project_id, audio_url, version_name")
       .eq("id", versionId)
-      .single();
+      .maybeSingle();
 
     if (versionError || !version) {
       console.error("[run-analyzer] Version not found:", versionError);
-      return NextResponse.json(
-        { error: "Version non trovata" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Version non trovata" }, { status: 404 });
     }
 
-        // 1b. recupero il project per avere genre e mix_type
+    // 2) Recupero progetto per profileKey/mode
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("id, genre, mix_type")
       .eq("id", version.project_id)
-      .single();
+      .maybeSingle();
 
     if (projectError || !project) {
       console.error("[run-analyzer] Project not found:", projectError);
-      return NextResponse.json(
-        { error: "Project non trovato" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Project non trovato" }, { status: 404 });
     }
 
-    // profilo di analisi e modalità (master/premaster)
     const profileKey = project.genre || "minimal_deep_tech";
     const mode = project.mix_type || "master";
 
-
     const analyzerUrl =
       process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
-
-    if (!analyzerUrl) {
-      console.error("[run-analyzer] TEKKIN_ANALYZER_URL mancante");
-      return NextResponse.json(
-        { error: "Analyzer non configurato sul server" },
-        { status: 500 }
-      );
-    }
 
     const audioPath = version.audio_url;
     if (!audioPath) {
@@ -86,7 +67,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Signed URL se serve
+    // 3) Signed URL se serve
     let audioUrl = audioPath;
     if (!audioPath.startsWith("http")) {
       const { data: signed, error: signedError } = await supabase.storage
@@ -104,14 +85,14 @@ export async function POST(req: NextRequest) {
       audioUrl = signed.signedUrl;
     }
 
-const payload = {
-  version_id: version.id,
-  project_id: version.project_id,
-  audio_url: audioUrl,
-  profile_key: profileKey,
-  mode,
-  lang: "it",
-};
+    const payload = {
+      version_id: version.id,
+      project_id: version.project_id,
+      audio_url: audioUrl,
+      profile_key: profileKey,
+      mode,
+      lang: "it",
+    };
 
     console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl, payload);
 
@@ -126,95 +107,130 @@ const payload = {
 
     if (!analyzerRes.ok) {
       const text = await analyzerRes.text().catch(() => "");
-      console.error(
-        "[run-analyzer] Analyzer error response:",
-        analyzerRes.status,
-        text
-      );
+      console.error("[run-analyzer] Analyzer error:", analyzerRes.status, text);
       return NextResponse.json(
         { error: "Errore dall'Analyzer", detail: text || null },
         { status: 502 }
       );
     }
 
-    const raw = await analyzerRes.json().catch(() => null);
+    const data = await analyzerRes.json().catch(() => null);
+    console.log("[run-analyzer] analyzer response keys:", Object.keys(data || {}));
+    console.log(
+      "[run-analyzer] loudness_stats keys:",
+      Object.keys((data?.v4_extras?.loudness_stats ?? data?.loudness_stats) || {})
+    );
+    console.log(
+      "[run-analyzer] arrays_blob_path:",
+      data?.arrays_blob_path ?? data?.v4_extras?.arrays_blob_path ?? null
+    );
 
-    console.log("[run-analyzer] Analyzer result JSON:", raw);
-
-    if (!raw) {
+    if (!data) {
       return NextResponse.json(
         { error: "Risposta Analyzer non valida" },
         { status: 500 }
       );
     }
 
-    const result = raw as AnalyzerResult;
+    const result = data as AnalyzerResult;
 
-    // mapping centralizzato
+    // 4) Mapping centralizzato
     const updatePayload = buildAnalyzerUpdatePayload(result);
-    const payloadWithoutKey = ((): Omit<typeof updatePayload, "analyzer_key"> => {
-      const { analyzer_key, ...rest } = updatePayload;
-      return rest;
+
+    // fallback se analyzer_key non esiste nel DB
+    const payloadWithoutKey = (() => {
+      const { analyzer_key, ...rest } = updatePayload as any;
+      return rest as Omit<typeof updatePayload, "analyzer_key">;
     })();
 
-    const versionSelectFieldsBase = [
+    const payloadWithoutArrays = (() => {
+      const { arrays_blob_path, arrays_blob_size_bytes, ...rest } = updatePayload as any;
+      return rest as typeof updatePayload;
+    })();
+
+    const payloadWithoutKeyAndArrays = (() => {
+      const { analyzer_key, ...rest } = payloadWithoutArrays as any;
+      return rest as typeof updatePayload;
+    })();
+
+    const hasAnalyzerKeyError = (error: any) => {
+      if (!error) return false;
+      const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+      return message.includes("analyzer_key");
+    };
+
+    const selectFieldsBase = [
       "id",
       "version_name",
       "created_at",
       "audio_url",
       "lufs",
-      "sub_clarity",
-      "hi_end",
-      "dynamics",
-      "stereo_image",
-      "tonality",
       "overall_score",
       "feedback",
+      "model_match_percent",
       "analyzer_bpm",
+      "analyzer_key",
       "analyzer_spectral_centroid_hz",
       "analyzer_spectral_rolloff_hz",
       "analyzer_spectral_bandwidth_hz",
       "analyzer_spectral_flatness",
       "analyzer_zero_crossing_rate",
       "analyzer_reference_ai",
-      "analyzer_mix_v1",
       "fix_suggestions",
       "analyzer_json",
+      // Se NON hai questa colonna, rimuovila da qui
+      "analysis_pro",
     ];
 
-    const buildSelectFields = (includeKey: boolean) =>
-      includeKey
-        ? [...versionSelectFieldsBase, "analyzer_key"]
-        : versionSelectFieldsBase;
-
-    const hasAnalyzerKeyError = (error: any) => {
-      if (!error) return false;
-      const message =
-        `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
-      return message.includes("analyzer_key");
+    const getPayload = (includeKey: boolean, includeArrays: boolean) => {
+      if (includeKey && includeArrays) {
+        return updatePayload;
+      }
+      if (!includeKey && includeArrays) {
+        return payloadWithoutKey;
+      }
+      if (includeKey && !includeArrays) {
+        return payloadWithoutArrays;
+      }
+      return payloadWithoutKeyAndArrays;
     };
 
-    const updateVersion = async (includeKey: boolean) =>
+    const updateVersion = async (includeKey: boolean, includeArrays: boolean) =>
       supabase
         .from("project_versions")
-        .update(includeKey ? updatePayload : payloadWithoutKey)
+        .update(getPayload(includeKey, includeArrays))
         .eq("id", version.id)
-        .select(buildSelectFields(includeKey).join(", "))
-        .single();
+        .select(selectFieldsBase.join(", "))
+        .maybeSingle();
 
-    let includeAnalyzerKey = true;
-    let updateResult = await updateVersion(includeAnalyzerKey);
+    let includeKey = true;
+    let includeArrays = true;
+    let updateResult = await updateVersion(includeKey, includeArrays);
 
-    if (
-      updateResult.error &&
-      hasAnalyzerKeyError(updateResult.error) &&
-      includeAnalyzerKey
-    ) {
-      console.warn(
-        "[run-analyzer] analyzer_key column missing, retrying without it"
-      );
-      includeAnalyzerKey = false;
-      updateResult = await updateVersion(includeAnalyzerKey);
+    while (updateResult.error) {
+      const message = `${updateResult.error.message ?? ""} ${updateResult.error.details ?? ""}`.toLowerCase();
+      let retried = false;
+
+      if (
+        includeArrays &&
+        (message.includes("arrays_blob_path") || message.includes("arrays_blob_size_bytes"))
+      ) {
+        console.warn("[run-analyzer] arrays_blob columns missing, retry without arrays fields");
+        includeArrays = false;
+        retried = true;
+      }
+
+      if (includeKey && hasAnalyzerKeyError(updateResult.error)) {
+        console.warn("[run-analyzer] analyzer_key missing, retry senza analyzer_key");
+        includeKey = false;
+        retried = true;
+      }
+
+      if (!retried) {
+        break;
+      }
+
+      updateResult = await updateVersion(includeKey, includeArrays);
     }
 
     const { data: updatedVersion, error: updateError } = updateResult;
@@ -228,18 +244,11 @@ const payload = {
     }
 
     return NextResponse.json(
-      {
-        ok: true,
-        version: updatedVersion,
-        analyzer_result: result,
-      },
+      { ok: true, version: updatedVersion, analyzer_result: result },
       { status: 200 }
     );
   } catch (err) {
     console.error("Unexpected run-analyzer error:", err);
-    return NextResponse.json(
-      { error: "Errore inatteso Analyzer" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Errore inatteso Analyzer" }, { status: 500 });
   }
 }

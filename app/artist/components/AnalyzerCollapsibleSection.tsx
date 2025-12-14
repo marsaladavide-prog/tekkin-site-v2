@@ -5,16 +5,16 @@ import { type ReactNode, useState } from "react";
 
 type AnalyzerCollapsibleSectionProps = {
   title: string;
-  defaultOpen?: boolean;
-  children: ReactNode;
+  subtitle?: string;
+  children: React.ReactNode;
 };
 
 export function AnalyzerCollapsibleSection({
   title,
-  defaultOpen = false,
+  subtitle,
   children,
 }: AnalyzerCollapsibleSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
+const [open, setOpen] = useState(false);
 
   return (
     <section className="rounded-2xl border border-white/10 bg-black/80 p-4">
@@ -24,7 +24,12 @@ export function AnalyzerCollapsibleSection({
         className="flex w-full items-center justify-between text-left text-sm font-semibold text-white"
         aria-expanded={open}
       >
-        <span>{title}</span>
+        <div className="flex flex-col gap-0.5 text-left">
+          <span>{title}</span>
+          {subtitle ? (
+            <span className="text-[11px] font-normal text-white/60">{subtitle}</span>
+          ) : null}
+        </div>
         {open ? (
           <ChevronUp className="h-4 w-4 text-white/70" />
         ) : (

@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import type {
   AnalyzerMetricsFields,
   AnalyzerResult,
-  AnalyzerV1Result,
   AnalyzerWarning,
   FixSuggestion,
   ReferenceAi,
@@ -106,17 +105,7 @@ type VersionRow = AnalyzerMetricsFields & {
   analyzer_ai_meta?: AnalyzerAiMeta | null;
 };
 
-type AnalyzerProPanelProps = {
-  version: VersionRow;
-  mixV1?: AnalyzerV1Result | null;
-  analyzerResult?: AnalyzerResult | null;
-  referenceAi?: ReferenceAi | null;
-  aiSummary?: string | null;
-  aiActions?: AnalyzerAiAction[] | null;
-  aiMeta?: AnalyzerAiMeta | null;
-  aiLoading?: boolean;
-  onAskAi?: () => void;
-};
+
 
 const EMPTY_AI_META: AnalyzerAiMeta = {
   artistic_assessment: "",
@@ -128,14 +117,13 @@ const EMPTY_AI_META: AnalyzerAiMeta = {
 
 export function AnalyzerProPanel({
   version,
-  mixV1,
-  analyzerResult,
-  referenceAi,
   aiSummary,
   aiActions,
   aiMeta,
   aiLoading,
   onAskAi,
+  analyzerResult,
+  referenceAi,
 }: AnalyzerProPanelProps) {
   const modeLabel = version.analyzer_mode || "Master";
   const profileLabel = version.analyzer_profile_key || "Minimal / Deep Tech";
@@ -146,7 +134,9 @@ export function AnalyzerProPanel({
   const mixState = getMixState(version.lufs);
   const scoreLabel = getScoreLabel(version.overall_score);
   const refAi = referenceAi ?? version.reference_ai ?? null;
-  const fixSuggestions = version.fix_suggestions ?? [];
+  const fixSuggestions: FixSuggestion[] = Array.isArray(version.fix_suggestions)
+    ? version.fix_suggestions
+    : [];
   const sortedFixSuggestions = sortByPriority(fixSuggestions);
 
   const modelMatch = refAi?.model_match || null;
@@ -257,7 +247,7 @@ export function AnalyzerProPanel({
     version.analyzer_spectral_centroid_hz,
   ]);
 
-  const hasAnalyzerData = !!analyzer || !!refAi || !!mixV1;
+  const hasAnalyzerData = !!analyzer || !!refAi 
 
   if (!hasAnalyzerData) {
     return (
@@ -391,28 +381,27 @@ export function AnalyzerProPanel({
         <AskAnalyzerAI versionId={version.id} />
 
         {/* D. Dettaglio tecnico */}
-        <AnalyzerDetailsSection
-          mixHealthScore={mixHealthScore}
-          mixHealthBreakdownEntries={mixHealthBreakdownEntries}
-          confidenceEntries={confidenceEntries}
-          harmonicBalance={harmonicBalance}
-          stereoWidth={stereoWidth}
-          loudness={version.lufs}
-          mixStateLabel={mixState}
-          bpm={version.analyzer_bpm}
-          brightnessLabel={brightnessLabel}
-          spectralCentroidHz={version.analyzer_spectral_centroid_hz}
-          spectralRolloffHz={version.analyzer_spectral_rolloff_hz}
-          spectralBandwidthHz={version.analyzer_spectral_bandwidth_hz}
-          refAi={refAi}
-          matchPercent={matchPercent}
-          matchLabel={matchLabel}
-          matchDescription={matchDescription}
-          readiness={readiness}
-          mixV1={mixV1 ?? analyzer?.mix_v1 ?? null}
-          warnings={warningsList}
-          feedbackText={feedbackText}
-        />
+<AnalyzerDetailsSection
+  mixHealthScore={mixHealthScore}
+  mixHealthBreakdownEntries={mixHealthBreakdownEntries}
+  confidenceEntries={confidenceEntries}
+  harmonicBalance={harmonicBalance}
+  stereoWidth={stereoWidth}
+  loudness={version.lufs}
+  mixStateLabel={mixState}
+  bpm={version.analyzer_bpm}
+  brightnessLabel={brightnessLabel}
+  spectralCentroidHz={version.analyzer_spectral_centroid_hz}
+  spectralRolloffHz={version.analyzer_spectral_rolloff_hz}
+  spectralBandwidthHz={version.analyzer_spectral_bandwidth_hz}
+  refAi={refAi}
+  matchPercent={matchPercent}
+  matchLabel={matchLabel}
+  matchDescription={matchDescription}
+  readiness={readiness}
+  warnings={warningsList}
+  feedbackText={feedbackText}
+/>
       </div>
     </section>
   );

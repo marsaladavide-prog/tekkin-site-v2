@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-   "dev": "concurrently \"npm run dev:next\" \"npm run dev:analyzer\"",
-"build": "next build",
-"start": "next start",
-   "lint": "next lint",
-"dev:next": "next dev --turbopack",
-  "dev:analyzer": "docker run --rm -p 8000:8000 -e TEKKIN_ANALYZER_SECRET=4fu4fugb4utbu4ndsauinufru48fsoi48845nfu tekkin-analyzer"
+    "dev": "concurrently \"npm run dev:next\" \"npm run dev:analyzer\"",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "dev:next": "next dev --turbopack",
+    "dev:analyzer": "docker run --rm --env-file .env.local -p 8000:8000 -e TEKKIN_ANALYZER_DEBUG=1 -v \"%cd%\":/app -w /app tekkin-analyzer python -m uvicorn tekkin_analyzer_api:app --host 0.0.0.0 --port 8000"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.10.0",
@@ -20,13 +20,14 @@
     "class-variance-authority": "^0.7.1",
     "framer-motion": "^12.23.24",
     "lucide-react": "^0.546.0",
-    "next": "15.5.6",
+    "next": "^15.5.9",
     "openai": "^6.9.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "recharts": "^3.3.0",
     "three": "^0.181.0",
-    "wavesurfer.js": "^7.11.0"
+    "wavesurfer.js": "^7.12.1",
+    "zustand": "^5.0.9"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

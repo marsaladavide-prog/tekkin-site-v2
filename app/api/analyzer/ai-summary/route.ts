@@ -16,25 +16,11 @@ type ProjectVersionForAi = {
   overall_score: number | null;
   feedback: string | null;
   analyzer_reference_ai: unknown | null;
-  analyzer_mix_v1: unknown | null;
   fix_suggestions: FixSuggestion[] | null;
   analyzer_ai_summary: string | null;
   analyzer_ai_actions: AnalyzerAiAction[] | null;
   analyzer_ai_meta: AnalyzerAiMeta | null;
 };
-
-type RawMixV1 =
-  | {
-      metrics?: {
-        loudness?: {
-          integrated_lufs?: number | null;
-          [key: string]: unknown;
-        };
-        [key: string]: unknown;
-      };
-      [key: string]: unknown;
-    }
-  | null;
 
 export const runtime = "nodejs";
 
@@ -49,10 +35,7 @@ export async function POST(req: NextRequest) {
 
     if (authError || !user) {
       console.error("[ai-summary] Auth error:", authError);
-      return NextResponse.json(
-        { error: "Non autenticato" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
 
     const body = await req.json().catch(() => null);
@@ -65,13 +48,10 @@ export async function POST(req: NextRequest) {
         : undefined;
 
     if (!versionId) {
-      return NextResponse.json(
-        { error: "version_id mancante" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "version_id mancante" }, { status: 400 });
     }
 
-    // 1. Recupero dati versione
+    // 1) Recupero dati versione
     const { data, error: versionError } = await supabase
       .from("project_versions")
       .select(
@@ -84,7 +64,6 @@ export async function POST(req: NextRequest) {
           "overall_score",
           "feedback",
           "analyzer_reference_ai",
-          "analyzer_mix_v1",
           "analyzer_ai_summary",
           "analyzer_ai_actions",
           "analyzer_ai_meta",
@@ -96,15 +75,12 @@ export async function POST(req: NextRequest) {
 
     if (versionError || !data) {
       console.error("[ai-summary] Version not found:", versionError);
-      return NextResponse.json(
-        { error: "Versione non trovata" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Versione non trovata" }, { status: 404 });
     }
 
     const version = data as unknown as ProjectVersionForAi;
 
-    // 2. Se non c'è question e ho già i dati AI, riuso (a meno di force)
+    // 2) Se non c'è question e ho già i dati AI, riuso (a meno di force)
     if (
       !question &&
       !force &&
@@ -118,8 +94,7 @@ export async function POST(req: NextRequest) {
           version_id: version.id,
           ai: {
             summary: version.analyzer_ai_summary ?? "",
-            actions: (version.analyzer_ai_actions ??
-              []) as AnalyzerAiAction[],
+            actions: (version.analyzer_ai_actions ?? []) as AnalyzerAiAction[],
             meta: (version.analyzer_ai_meta ?? {
               artistic_assessment: "",
               risk_flags: [],
@@ -142,54 +117,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Normalizzo LUFS e preparo mix_v1 per il modello
-    const rawMixV1: RawMixV1 =
-      (version.analyzer_mix_v1 as RawMixV1 | null) ?? null;
-
-    const mainLufs: number | null =
-      typeof version.lufs === "number"
-        ? version.lufs
-        : rawMixV1?.metrics?.loudness?.integrated_lufs ?? null;
-
-    const mixV1ForModel =
-      rawMixV1 && typeof rawMixV1 === "object"
-        ? {
-            ...rawMixV1,
-            metrics: {
-              ...rawMixV1.metrics,
-              // loudness legacy rimossa per evitare mismatch tipo -12.5 LUFS
-              loudness: undefined,
-            },
-          }
-        : null;
-
+    // 3) Payload per il modello (Niente mix_v1)
     const payloadForModel = {
       version_id: version.id,
       project_id: version.project_id,
       version_name: version.version_name,
-      lufs: mainLufs,
+      lufs: typeof version.lufs === "number" ? version.lufs : null,
       analyzer_bpm: version.analyzer_bpm,
       overall_score: version.overall_score,
       feedback: version.feedback,
       reference_ai: version.analyzer_reference_ai,
-      mix_v1: mixV1ForModel,
       fix_suggestions: (version.fix_suggestions ?? []) as FixSuggestion[],
     };
 
-    // 4. Modalità Q&A: se arriva una question, faccio solo risposta testuale e non salvo nulla
+    // 4) Modalità Q&A: se arriva una question, faccio solo risposta testuale e non salvo nulla
     if (question) {
       const qSystemPrompt = `
 Sei Tekkin Analyzer AI, assistente per il mix di musica minimal, deep house, tech house e affini.
 Ricevi:
-- Un JSON con i dati tecnici di una versione (loudness, BPM, Reference AI, mix_v1, fix_suggestions, ecc).
+- Un JSON con i dati tecnici di una versione (loudness/LUFS, BPM, Reference AI, fix_suggestions, ecc).
 - Una domanda precisa dell'artista su questo mix (voce, hi-hat, percussioni, dinamica, stereo, groove, ecc).
 
 Regole:
 - Rispondi SEMPRE in Italiano.
 - Sii pratico e specifico, come un producer esperto in studio.
 - Considera anche voce, hi-hats, percussioni, transitori, stereo e "realismo" del mix, non solo clap e kick.
-- Evita di ripetere in modo identico i testi di fix_suggestions o mix_v1.issues.
-- Se il problema del clap è già evidente, non fissarti solo su quello: collega la risposta al quadro generale del mix.
+- Evita di copiare/incollare fix_suggestions: usale come base, ma scrivi naturale e mirato.
 - Limita la risposta a 2-4 paragrafi brevi, massimo 8-10 frasi totali.
       `.trim();
 
@@ -204,24 +157,21 @@ ${question}
 Rispondi in Italiano in modo diretto e pratico, riferendoti chiaramente a questo mix.
       `.trim();
 
-      const openAiRes = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${openaiApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "gpt-4.1-mini",
-            messages: [
-              { role: "system", content: qSystemPrompt },
-              { role: "user", content: qUserPrompt },
-            ],
-            temperature: 0.5,
-          }),
-        }
-      );
+      const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${openaiApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1-mini",
+          messages: [
+            { role: "system", content: qSystemPrompt },
+            { role: "user", content: qUserPrompt },
+          ],
+          temperature: 0.5,
+        }),
+      });
 
       if (!openAiRes.ok) {
         const text = await openAiRes.text().catch(() => "");
@@ -238,19 +188,13 @@ Rispondi in Italiano in modo diretto e pratico, riferendoti chiaramente a questo
 
       if (!rawContent) {
         console.error("[ai-summary][Q&A] Nessun contenuto dal modello");
-        return NextResponse.json(
-          { error: "Risposta AI vuota" },
-          { status: 500 }
-        );
+        return NextResponse.json({ error: "Risposta AI vuota" }, { status: 500 });
       }
 
-      return NextResponse.json(
-        { answer: rawContent },
-        { status: 200 }
-      );
+      return NextResponse.json({ answer: rawContent }, { status: 200 });
     }
 
-    // 5. Modalità "coach" completa con JSON strutturato
+    // 5) Modalità "coach" completa con JSON strutturato
     const systemPrompt = `
 You are Tekkin AI, a specialist assistant for minimal / deep tech / tech house club tracks.
 
@@ -264,7 +208,6 @@ You receive a JSON payload with:
   - bands_status: for each band (sub, low, lowmid, mid, presence, high) you have
     value, target_min, target_max, status ("low", "ok", "high")
   - optional model_match, guessed_genre, reference tracks, adjustments
-- mix_v1: technical metrics (loudness, balance, spectrum, stereo, structure) and a list of issues
 - fix_suggestions: a list of structured suggestions generated by deterministic rules, each with:
   - issue (short title)
   - priority ("low" | "medium" | "high")
@@ -273,8 +216,7 @@ You receive a JSON payload with:
 
 VERY IMPORTANT:
 - The top level field "lufs" is the authoritative integrated LUFS value for the mix.
-- If any loudness value inside mix_v1 (for example old "integrated_lufs") conflicts with "lufs", you MUST ignore the old value and follow "lufs".
-- The technical parts (reference_ai, mix_v1, issues, bands_status, fix_suggestions) are already correct: you do NOT need to reinvent the analysis.
+- The technical parts (reference_ai, bands_status, fix_suggestions) are already correct: you do NOT need to reinvent the analysis.
 - Your job is to give a higher-level synthesis and a focused action plan, not to list again every small detail.
 - Always pay attention to voice presence (when present), hi-hat and percussive texture, realism / tridimensionality of the mix, and the overall dynamics / punch.
 - Avoid repeating identical suggestions (same wording or target instrument) across actions or summary lines.
@@ -291,48 +233,40 @@ Your tasks:
      - Quanto è adatto al contesto club minimal / deep tech.
      - Le 2 criticità principali che il producer deve sapere SUBITO.
    - Fai almeno un cenno a: voce (se presente), hi-hat/percussioni oppure stereo width.
-   - NON elencare tutti i dettagli tecnici: solo quelli che cambiano davvero la vita (es. LUFS troppo basso, profilo di genere molto lontano).
+   - NON elencare tutti i dettagli tecnici: solo quelli che cambiano davvero la vita.
 
 2) ACTIONS (massimo 4 AZIONI, non di più)
    Devi agire come un FIX AGGREGATOR:
-   - Ricevi mix_v1.issues, bands_status e fix_suggestions.
+   - Ricevi bands_status e fix_suggestions.
    - NON riscrivere tutte le micro-note.
    - Raggruppa i problemi in 3–4 MACRO AREE DI INTERVENTO che un producer farebbe davvero in studio.
 
    Per ogni azione:
-   - title: 3–6 parole, in Italiano, chiarissimo (es. "Ripulisci accumulo low-mid").
-   - description: **massimo 2 frasi** in Italiano, pratiche e specifiche.
+   - title: 3–6 parole, in Italiano, chiarissimo.
+   - description: massimo 2 frasi in Italiano, pratiche e specifiche.
    - focus_area: uno tra
        "loudness" | "sub" | "lowmid" | "mid" | "high" | "stereo" | "stereo_high" | "vocals" | "hihats" | "percussions" | "transients" | "punch" | "structure" | "groove" | "arrangement" | "other"
    - priority: "low" | "medium" | "high"
-     Metti "high" solo quando l’intervento cambia DAVVERO il risultato in club.
 
    Regole aggiuntive:
-   - Se fix_suggestions e mix_v1 dicono la stessa cosa, tu la scrivi UNA volta sola in forma di macro-mossa.
-   - Se hai già un’azione su clap/percussioni, non creare un’altra azione quasi identica.
+   - Se più fix_suggestions dicono la stessa cosa, tu la scrivi UNA volta sola in forma di macro-mossa.
+   - Se hai già un’azione su percussioni/hi-hat, non crearne un’altra quasi identica.
    - Se hai dubbi, meglio una azione in meno ma chiara che tante azioni ripetitive.
 
 3) META (AnalyzerAiMeta)
    - artistic_assessment:
-     Short paragraph in Italian about how interesting or generic the track is in the minimal / deep tech scene (no offensive judgements).
+     Short paragraph in Italian about how interesting or generic the track is in the minimal / deep tech scene.
    - risk_flags:
      List of short codes only if relevant, chosen from:
        "too_dark", "too_bright", "weak_sub", "harsh_highs",
        "weak_transients", "flat_stereo", "muddy_lowmid",
        "unbalanced_vocals", "weak_drop", "structure_confusing".
    - predicted_rank_gain:
-     Number (can be decimal) that represents how much the score / Tekkin Rank could grow if the action plan is followed (es. 1.5, 3.0, 5.0). Use null if unsure.
+     Number (can be decimal) or null if unsure.
    - label_fit:
-     Short sentence in Italian about which type of label or DJ context fits best, or null if not clear.
+     Short sentence in Italian about DJ/label context, or null if not clear.
    - structure_feedback:
-     Short paragraph in Italian that comments the flow of sections (intro, build, drop, break, outro) and how DJ friendly it is.
-
-STYLE RULES (IMPORTANT):
-- Style must be direct, natural, like an experienced mix engineer.
-- Use technical values or ranges only when present or clearly implied.
-- Alternate the way you start sentences, do not always use "Riduci", "Applica", "Incrementa".
-- 2-3 sentences per action are enough.
-- Avoid duplicated concepts even with different wording.
+     Short paragraph in Italian about sections and DJ-friendliness.
 
 Output must be a single JSON object with this exact shape:
 
@@ -364,24 +298,21 @@ JSON payload from Tekkin Analyzer:
 ${JSON.stringify(payloadForModel, null, 2)}
     `.trim();
 
-    const openAiRes = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${openaiApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4.1-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.4,
-        }),
-      }
-    );
+    const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.4,
+      }),
+    });
 
     if (!openAiRes.ok) {
       const text = await openAiRes.text().catch(() => "");
@@ -398,10 +329,7 @@ ${JSON.stringify(payloadForModel, null, 2)}
 
     if (!rawContent) {
       console.error("[ai-summary] Nessun contenuto dal modello");
-      return NextResponse.json(
-        { error: "Risposta AI vuota" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Risposta AI vuota" }, { status: 500 });
     }
 
     let parsed: AnalyzerAiCoach | null = null;
@@ -423,9 +351,7 @@ ${JSON.stringify(payloadForModel, null, 2)}
     const meta: AnalyzerAiMeta = {
       artistic_assessment: parsed.meta?.artistic_assessment ?? "",
       risk_flags: Array.isArray(rawRiskFlags)
-        ? rawRiskFlags.filter(
-            (flag): flag is string => typeof flag === "string"
-          )
+        ? rawRiskFlags.filter((flag): flag is string => typeof flag === "string")
         : [],
       predicted_rank_gain: parsed.meta?.predicted_rank_gain ?? null,
       label_fit: parsed.meta?.label_fit ?? null,
@@ -443,10 +369,7 @@ ${JSON.stringify(payloadForModel, null, 2)}
 
     if (updateError) {
       console.error("[ai-summary] Update error:", updateError);
-      return NextResponse.json(
-        { error: "Errore salvando i dati AI" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Errore salvando i dati AI" }, { status: 500 });
     }
 
     return NextResponse.json(
@@ -463,9 +386,6 @@ ${JSON.stringify(payloadForModel, null, 2)}
     );
   } catch (err) {
     console.error("[ai-summary] Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Errore inatteso Tekkin AI" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Errore inatteso Tekkin AI" }, { status: 500 });
   }
 }

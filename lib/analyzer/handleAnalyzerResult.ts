@@ -1,96 +1,116 @@
 import type { AnalyzerResult } from "@/types/analyzer";
 
+type AnyRecord = Record<string, unknown>;
+
+function isFiniteNumber(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x);
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
+
 /**
  * Mapping risultato Tekkin Analyzer -> colonne project_versions.
  */
 export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
-  const {
-    lufs,
-    sub_clarity,
-    hi_end,
-    dynamics,
-    stereo_image,
-    tonality,
-    overall_score,
-    feedback,
-    bpm,
-    spectral_centroid_hz,
-    spectral_rolloff_hz,
-    spectral_bandwidth_hz,
-    spectral_flatness,
-    zero_crossing_rate,
-    fix_suggestions,
-    reference_ai,
-    mix_v1,
-    key,
-  } = result;
+  // Fallback LUFS: preferisci result.lufs (già full-track Essentia),
+  // altrimenti prova a leggere loudness_stats.integrated_lufs dal JSON.
+  const integratedFromStats = (() => {
+    const ls = (result as unknown as AnyRecord)?.loudness_stats as AnyRecord | undefined;
+    const v = ls?.integrated_lufs;
+    return isFiniteNumber(v) ? v : null;
+  })();
 
-    const modelMatchPercent =
-    reference_ai?.model_match?.match_percent != null
-      ? Number(reference_ai.model_match.match_percent)
-      : reference_ai?.match_ratio != null
-      ? Number(reference_ai.match_ratio * 100)
+  const lufs = isFiniteNumber(result.lufs) ? result.lufs : integratedFromStats;
+
+  // model_match_percent: gestisce sia ratio 0..1 che percent 0..100
+  const modelMatchPercent = (() => {
+    const mr = (result.reference_ai as any)?.match_ratio;
+    if (!isFiniteNumber(mr)) return null;
+
+    // Se è un ratio (0..1) lo trasformo in percentuale.
+    // Se è già percentuale (>1), lo tratto come percent.
+    const percent = mr <= 1 ? mr * 100 : mr;
+    return clamp(percent, 0, 100);
+  })();
+
+  const effectiveBpm = isFiniteNumber(result.bpm) ? Math.round(result.bpm) : null;
+
+  const analyzerKey =
+    typeof result.key === "string" && result.key.trim().length > 0
+      ? result.key.trim()
       : null;
 
-  // BPM strutturale dal Tekkin Analyzer V1 (se presente)
-  const structureBpm =
-    mix_v1?.metrics?.structure?.bpm != null
-      ? mix_v1.metrics.structure.bpm
+  const arraysBlobPathRaw = (result as unknown as AnyRecord)?.arrays_blob_path;
+  const arraysBlobPath =
+    typeof arraysBlobPathRaw === "string" && arraysBlobPathRaw.trim().length > 0
+      ? arraysBlobPathRaw.trim()
       : null;
 
-  // BPM "effettivo" unico
-  let effectiveBpm: number | null = null;
+  const arraysBlobSizeRaw = (result as unknown as AnyRecord)?.arrays_blob_size_bytes;
+  const arraysBlobSize = isFiniteNumber(arraysBlobSizeRaw) ? Math.round(arraysBlobSizeRaw) : null;
 
-  if (bpm != null && structureBpm != null) {
-    const diff = Math.abs(bpm - structureBpm);
+  const fixSuggestions =
+    Array.isArray(result.fix_suggestions) ? result.fix_suggestions : null;
 
-    if (diff > 1.5) {
-      // Se sono troppo diversi, mi fido del BPM strutturale (V1)
-      effectiveBpm = Math.round(structureBpm);
-    } else {
-      // Se sono vicini, media e arrotondo
-      effectiveBpm = Math.round((bpm + structureBpm) / 2);
+  // analysis_pro: lo salvo e ci inietto analysis_scope se disponibile nel result raw
+  const analysisScope = (() => {
+    const v = (result as unknown as AnyRecord)?.analysis_scope;
+    return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  })();
+
+  const analysisPro = (() => {
+    const ap = (result as unknown as AnyRecord)?.analysis_pro;
+    if (!ap || typeof ap !== "object") {
+      return analysisScope ? { analysis_scope: analysisScope } : null;
     }
-  } else if (structureBpm != null) {
-    effectiveBpm = Math.round(structureBpm);
-  } else if (bpm != null) {
-    effectiveBpm = Math.round(bpm);
-  } else {
-    effectiveBpm = null;
-  }
+    // merge non distruttivo
+    const merged = { ...(ap as AnyRecord) };
+    if (analysisScope) merged.analysis_scope = analysisScope;
+    return merged;
+  })();
 
   return {
-    // metri "storici" sulle colonne principali
-    lufs,
-    sub_clarity: sub_clarity ?? null,
-    hi_end: hi_end ?? null,
-    dynamics: dynamics ?? null,
-    stereo_image: stereo_image ?? null,
-    tonality: tonality ?? null,
-    overall_score,
-    feedback,
+    // metri principali
+    lufs: lufs ?? null,
+    overall_score: isFiniteNumber(result.overall_score) ? result.overall_score : null,
+    feedback: result.feedback ?? null,
 
-    // nuovo: percentuale di match con il modello di genere
+    // percentuale match con modello di genere
     model_match_percent: modelMatchPercent,
 
-    // snapshot completo dell'Analyzer (utile per debug / UI avanzata)
+    // snapshot raw completo (debug / UI avanzata)
     analyzer_json: result,
 
-    // blocco Reference AI + Tekkin Analyzer V1
-    analyzer_reference_ai: reference_ai ?? null,
-    analyzer_mix_v1: mix_v1 ?? null,
+    // reference ai
+    analyzer_reference_ai: result.reference_ai ?? null,
 
-    // extra numerici (BPM effettivo qui)
+    // analysis pro (jsonb)
+    analysis_pro: analysisPro,
+
+    // extra numerici
     analyzer_bpm: effectiveBpm,
-    analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
-    analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
-    analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
-    analyzer_spectral_flatness: spectral_flatness ?? null,
-    analyzer_zero_crossing_rate: zero_crossing_rate ?? null,
-    analyzer_key: key ?? null,
+    analyzer_spectral_centroid_hz: isFiniteNumber(result.spectral_centroid_hz)
+      ? result.spectral_centroid_hz
+      : null,
+    analyzer_spectral_rolloff_hz: isFiniteNumber(result.spectral_rolloff_hz)
+      ? result.spectral_rolloff_hz
+      : null,
+    analyzer_spectral_bandwidth_hz: isFiniteNumber(result.spectral_bandwidth_hz)
+      ? result.spectral_bandwidth_hz
+      : null,
+    analyzer_spectral_flatness: isFiniteNumber(result.spectral_flatness)
+      ? result.spectral_flatness
+      : null,
+    analyzer_zero_crossing_rate: isFiniteNumber(result.zero_crossing_rate)
+      ? result.zero_crossing_rate
+      : null,
+    analyzer_key: analyzerKey,
 
-    // suggerimenti di fix strutturati
-    fix_suggestions: fix_suggestions ?? null,
+    // fix suggestions
+    fix_suggestions: fixSuggestions,
+    arrays_blob_path: arraysBlobPath,
+    arrays_blob_size_bytes: arraysBlobSize,
   };
 }
-

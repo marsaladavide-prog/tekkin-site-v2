@@ -147,36 +147,29 @@ const payload = {
     }
 
     const {
-      lufs,
-      sub_clarity,
-      hi_end,
-      dynamics,
-      stereo_image,
-      tonality,
       overall_score,
-      feedback,
+      lufs,
       bpm,
       spectral_centroid_hz,
       spectral_rolloff_hz,
       spectral_bandwidth_hz,
       spectral_flatness,
       zero_crossing_rate,
+      feedback,
       fix_suggestions,
       reference_ai,
     } = result;
+
+    const analyzerBpm =
+      typeof bpm === "number" && Number.isFinite(bpm) ? Math.round(bpm) : null;
 
     const { data: updatedVersion, error: updateError } = await supabase
       .from("project_versions")
       .update({
         lufs,
-        sub_clarity,
-        hi_end,
-        dynamics,
-        stereo_image,
-        tonality,
         overall_score,
         feedback,
-        analyzer_bpm: bpm ?? null,
+        analyzer_bpm: analyzerBpm,
         analyzer_spectral_centroid_hz: spectral_centroid_hz ?? null,
         analyzer_spectral_rolloff_hz: spectral_rolloff_hz ?? null,
         analyzer_spectral_bandwidth_hz: spectral_bandwidth_hz ?? null,
@@ -187,7 +180,7 @@ const payload = {
       })
       .eq("id", version.id)
       .select(
-        "id, version_name, created_at, audio_url, lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai"
+        "id, version_name, created_at, audio_url, lufs, overall_score, feedback, analyzer_bpm, analyzer_spectral_centroid_hz, analyzer_spectral_rolloff_hz, analyzer_spectral_bandwidth_hz, analyzer_spectral_flatness, analyzer_zero_crossing_rate, analyzer_reference_ai, fix_suggestions"
       )
       .single();
 
