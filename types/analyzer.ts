@@ -77,12 +77,12 @@ export type AnalyzerConfidence = {
   mix_health?: number | null;
 };
 
-export type AnalyzerWarningSeverity = 'info' | 'warning' | 'error';
+export type AnalyzerWarningSeverity = 'info' | 'warning' | 'critical';
 
 export type AnalyzerWarning = {
-  code: string;
   message: string;
   severity: AnalyzerWarningSeverity;
+  code?: string;
 };
 
 export type AnalyzerSpectrumDetails = {
@@ -334,6 +334,27 @@ export interface LoudnessStats {
   short_lufs_mean?: number | null;
 }
 
+export interface AnalyzerBandCompareEntry {
+  value: number;
+  p10: number;
+  p50: number;
+  p90: number;
+  status: 'ok' | 'low' | 'high' | string;
+  distance: number;
+}
+
+export interface AnalyzerCompare {
+  bands_norm?: Record<string, AnalyzerBandCompareEntry> | null;
+}
+
+export interface AnalyzerSpectral {
+  band_norm?: BandsNorm | null;
+  spectral_centroid_hz?: number | null;
+  spectral_rolloff_hz?: number | null;
+  spectral_bandwidth_hz?: number | null;
+  spectral_flatness?: number | null;
+}
+
 export interface AnalyzerResult {
   version_id: string;
   project_id: string;
@@ -363,6 +384,11 @@ export interface AnalyzerResult {
   waveform_peaks?: number[] | null;
   waveform_duration?: number | null;
   waveform_bands?: WaveformBands | null;
+  spectral?: AnalyzerSpectral | null;
+  compare?: AnalyzerCompare | null;
+  tekkin_score?: number | null;
+  top_issues?: string[] | null;
+  actions?: AnalyzerAiAction[] | null;
 }
 
 // ❌ Legacy types rimossi: tonality, stereo_image, sub_clarity, hi_end, reference_db, model_match

@@ -92,9 +92,14 @@ export async function POST(req: NextRequest) {
       profile_key: profileKey,
       mode,
       lang: "it",
+      upload_arrays_blob: true,
+      storage_bucket: "tracks",
+      storage_base_path: "analyzer",
     };
 
-    console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl, payload);
+    console.log("[run-analyzer] payload ->", JSON.stringify(payload, null, 2));
+
+    console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl);
 
     const analyzerRes = await fetch(analyzerUrl, {
       method: "POST",
@@ -105,30 +110,60 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify(payload),
     });
 
-    if (!analyzerRes.ok) {
-      const text = await analyzerRes.text().catch(() => "");
-      console.error("[run-analyzer] Analyzer error:", analyzerRes.status, text);
-      return NextResponse.json(
-        { error: "Errore dall'Analyzer", detail: text || null },
-        { status: 502 }
-      );
+    const raw = await analyzerRes.text();
+    console.log("[run-analyzer] status ->", analyzerRes.status);
+    console.log("[run-analyzer] raw size ->", raw.length);
+    console.log("[run-analyzer] raw head ->", raw.slice(0, 600));
+
+    let data: any = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      console.error("[run-analyzer] response not json");
+      return NextResponse.json({ error: "Analyzer returned non-JSON" }, { status: 502 });
     }
 
-    const data = await analyzerRes.json().catch(() => null);
-    console.log("[run-analyzer] analyzer response keys:", Object.keys(data || {}));
+    const warnings = [
+      ...(Array.isArray(data?.warnings) ? data.warnings : []),
+      ...(Array.isArray(data?.loudness_stats?.warnings) ? data.loudness_stats.warnings : []),
+    ].slice(0, 10);
+    console.log("[run-analyzer] warnings ->", warnings);
+
+    const matchRatio =
+      typeof data?.model_match?.match_ratio === "number" && Number.isFinite(data.model_match.match_ratio)
+        ? data.model_match.match_ratio
+        : null;
+    const modelMatchPercent = matchRatio == null ? null : Math.round(matchRatio * 100);
+    const bandEnergyNorm = (data as any)?.band_energy_norm;
+    const hasBandNorm =
+      !!bandEnergyNorm && typeof bandEnergyNorm === "object" && Object.keys(bandEnergyNorm).length > 0;
+
     console.log(
-      "[run-analyzer] loudness_stats keys:",
-      Object.keys((data?.v4_extras?.loudness_stats ?? data?.loudness_stats) || {})
-    );
-    console.log(
-      "[run-analyzer] arrays_blob_path:",
-      data?.arrays_blob_path ?? data?.v4_extras?.arrays_blob_path ?? null
+      "[run-analyzer] brief ->",
+      JSON.stringify(
+        {
+          bpm: data?.bpm,
+          key: data?.key,
+          lufs: data?.loudness_stats?.integrated_lufs,
+          lra: data?.loudness_stats?.lra,
+          sample_peak_db: data?.loudness_stats?.sample_peak_db,
+          spectral_keys: Object.keys(data?.spectral ?? {}),
+          has_band_norm: hasBandNorm,
+          model_match_percent: modelMatchPercent,
+          model_match: data?.model_match ?? null,
+          arrays_blob_path: data?.arrays_blob_path ?? null,
+          arrays_blob_size_bytes: data?.arrays_blob_size_bytes ?? null,
+        },
+        null,
+        2
+      )
     );
 
-    if (!data) {
+    if (!analyzerRes.ok) {
+      console.error("[run-analyzer] Analyzer error:", analyzerRes.status);
       return NextResponse.json(
-        { error: "Risposta Analyzer non valida" },
-        { status: 500 }
+        { error: "Errore dall'Analyzer", detail: raw || null },
+        { status: 502 }
       );
     }
 
@@ -245,6 +280,8 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    console.log("[run-analyzer] saved lufs ->", (updatedVersion as any)?.lufs);
 
     return NextResponse.json(
       { ok: true, version: updatedVersion, analyzer_result: result },

@@ -16,7 +16,7 @@ except Exception:
     es = None
     _ESSENTIA = False
 
-from tekkin_analyzer_v4_extras import analyze_v4_extras, BAND_DEFS_V2
+from tools.tekkin_analyzer_v4_extras import analyze_v4_extras, BAND_DEFS_V2
 
 
 AUDIO_EXTS = (".wav", ".aif", ".aiff", ".flac", ".mp3", ".m4a")

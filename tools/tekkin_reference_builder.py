@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 
 from analyze_master_web import analyze_to_text, extract_metrics_from_report, PROFILES  # type: ignore
-from tekkin_analyzer_v4_extras import analyze_v4_extras  # type: ignore
+from tools.tekkin_analyzer_v4_extras import analyze_v4_extras  # type: ignore
 
 
 AUDIO_EXTENSIONS = {".wav", ".aiff", ".aif", ".mp3", ".flac", ".ogg"}

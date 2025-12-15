@@ -40,6 +40,19 @@ type ReadinessTag = {
   intent: AnalyzerReadinessIntent;
 };
 
+function normalizeProfileKey(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toLowerCase().replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
+  return normalized || null;
+}
+
+function mapWarningSeverity(x: unknown): AnalyzerWarning["severity"] {
+  if (x === "info") return "info";
+  return "warning"; // warning, critical, altro -> warning
+}
+
 function computeReadinessTag(params: {
   lufs?: number | null;
   overallScore?: number | null;
@@ -99,6 +112,7 @@ type VersionRow = AnalyzerMetricsFields & {
   analyzer_profile_key?: string | null;
   analyzer_mode?: string | null;
   analyzer_key?: string | null;
+  model_match_percent?: number | null;
   analyzer_bands_norm?: BandsNorm | null;
   fix_suggestions?: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
@@ -155,10 +169,9 @@ export function AnalyzerProPanel({
     : [];
   const sortedFixSuggestions = sortByPriority(fixSuggestions);
 
-  const modelMatch = refAi?.model_match || null;
   const matchPercent: number | null =
-    modelMatch?.match_percent != null
-      ? modelMatch.match_percent
+    typeof version.model_match_percent === "number"
+      ? version.model_match_percent
       : refAi != null && typeof refAi.match_ratio === "number"
       ? refAi.match_ratio * 100
       : null;
@@ -186,14 +199,6 @@ export function AnalyzerProPanel({
     }
     return null;
   }, [analyzer, version]);
-
-  const normalizeProfileKey = (raw: string | null | undefined): string | null => {
-    if (!raw) return null;
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const normalized = trimmed.toLowerCase().replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "");
-    return normalized || null;
-  };
 
   const rawProfileKey =
     (analyzer as unknown as { analysis_scope?: { profile_key?: string | null } | null })
@@ -259,7 +264,10 @@ export function AnalyzerProPanel({
   const harmonicBalance = analyzer?.harmonic_balance ?? null;
   const stereoWidth = analyzer?.stereo_width ?? null;
   const confidenceMetrics = analyzer?.confidence ?? null;
-  const warningsList: AnalyzerWarning[] = analyzer?.warnings ?? [];
+  const warningsList: AnalyzerWarning[] = (analyzer?.warnings ?? []).map((w: any) => ({
+    ...w,
+    severity: mapWarningSeverity(w?.severity),
+  }));
   const confidenceEntries = [
     { label: "Tempo", value: confidenceMetrics?.bpm ?? null },
     { label: "Key", value: confidenceMetrics?.key ?? null },
@@ -342,7 +350,7 @@ export function AnalyzerProPanel({
     version.analyzer_spectral_centroid_hz,
   ]);
 
-  const hasAnalyzerData = !!analyzer || !!refAi 
+  const hasAnalyzerData = !!analyzer || !!refAi;
 
   if (!hasAnalyzerData) {
     return (

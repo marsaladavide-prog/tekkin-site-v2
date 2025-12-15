@@ -110,8 +110,9 @@ const payload = {
   lang: "it",
 };
 
+    console.log("[run-analyzer] payload ->", JSON.stringify(payload, null, 2));
 
-    console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl, payload);
+    console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl);
 
     const analyzerRes = await fetch(analyzerUrl, {
       method: "POST",
@@ -122,27 +123,67 @@ const payload = {
       body: JSON.stringify(payload),
     });
 
-    if (!analyzerRes.ok) {
-      const text = await analyzerRes.text().catch(() => "");
-      console.error(
-        "[run-analyzer] Analyzer error response:",
-        analyzerRes.status,
-        text
-      );
-      return NextResponse.json(
-        { error: "Errore dall'Analyzer", detail: text || null },
-        { status: 502 }
-      );
+    const raw = await analyzerRes.text();
+    console.log("[run-analyzer] status ->", analyzerRes.status);
+    console.log("[run-analyzer] raw size ->", raw.length);
+    console.log("[run-analyzer] raw head ->", raw.slice(0, 600));
+
+    let result: any = null;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      console.error("[run-analyzer] response not json");
+      return NextResponse.json({ error: "Analyzer returned non-JSON" }, { status: 502 });
     }
 
-    const result = await analyzerRes.json().catch(() => null);
+    const warnings = [
+      ...(Array.isArray(result?.warnings) ? result.warnings : []),
+      ...(Array.isArray(result?.loudness_stats?.warnings) ? result.loudness_stats.warnings : []),
+    ].slice(0, 10);
+    console.log("[run-analyzer] warnings ->", warnings);
 
-    console.log("[run-analyzer] Analyzer result JSON:", result);
+    const matchRatio =
+      typeof result?.model_match?.match_ratio === "number" && Number.isFinite(result.model_match.match_ratio)
+        ? result.model_match.match_ratio
+        : null;
+    const modelMatchPercent = matchRatio == null ? null : Math.round(matchRatio * 100);
+    const bandEnergyNorm = (result as any)?.band_energy_norm;
+    const hasBandNorm =
+      !!bandEnergyNorm && typeof bandEnergyNorm === "object" && Object.keys(bandEnergyNorm).length > 0;
 
-    if (!result) {
+    console.log(
+      "[run-analyzer] brief ->",
+      JSON.stringify(
+        {
+          bpm: result?.bpm,
+          key: result?.key,
+          lufs: result?.loudness_stats?.integrated_lufs,
+          lra: result?.loudness_stats?.lra,
+          sample_peak_db: result?.loudness_stats?.sample_peak_db,
+          spectral_keys: Object.keys(result?.spectral ?? {}),
+          has_band_norm: hasBandNorm,
+          model_match_percent: modelMatchPercent,
+          model_match: result?.model_match ?? null,
+          arrays_blob_path: result?.arrays_blob_path ?? null,
+          arrays_blob_size_bytes: result?.arrays_blob_size_bytes ?? null,
+        },
+        null,
+        2
+      )
+    );
+
+    console.log("[run-analyzer] keys:", Object.keys(result || {}));
+    console.log("[run-analyzer] lufs:", result?.loudness_stats?.integrated_lufs);
+    console.log("[run-analyzer] model_match:", result?.model_match);
+    console.log("[run-analyzer] spectral keys:", Object.keys(result?.spectral ?? {}));
+    // const rawPretty = JSON.stringify(result, null, 2);
+    // console.log("[run-analyzer] full (first 8000 chars):\n", rawPretty.slice(0, 8000));
+
+    if (!analyzerRes.ok) {
+      console.error("[run-analyzer] Analyzer error response:", analyzerRes.status);
       return NextResponse.json(
-        { error: "Risposta Analyzer non valida" },
-        { status: 500 }
+        { error: "Errore dall'Analyzer", detail: raw.slice(0, 8000) || null },
+        { status: 502 }
       );
     }
 

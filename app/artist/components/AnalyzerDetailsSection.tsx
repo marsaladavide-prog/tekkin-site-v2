@@ -109,6 +109,13 @@ export function AnalyzerDetailsSection({
 }: AnalyzerDetailsSectionProps) {
   const hasBandsCompare = Array.isArray(bandsCompare) && bandsCompare.length > 0;
 
+  const bandWidthsDb =
+    stereoWidth?.band_widths_db && typeof stereoWidth.band_widths_db === "object"
+      ? stereoWidth.band_widths_db
+      : null;
+
+  const bandEntries = bandWidthsDb ? Object.entries(bandWidthsDb) : [];
+
   const getCompareBadgeClass = (status: BandCompare["status"]): string => {
     switch (status) {
       case "ok":
@@ -279,26 +286,32 @@ export function AnalyzerDetailsSection({
                     : "n.a."}
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
-                  {Object.entries(stereoWidth.band_widths_db).map(([band, value]) => (
-                    <div
-                      key={band}
-                      className="rounded-lg border border-white/10 bg-black/60 p-2"
-                    >
-                      <p className="text-[10px] uppercase text-white/60">
-                        {getBandDisplayName(band)}
-                      </p>
-                      <p className="text-sm font-semibold text-white">
-                        {formatNumber(value, 2)} dB
-                      </p>
-                      <span
-                        className={`mt-1 inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide ${getBandBadgeClass(
-                          value
-                        )}`}
+                  {bandEntries.length > 0 ? (
+                    bandEntries.map(([band, value]) => (
+                      <div
+                        key={band}
+                        className="rounded-lg border border-white/10 bg-black/60 p-2"
                       >
-                        {getBandWidthLabel(value)}
-                      </span>
+                        <p className="text-[10px] uppercase text-white/60">
+                          {getBandDisplayName(band)}
+                        </p>
+                        <p className="text-sm font-semibold text-white">
+                          {formatNumber(value, 2)} dB
+                        </p>
+                        <span
+                          className={`mt-1 inline-flex items-center justify-center rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide ${getBandBadgeClass(
+                            value
+                          )}`}
+                        >
+                          {getBandWidthLabel(value)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-3 rounded-lg border border-white/10 bg-black/60 p-2 text-[10px] text-white/60">
+                      Dettaglio stereo per-banda non disponibile in questa analisi.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             )}

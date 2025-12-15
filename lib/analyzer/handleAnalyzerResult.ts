@@ -11,25 +11,39 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
+function getObj(x: unknown): AnyRecord | null {
+  return x && typeof x === "object" ? (x as AnyRecord) : null;
+}
+
+function getNum(obj: unknown, key: string): number | null {
+  const o = getObj(obj);
+  const v = o ? o[key] : null;
+  return isFiniteNumber(v) ? v : null;
+}
+
 const BAND_KEYS: BandKey[] = ["sub", "low", "lowmid", "mid", "presence", "high", "air"];
 
 export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm {
-  const spectralRaw = (result as unknown as AnyRecord)?.spectral as AnyRecord | undefined;
-  if (!spectralRaw || typeof spectralRaw !== "object") {
-    return {};
+  const anyR = result as unknown as AnyRecord;
+
+  const rootBands = getObj(anyR.band_energy_norm);
+  if (rootBands) {
+    const normalized: BandsNorm = {};
+    for (const key of BAND_KEYS) {
+      const v = rootBands[key];
+      if (isFiniteNumber(v)) normalized[key] = v;
+    }
+    return normalized;
   }
 
-  const bandNormRaw = spectralRaw.band_norm as AnyRecord | undefined;
-  if (!bandNormRaw || typeof bandNormRaw !== "object") {
-    return {};
-  }
+  const spectralRaw = getObj(anyR.spectral);
+  const bandNormRaw = spectralRaw ? getObj((spectralRaw as AnyRecord).band_norm) : null;
+  if (!bandNormRaw) return {};
 
   const normalized: BandsNorm = {};
   for (const key of BAND_KEYS) {
-    const value = bandNormRaw[key];
-    if (isFiniteNumber(value)) {
-      normalized[key] = value;
-    }
+    const v = (bandNormRaw as AnyRecord)[key];
+    if (isFiniteNumber(v)) normalized[key] = v;
   }
   return normalized;
 }
@@ -38,122 +52,116 @@ export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm 
  * Mapping risultato Tekkin Analyzer -> colonne project_versions.
  */
 export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
-  // Fallback LUFS: preferisci result.lufs (già full-track Essentia),
-  // altrimenti prova a leggere loudness_stats.integrated_lufs dal JSON.
+  const resultAny = result as unknown as AnyRecord;
+
+  // loudness_stats.integrated_lufs (nuovo) fallback a result.lufs (vecchio)
   const integratedFromStats = (() => {
-    const ls = (result as unknown as AnyRecord)?.loudness_stats as AnyRecord | undefined;
+    const ls = (result as any)?.loudness_stats;
     const v = ls?.integrated_lufs;
-    return isFiniteNumber(v) ? v : null;
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
   })();
 
-  const lufs = isFiniteNumber(result.lufs) ? result.lufs : integratedFromStats;
+  const lufs = integratedFromStats;
 
-  // model_match_percent: gestisce sia ratio 0..1 che percent 0..100
-  const modelMatchPercent = (() => {
-    const mr = (result.reference_ai as any)?.match_ratio;
-    if (!isFiniteNumber(mr)) return null;
+  // spectral nested (nuovo) fallback ai campi flat (vecchio)
+  const spectralObj = getObj(resultAny.spectral);
+  const spectralCentroid =
+    getNum(spectralObj, "spectral_centroid_hz") ??
+    (isFiniteNumber((result as any).spectral_centroid_hz) ? (result as any).spectral_centroid_hz : null);
 
-    // Se è un ratio (0..1) lo trasformo in percentuale.
-    // Se è già percentuale (>1), lo tratto come percent.
-    const percent = mr <= 1 ? mr * 100 : mr;
-    return clamp(percent, 0, 100);
+  const spectralRolloff =
+    getNum(spectralObj, "spectral_rolloff_hz") ??
+    (isFiniteNumber((result as any).spectral_rolloff_hz) ? (result as any).spectral_rolloff_hz : null);
+
+  const spectralBandwidth =
+    getNum(spectralObj, "spectral_bandwidth_hz") ??
+    (isFiniteNumber((result as any).spectral_bandwidth_hz) ? (result as any).spectral_bandwidth_hz : null);
+
+  const spectralFlatness =
+    getNum(spectralObj, "spectral_flatness") ??
+    (isFiniteNumber((result as any).spectral_flatness) ? (result as any).spectral_flatness : null);
+
+  // model_match (nuovo) fallback a reference_ai (vecchio)
+  const modelMatchRatio = (() => {
+    const mm = getObj(resultAny.model_match);
+    const v1 = mm ? getNum(mm, "match_ratio") : null;
+    if (v1 != null) return v1;
+
+    const ra = getObj((result as any).reference_ai);
+    const v2 = ra ? getNum(ra, "match_ratio") : null;
+    return v2;
   })();
 
-  const effectiveBpm = isFiniteNumber(result.bpm) ? Math.round(result.bpm) : null;
+  const modelMatchPercent =
+    modelMatchRatio == null ? null : clamp(modelMatchRatio <= 1 ? modelMatchRatio * 100 : modelMatchRatio, 0, 100);
+
+  const effectiveBpm = isFiniteNumber((result as any).bpm) ? Math.round((result as any).bpm) : null;
 
   const analyzerKey =
-    typeof result.key === "string" && result.key.trim().length > 0
-      ? result.key.trim()
+    typeof (result as any).key === "string" && (result as any).key.trim().length > 0
+      ? (result as any).key.trim()
       : null;
 
-  const arraysBlobPathRaw = (result as unknown as AnyRecord)?.arrays_blob_path;
+  const arraysBlobPathRaw = resultAny.arrays_blob_path;
   const arraysBlobPath =
     typeof arraysBlobPathRaw === "string" && arraysBlobPathRaw.trim().length > 0
       ? arraysBlobPathRaw.trim()
       : null;
 
-  const arraysBlobSizeRaw = (result as unknown as AnyRecord)?.arrays_blob_size_bytes;
+  const arraysBlobSizeRaw = resultAny.arrays_blob_size_bytes;
   const arraysBlobSize = isFiniteNumber(arraysBlobSizeRaw) ? Math.round(arraysBlobSizeRaw) : null;
 
-  const fixSuggestions =
-    Array.isArray(result.fix_suggestions) ? result.fix_suggestions : null;
-
-  // analysis_pro: lo salvo e ci inietto analysis_scope se disponibile nel result raw
-  const analysisScope = (() => {
-    const v = (result as unknown as AnyRecord)?.analysis_scope;
-    return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
-  })();
-
-  const analysisPro = (() => {
-    const ap = (result as unknown as AnyRecord)?.analysis_pro;
-    if (!ap || typeof ap !== "object") {
-      return analysisScope ? { analysis_scope: analysisScope } : null;
-    }
-    // merge non distruttivo
-    const merged = { ...(ap as AnyRecord) };
-    if (analysisScope) merged.analysis_scope = analysisScope;
-    return merged;
-  })();
-
   const waveformPeaks =
-    Array.isArray(result.waveform_peaks) && result.waveform_peaks.length
-      ? result.waveform_peaks.filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    Array.isArray((result as any).waveform_peaks) && (result as any).waveform_peaks.length
+      ? (result as any).waveform_peaks.filter((v: unknown): v is number => isFiniteNumber(v))
       : null;
 
   const waveformDuration =
-    typeof result.waveform_duration === "number" && Number.isFinite(result.waveform_duration)
-      ? result.waveform_duration
-      : null;
+    isFiniteNumber((result as any).waveform_duration) ? (result as any).waveform_duration : null;
 
   const waveformBands = (() => {
-    const wb = (result as unknown as AnyRecord)?.waveform_bands;
-    return wb && typeof wb === "object" ? (wb as AnalyzerResult["waveform_bands"]) : null;
+    const wb = getObj(resultAny.waveform_bands);
+    return wb ? (wb as AnalyzerResult["waveform_bands"]) : null;
+  })();
+
+  // analysis_pro nel minimal analyzer non c’è (a meno che tu lo aggiunga), quindi qui spesso null
+  const analysisPro = (() => {
+    const ap = getObj(resultAny.analysis_pro);
+    return ap ? ap : null;
   })();
 
   return {
-    // metri principali
     lufs: lufs ?? null,
-    overall_score: isFiniteNumber(result.overall_score) ? result.overall_score : null,
-    feedback: result.feedback ?? null,
+    overall_score: isFiniteNumber((result as any).overall_score) ? (result as any).overall_score : null,
+    feedback: (result as any).feedback ?? null,
 
-    // percentuale match con modello di genere
     model_match_percent: modelMatchPercent,
 
-    // snapshot raw completo (debug / UI avanzata)
     analyzer_json: result,
 
-    // reference ai
-    analyzer_reference_ai: result.reference_ai ?? null,
+    // Salviamo sempre il blocco model_match nel campo coerente
+    analyzer_reference_ai: resultAny.model_match ?? null,
 
-    // analysis pro (jsonb)
     analysis_pro: analysisPro,
 
-    // extra numerici
     analyzer_bpm: effectiveBpm,
-    analyzer_spectral_centroid_hz: isFiniteNumber(result.spectral_centroid_hz)
-      ? result.spectral_centroid_hz
-      : null,
-    analyzer_spectral_rolloff_hz: isFiniteNumber(result.spectral_rolloff_hz)
-      ? result.spectral_rolloff_hz
-      : null,
-    analyzer_spectral_bandwidth_hz: isFiniteNumber(result.spectral_bandwidth_hz)
-      ? result.spectral_bandwidth_hz
-      : null,
-    analyzer_spectral_flatness: isFiniteNumber(result.spectral_flatness)
-      ? result.spectral_flatness
-      : null,
-    analyzer_zero_crossing_rate: isFiniteNumber(result.zero_crossing_rate)
-      ? result.zero_crossing_rate
+    analyzer_spectral_centroid_hz: spectralCentroid,
+    analyzer_spectral_rolloff_hz: spectralRolloff,
+    analyzer_spectral_bandwidth_hz: spectralBandwidth,
+    analyzer_spectral_flatness: spectralFlatness,
+    analyzer_zero_crossing_rate: isFiniteNumber((result as any).zero_crossing_rate)
+      ? (result as any).zero_crossing_rate
       : null,
     analyzer_key: analyzerKey,
 
-    // fix suggestions
-    fix_suggestions: fixSuggestions,
+    fix_suggestions: Array.isArray((result as any).fix_suggestions) ? (result as any).fix_suggestions : null,
     arrays_blob_path: arraysBlobPath,
     arrays_blob_size_bytes: arraysBlobSize,
+
     waveform_peaks: waveformPeaks,
     waveform_duration: waveformDuration,
     waveform_bands: waveformBands,
+
     analyzer_bands_norm: extractBandsNormFromAnalyzer(result),
   };
 }
