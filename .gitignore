@@ -37,4 +37,7 @@ venv/
 .tekkin-analyzer-venv/
 .tekkin-analyzer-venv-essentia/
 .tekkin-analyzer-venv-linux/
+
+# TypeScript build info
 tsconfig.tsbuildinfo
+*.tsbuildinfo
