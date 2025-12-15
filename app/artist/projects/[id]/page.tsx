@@ -1,41 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { AnalyzerProPanel } from "@/app/artist/components/AnalyzerProPanel";
-
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type FormEvent,
-  type MouseEvent,
-} from "react";
-
-import { Play, Pause } from "lucide-react";
-
-import type {
-  AnalyzerMetricsFields,
-  AnalyzerResult,
-  AnalyzerRunResponse,
-  AnalyzerV1Result,
-  FixSuggestion,
-  ReferenceAi,
-  AnalyzerAiCoach,
-  AnalyzerAiAction,
-  AnalyzerAiMeta,
-} from "@/types/analyzer";
-
-import {
-  getTekkinGenreLabel,
-  TEKKIN_MIX_TYPES,
-  type TekkinGenreId,
-  type TekkinMixType,
-} from "@/lib/constants/genres";
+import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
+import { TEKKIN_MIX_TYPES, type TekkinMixType, type TekkinGenreId, getTekkinGenreLabel } from "@/lib/constants/genres";
+import type { AnalyzerMetricsFields, AnalyzerRunResponse, AnalyzerResult, FixSuggestion, ReferenceAi, AnalyzerAiAction, AnalyzerAiCoach, AnalyzerAiMeta } from "@/types/analyzer";
+import type { WaveformBands } from "@/types/analyzer";
+import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
@@ -46,560 +19,108 @@ const MIX_TYPE_LABELS: Record<TekkinMixType, string> = {
 
 type AnalyzerStatus = "idle" | "starting" | "analyzing" | "saving" | "done" | "error";
 
-type UploadCoverResponse = {
-  ok: boolean;
-  coverUrl?: string | null;
-  storagePath?: string | null;
-  error?: string | null;
-};
-
-type UpdateInfoResponse = {
-  ok: boolean;
-  error?: string | null;
-  project?: any;
-  supabaseError?: {
-    message: string;
-    code: string | null;
-    details: unknown;
-  } | null;
-};
-
-type AudioPreviewState = {
-  url: string | null;
-  error: string | null;
-  loading: boolean;
-};
-
-type ProjectVersionRecord = AnalyzerMetricsFields & {
+type ProjectVersionRow = AnalyzerMetricsFields & {
   id: string;
-  version_name: string;
   created_at: string;
-  audio_url: string | null; // path nel bucket tracks
+  version_name: string | null;
+  mix_type: TekkinMixType | null;
+
+  // IMPORTANT: nel tuo DB audio_url contiene la path storage nel bucket tracks
+audio_url: string | null;   // può essere URL http firmato (se usato) oppure null
+audio_path: string | null;  // path nel bucket tracks
+
+
+
+  analyzer_json?: AnalyzerResult | null;
   analyzer_reference_ai?: ReferenceAi | null;
-  analyzer_json?: AnalyzerResult | null;
-  mix_type?: string | null;
-  analyzer_key?: string | null;
-  analyzer_ai_summary?: string | null;
-  analyzer_ai_actions?: AnalyzerAiAction[] | null;
-  analyzer_ai_meta?: AnalyzerAiMeta | null;
-};
-
-type SupabaseProjectRecord = {
-  id: string;
-  title: string;
-  status: string | null;
-  created_at: string;
-  mix_type: TekkinMixType | null;
-  genre: TekkinGenreId | null;
-  cover_url?: string | null;
-  cover_link?: string | null;
-  description?: string | null;
-  project_versions: ProjectVersionRecord[];
-};
-
-type VersionRow = AnalyzerMetricsFields & {
-  id: string;
-  version_name: string;
-  created_at: string;
-  audio_url: string | null; // path
-  mix_type: TekkinMixType;
 
   analyzer_ai_summary?: string | null;
   analyzer_ai_actions?: AnalyzerAiAction[] | null;
   analyzer_ai_meta?: AnalyzerAiMeta | null;
 
-  analyzer_key?: string | null;
-  analyzer_json?: AnalyzerResult | null;
-
-  reference_ai?: ReferenceAi | null;
+  waveform_peaks?: number[] | null;
+  waveform_duration?: number | null;
+  waveform_bands?: WaveformBands | null;
 };
 
-type ProjectDetail = {
+type ProjectRow = {
   id: string;
   title: string;
   status: string | null;
   created_at: string;
-  mix_type: TekkinMixType | null;
   genre: TekkinGenreId | null;
-  cover_url?: string | null;
-  cover_link?: string | null;
-  description?: string | null;
-  versions: VersionRow[];
+  mix_type: TekkinMixType | null;
+  cover_url: string | null;
+  description: string | null;
+  project_versions: ProjectVersionRow[];
 };
 
-const buildProjectSelectQuery = (includeAnalyzerKey: boolean, includeProjectInfo: boolean) => `
-  id,
-  title,
-  status,
-  created_at,
-  mix_type,
-  genre,
-  ${includeProjectInfo ? "cover_url,\n  cover_link,\n  description," : ""}
-  project_versions (
-    id,
-    version_name,
-    created_at,
-    audio_url,
-    lufs,
-    sub_clarity,
-    hi_end,
-    dynamics,
-    stereo_image,
-    tonality,
-    overall_score,
-    feedback,
-    analyzer_bpm,
-    analyzer_spectral_centroid_hz,
-    analyzer_spectral_rolloff_hz,
-    analyzer_spectral_bandwidth_hz,
-    analyzer_spectral_flatness,
-    analyzer_zero_crossing_rate,
-    analyzer_reference_ai,
-    analyzer_mix_v1,
-    mix_type,
-    analyzer_ai_summary,
-    analyzer_ai_actions,
-    analyzer_ai_meta,
-    analyzer_json${includeAnalyzerKey ? ",\n    analyzer_key" : ""}
-  )
-`;
-
-const shouldExcludeAnalyzerKey = (error: { message?: string | null; details?: string | null } | null) => {
-  if (!error) return false;
-  const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
-  return message.includes("analyzer_key");
-};
-
-const shouldExcludeProjectInfo = (error: { message?: string | null; details?: string | null } | null) => {
-  if (!error) return false;
-  const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
-  return message.includes("cover_url") || message.includes("description");
-};
-
-function normalizeMixType(value?: string | null, fallback: TekkinMixType = "premaster"): TekkinMixType {
+const normalizeMixType = (value?: string | null): TekkinMixType | null => {
   if (value && TEKKIN_MIX_TYPES.includes(value as TekkinMixType)) return value as TekkinMixType;
-  return fallback;
-}
+  return null;
+};
 
-function getMixTypeLabel(value?: string | null | TekkinMixType, fallback: TekkinMixType = "premaster"): string {
-  const v = normalizeMixType(value ?? null, fallback);
-  return v === "master" ? "Master" : "Premaster";
-}
-
-function normalizeAiMeta(meta?: AnalyzerAiMeta | null): AnalyzerAiMeta {
-  const raw = meta?.risk_flags;
-  return {
-    artistic_assessment: meta?.artistic_assessment ?? "",
-    risk_flags: Array.isArray(raw) ? raw : [],
-    predicted_rank_gain: meta?.predicted_rank_gain ?? null,
-    label_fit: meta?.label_fit ?? null,
-    structure_feedback: meta?.structure_feedback ?? null,
-  };
-}
-
-function formatTime(secs: number) {
+const formatTime = (secs: number) => {
   if (!Number.isFinite(secs) || secs < 0) return "00:00";
   const m = Math.floor(secs / 60);
   const s = Math.floor(secs % 60);
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+};
+
+async function sha1Hex(input: string): Promise<string> {
+  const enc = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest("SHA-1", enc);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
+function extFromName(name: string) {
+  const parts = name.split(".");
+  const ext = parts.length > 1 ? parts[parts.length - 1] : "";
+  return ext.toLowerCase();
 }
 
-type CachedPeaks = {
-  peaks: Array<number[]>;
-  duration: number;
-  ts: number;
-};
-const PEAKS_STORAGE_PREFIX = "tekkin:wavesurfer:peaks:v2:";
-const MAX_IN_MEMORY = 40;
-const waveformPeaksCache = new Map<string, CachedPeaks>();
-
-const hashKey = (s: string) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return (h >>> 0).toString(16);
-};
-const storageKey = (k: string) => PEAKS_STORAGE_PREFIX + hashKey(k);
-
-const isNumericArray = (value: unknown): value is number[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "number");
-
-const isPeaksArray = (value: unknown): value is Array<number[]> =>
-  Array.isArray(value) && value.length > 0 && value.every((channel) => isNumericArray(channel));
-
-const readPeaksFromStorage = (key: string): CachedPeaks | null => {
-  const mem = waveformPeaksCache.get(key);
-  if (mem) return mem;
-  try {
-    const raw = localStorage.getItem(storageKey(key));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedPeaks;
-    if (!parsed || !isPeaksArray(parsed.peaks) || !Number.isFinite(parsed.duration)) return null;
-    waveformPeaksCache.set(key, parsed);
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const writePeaksToStorage = (key: string, value: CachedPeaks) => {
-  waveformPeaksCache.set(key, value);
-  if (waveformPeaksCache.size > MAX_IN_MEMORY) {
-    const oldest = [...waveformPeaksCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-    if (oldest) waveformPeaksCache.delete(oldest[0]);
-  }
-  try {
-    localStorage.setItem(storageKey(key), JSON.stringify(value));
-  } catch {
-    // ignore
-  }
-};
-
-function WaveformPreview({
-  audioUrl,
-  cacheKey,
-  className,
-  waveHeight,
-}: {
-  audioUrl?: string | null;
-  cacheKey: string;
-  className?: string;
-  waveHeight?: number;
-}) {
-  const waveformHeight =
-    typeof waveHeight === "number" && Number.isFinite(waveHeight) && waveHeight > 0
-      ? waveHeight
-      : 90;
-  const rootClassName = ["p-0", className].filter(Boolean).join(" ");
-
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const waveRef = useRef<any>(null);
-
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [ready, setReady] = useState(false);
-
-  const applyFit = useCallback(() => {
-    const wave = waveRef.current;
-    const wrap = wrapRef.current;
-    if (!wave || !wrap) return;
-
-    const d = wave.getDuration?.() ?? 0;
-    if (!d) return;
-
-    const pxPerSec = Math.max(1, Math.floor(wrap.clientWidth / d));
-    try {
-      wave.zoom(pxPerSec);
-      const drawer = wave.drawer;
-      if (drawer?.wrapper) drawer.wrapper.scrollLeft = 0;
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const ensureWave = useCallback(async () => {
-    if (waveRef.current) return;
-    if (!audioUrl || !containerRef.current) return;
-
-    const cached = readPeaksFromStorage(cacheKey);
-    containerRef.current.innerHTML = '';
-
-    const WaveSurfer = (await import('wavesurfer.js')).default;
-    const wave = WaveSurfer.create({
-      container: containerRef.current,
-      height: waveformHeight,
-      waveColor: '#6b7280',
-      progressColor: '#22d3ee',
-      cursorColor: '#8efacb',
-      cursorWidth: 1,
-      normalize: true,
-      dragToSeek: true,
-      fillParent: true,
-    });
-
-    waveRef.current = wave;
-    if (cached) wave.load(audioUrl, cached.peaks, cached.duration);
-    else wave.load(audioUrl);
-
-    wave.on('ready', async () => {
-      const d = wave.getDuration();
-      setDuration(d);
-      setProgress(0);
-      setPlaying(false);
-      setReady(true);
-      requestAnimationFrame(applyFit);
-
-      if (!cached) {
-        const exportedPeaks = wave.exportPeaks();
-        if (exportedPeaks.length && Number.isFinite(d)) {
-          try {
-            writePeaksToStorage(cacheKey, {
-              peaks: exportedPeaks,
-              duration: d,
-              ts: Date.now(),
-            });
-          } catch {
-            // ignore
-          }
-        }
-      }
-    });
-
-    wave.on('audioprocess', () => {
-      const d = wave.getDuration();
-      if (!d) return;
-      setDuration(d);
-      setProgress(Math.min(1, wave.getCurrentTime() / d));
-    });
-
-    wave.on('seeking', (currentTime: number) => {
-      const totalDuration = wave.getDuration() || 0;
-      if (!totalDuration) {
-        setProgress(0);
-        return;
-      }
-      setProgress(Math.min(1, Math.max(0, currentTime / totalDuration)));
-    });
-    wave.on('play', () => setPlaying(true));
-    wave.on('pause', () => setPlaying(false));
-    wave.on('finish', () => {
-      setPlaying(false);
-      setProgress(1);
-    });
-  }, [audioUrl, cacheKey, applyFit, waveformHeight]);
-
-  useEffect(() => {
-    void ensureWave();
-    const waveInstance = waveRef.current;
-    const containerEl = containerRef.current;
-    return () => {
-      if (waveInstance) {
-        waveInstance.destroy();
-      }
-      if (containerEl) {
-        containerEl.replaceChildren();
-      }
-      waveRef.current = null;
-      setPlaying(false);
-      setProgress(0);
-      setDuration(0);
-      setReady(false);
-    };
-  }, [ensureWave]);
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-
-    const ro = new ResizeObserver(() => applyFit());
-    ro.observe(el);
-
-    window.addEventListener('orientationchange', applyFit);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('orientationchange', applyFit);
-    };
-  }, [applyFit]);
-
-  const toggle = async () => {
-    if (!waveRef.current) await ensureWave();
-    waveRef.current?.playPause();
-  };
-
-  const seek = (e: MouseEvent<HTMLDivElement>) => {
-    const wave = waveRef.current;
-    if (!wave || !duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    wave.seekTo(ratio);
-    setProgress(ratio);
-  };
-
-  const timeLabel = duration
-    ? `${formatTime(progress * duration)} / ${formatTime(duration)}`
-    : '00:00 / --:--';
-
-  if (!audioUrl) {
-    return <div className="p-1 text-xs text-white/60">Audio non disponibile.</div>;
-  }
-
-  return (
-    <div className={rootClassName}>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={toggle}
-          className="h-10 w-10 rounded-full bg-white/8 text-white/85 hover:bg-white/12 border border-white/10"
-          aria-label={playing ? 'Pausa' : 'Play'}
-        >
-          {playing ? <Pause className="h-4 w-4 mx-auto" /> : <Play className="h-4 w-4 mx-auto" />}
-        </button>
-
-        <div
-          ref={wrapRef}
-          className="relative flex-1 overflow-hidden rounded-xl bg-[#0a0c12] cursor-pointer"
-          onClick={seek}
-        >
-          <div
-            ref={containerRef}
-            className="w-full"
-            style={{ height: waveformHeight }}
-          />
-          {!ready && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
-              loading waveform...
-            </div>
-          )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2 bg-[#0a0c12]" />
-        </div>
-
-        <div className="w-24 text-right text-[11px] text-white/70">{timeLabel}</div>
-      </div>
-
-      <p className="mt-2 text-[10px] uppercase tracking-[0.2em] text-white/55">Stream preview</p>
-    </div>
-  );
+function guessContentType(file: File) {
+  if (file.type) return file.type;
+  const ext = extFromName(file.name);
+  if (ext === "mp3") return "audio/mpeg";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "flac") return "audio/flac";
+  if (ext === "m4a") return "audio/mp4";
+  return "application/octet-stream";
 }
+
+async function buildSignedUrlFromStoragePath(path: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 60 * 30);
+  if (error || !data?.signedUrl) throw new Error("Signed URL non disponibile");
+  return data.signedUrl;
+}
+
+/* ------------------------------ Page ------------------------------ */
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
-  const projectId = params?.id as string;
+  const search = useSearchParams();
+  const projectId = params?.id ?? "";
+  const initialVersionId = search?.get("version_id");
 
-  const allowAnalyzerKeySelectRef = useRef(true);
-  const allowProjectInfoSelectRef = useRef(true);
+  const player = useTekkinPlayer();
 
-  const [analyzerStatus, setAnalyzerStatus] = useState<AnalyzerStatus>("idle");
-
-  const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [project, setProject] = useState<ProjectRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [titleSaving, setTitleSaving] = useState(false);
-  const [titleError, setTitleError] = useState<string | null>(null);
-  const [titleFeedback, setTitleFeedback] = useState<string | null>(null);
-
-  const [versionNameDrafts, setVersionNameDrafts] = useState<Record<string, string>>({});
-  const [versionNameFeedback, setVersionNameFeedback] = useState<
-    Record<string, { error: string | null; success: string | null }>
-  >({});
-
-  const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
-
-  const [versionToDelete, setVersionToDelete] = useState<VersionRow | null>(null);
-  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
-  const [versionDeleteError, setVersionDeleteError] = useState<string | null>(null);
-
+  const [versionName, setVersionName] = useState("");
+  const [versionMixType, setVersionMixType] = useState<TekkinMixType>("master");
+  const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [selectedFileSize, setSelectedFileSize] = useState<number | null>(null);
-  const [fileTooLarge, setFileTooLarge] = useState(false);
-  const [versionMixType, setVersionMixType] = useState<TekkinMixType>(TEKKIN_MIX_TYPES[0]);
 
   const [analyzingVersionId, setAnalyzingVersionId] = useState<string | null>(null);
+  const [analyzerStatus, setAnalyzerStatus] = useState<AnalyzerStatus>("idle");
 
-  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
-  const [audioStates, setAudioStates] = useState<Record<string, AudioPreviewState>>({});
-
+  const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
   const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<Record<string, FixSuggestion[] | null>>({});
-  const [mixV1ByVersion, setMixV1ByVersion] = useState<Record<string, AnalyzerV1Result | null>>({});
-
-  const [aiByVersion, setAiByVersion] = useState<Record<string, AnalyzerAiCoach>>({});
-  const [aiLoadingVersionId, setAiLoadingVersionId] = useState<string | null>(null);
-  const [aiErrorByVersion, setAiErrorByVersion] = useState<Record<string, string | null>>({});
-
-  const [coverEditorOpen, setCoverEditorOpen] = useState(false);
-  const [isSavingInfo, setIsSavingInfo] = useState(false);
-  const [infoError, setInfoError] = useState<string | null>(null);
-  const [infoFeedback, setInfoFeedback] = useState<string | null>(null);
-
-  const [coverUploadError, setCoverUploadError] = useState<string | null>(null);
-  const [coverUploadMessage, setCoverUploadMessage] = useState<string | null>(null);
-  const [isUploadingCover, setIsUploadingCover] = useState(false);
-
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [tempCoverPreview, setTempCoverPreview] = useState<string | null>(null);
-  const tempCoverUrlRef = useRef<string | null>(null);
-
-  const [descriptionDraft, setDescriptionDraft] = useState("");
-  const [coverDraft, setCoverDraft] = useState("");
-
-  const versionsWithFixes = useMemo(() => {
-    if (!project) return [];
-    return project.versions.map((v) => ({
-      ...v,
-      fix_suggestions: fixSuggestionsByVersion[v.id] ?? (v as any).fix_suggestions ?? null,
-      mix_v1: mixV1ByVersion[v.id] ?? (v as any).mix_v1 ?? null,
-    }));
-  }, [project, fixSuggestionsByVersion, mixV1ByVersion]);
-
-  const latestVersion = versionsWithFixes[0] ?? null;
-  const latestVersionId = latestVersion?.id ?? null;
-  const latestVersionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const prevLatestId = latestVersionRef.current;
-    const shouldAutoExpand = latestVersionId && (expandedVersionId === null || expandedVersionId === prevLatestId);
-    if (shouldAutoExpand) setExpandedVersionId(latestVersionId);
-    latestVersionRef.current = latestVersionId;
-  }, [expandedVersionId, latestVersionId]);
-
-  const expandedVersion = useMemo(
-    () => versionsWithFixes.find((v) => v.id === expandedVersionId) ?? null,
-    [versionsWithFixes, expandedVersionId]
-  );
-
-  const projectTitleValue = project?.title ?? "";
-  const projectVersions = useMemo(() => project?.versions ?? [], [project?.versions]);
-  const projectCoverLink = project?.cover_link ?? null;
-  const projectCoverUrl = project?.cover_url ?? null;
-  const projectDescriptionValue = project?.description ?? "";
-
-  const effectiveCover = useMemo(() => coverUrl ?? project?.cover_url ?? project?.cover_link ?? null, [coverUrl, project]);
-  const previewCoverUrl = useMemo(
-    () => tempCoverPreview ?? coverUrl ?? project?.cover_url ?? project?.cover_link ?? null,
-    [tempCoverPreview, coverUrl, project]
-  );
-
-  const handleToggleVersion = useCallback((version: VersionRow) => {
-    setExpandedVersionId((prev) => (prev === version.id ? null : version.id));
-  }, []);
-
-  const fetchAudioPreviewForVersion = useCallback(async (version: VersionRow) => {
-    const path = version.audio_url ?? null;
-    if (!path) {
-      setAudioStates((prev) => ({ ...prev, [version.id]: { url: null, error: null, loading: false } }));
-      return;
-    }
-
-    setAudioStates((prev) => ({ ...prev, [version.id]: { url: null, error: null, loading: true } }));
-
-    try {
-      const supabase = createClient();
-      const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 60 * 60);
-
-      if (error || !data?.signedUrl) throw error ?? new Error("Signed URL non disponibile");
-
-      setAudioStates((prev) => ({ ...prev, [version.id]: { url: data.signedUrl, error: null, loading: false } }));
-    } catch (err) {
-      console.error("Signed URL preview error:", err);
-      setAudioStates((prev) => ({
-        ...prev,
-        [version.id]: { url: null, error: "Impossibile caricare l'audio della versione.", loading: false },
-      }));
-    }
-  }, []);
+  const [aiByVersion, setAiByVersion] = useState<Record<string, AnalyzerAiCoach | null>>({});
 
   const loadProject = useCallback(async () => {
     if (!projectId) return;
@@ -607,116 +128,50 @@ export default function ProjectDetailPage() {
     try {
       setLoading(true);
       setErrorMsg(null);
-      setAiByVersion({});
-      setAiErrorByVersion({});
-      setVersionMixType(TEKKIN_MIX_TYPES[0]);
 
       const supabase = createClient();
 
-      const fetchProject = async (includeAnalyzerKey: boolean, includeProjectInfo: boolean) =>
-        supabase
-          .from("projects")
-          .select(buildProjectSelectQuery(includeAnalyzerKey, includeProjectInfo))
-          .eq("id", projectId)
-          .single();
+      const { data, error } = await supabase
+        .from("projects")
+        .select(
+          `
+          id, title, status, created_at, genre, mix_type, cover_url, description,
+          project_versions (
+            id, created_at, version_name, mix_type,
+            audio_url,
+              audio_path,
+            lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback,
+            analyzer_bpm, analyzer_key,
+            analyzer_reference_ai, analyzer_json,
+            analyzer_ai_summary, analyzer_ai_actions, analyzer_ai_meta,
+            waveform_peaks, waveform_duration, waveform_bands
+          )
+        `
+        )
+        .eq("id", projectId)
+        .single();
 
-      let includeAnalyzerKey = allowAnalyzerKeySelectRef.current;
-      let includeProjectInfo = allowProjectInfoSelectRef.current;
-
-      let selectResult = await fetchProject(includeAnalyzerKey, includeProjectInfo);
-
-      if (selectResult.error && includeAnalyzerKey && shouldExcludeAnalyzerKey(selectResult.error)) {
-        includeAnalyzerKey = false;
-        allowAnalyzerKeySelectRef.current = false;
-        selectResult = await fetchProject(includeAnalyzerKey, includeProjectInfo);
-      }
-
-      if (selectResult.error && includeProjectInfo && shouldExcludeProjectInfo(selectResult.error)) {
-        includeProjectInfo = false;
-        allowProjectInfoSelectRef.current = false;
-        selectResult = await fetchProject(includeAnalyzerKey, includeProjectInfo);
-      }
-
-      const { data, error } = selectResult;
       if (error || !data) {
-        console.error("Supabase project detail error:", error);
-        setErrorMsg("Project non trovato o errore nel caricamento.");
+        console.error("loadProject error:", error);
         setProject(null);
         setLoading(false);
+        setErrorMsg("Project non trovato o errore nel caricamento.");
         return;
       }
 
-      const projectData = data as unknown as SupabaseProjectRecord;
-      const versionsRaw = projectData.project_versions ?? [];
+      const p = data as unknown as ProjectRow;
+      p.project_versions = Array.isArray(p.project_versions) ? p.project_versions : [];
+      p.project_versions = [...p.project_versions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      const profileLabel = getTekkinGenreLabel(projectData.genre ?? null) ?? "Minimal / Deep Tech";
+      // normalizza mix_type versioni
+      p.project_versions = p.project_versions.map((v) => ({ ...v, mix_type: normalizeMixType(v.mix_type ?? p.mix_type) }));
 
-      const versions: VersionRow[] = versionsRaw
-        .map((v) => {
-          const vMix = normalizeMixType(v.mix_type ?? projectData.mix_type ?? null);
-          return {
-            id: v.id,
-            version_name: v.version_name,
-            created_at: v.created_at,
-            audio_url: v.audio_url ?? null,
-            lufs: (v as any).lufs ?? null,
-            sub_clarity: (v as any).sub_clarity ?? null,
-            hi_end: (v as any).hi_end ?? null,
-            dynamics: (v as any).dynamics ?? null,
-            stereo_image: (v as any).stereo_image ?? null,
-            tonality: (v as any).tonality ?? null,
-            overall_score: (v as any).overall_score ?? null,
-            feedback: (v as any).feedback ?? null,
-            analyzer_bpm: (v as any).analyzer_bpm ?? null,
-            analyzer_spectral_centroid_hz: (v as any).analyzer_spectral_centroid_hz ?? null,
-            analyzer_spectral_rolloff_hz: (v as any).analyzer_spectral_rolloff_hz ?? null,
-            analyzer_spectral_bandwidth_hz: (v as any).analyzer_spectral_bandwidth_hz ?? null,
-            analyzer_spectral_flatness: (v as any).analyzer_spectral_flatness ?? null,
-            analyzer_zero_crossing_rate: (v as any).analyzer_zero_crossing_rate ?? null,
-            analyzer_ai_summary: v.analyzer_ai_summary ?? null,
-            analyzer_ai_actions: v.analyzer_ai_actions ?? null,
-            analyzer_ai_meta: v.analyzer_ai_meta ?? null,
-            analyzer_key: v.analyzer_key ?? null,
-            reference_ai: v.analyzer_reference_ai ?? null,
-            analyzer_json: v.analyzer_json ?? null,
-            mix_type: vMix,
-            analyzer_mode: vMix,
-            analyzer_profile_key: profileLabel,
-          } as VersionRow;
-        })
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-      const aiFromDb: Record<string, AnalyzerAiCoach> = {};
-      versions.forEach((v) => {
-        if (!v.analyzer_ai_summary) return;
-        aiFromDb[v.id] = {
-          summary: v.analyzer_ai_summary,
-          actions: v.analyzer_ai_actions ?? [],
-          meta: normalizeAiMeta(v.analyzer_ai_meta ?? null),
-        };
-      });
-
-      setAiByVersion(aiFromDb);
-
-      setProject({
-        id: projectData.id,
-        title: projectData.title,
-        status: projectData.status,
-        created_at: projectData.created_at,
-        mix_type: projectData.mix_type ?? null,
-        genre: projectData.genre ?? null,
-        cover_url: projectData.cover_url ?? null,
-        cover_link: projectData.cover_link ?? null,
-        description: projectData.description ?? null,
-        versions,
-      });
-
+      setProject(p);
       setLoading(false);
-    } catch (err) {
-      console.error("Unexpected project load error:", err);
-      setErrorMsg("Errore inatteso nel caricamento del project.");
-      setProject(null);
+    } catch (e) {
+      console.error("loadProject unexpected:", e);
       setLoading(false);
+      setErrorMsg("Errore nel caricamento.");
     }
   }, [projectId]);
 
@@ -724,366 +179,147 @@ export default function ProjectDetailPage() {
     void loadProject();
   }, [loadProject]);
 
-  useEffect(() => {
-    setTitleDraft(projectTitleValue);
-  }, [projectTitleValue]);
+  const versions = project?.project_versions ?? [];
+  const latestVersion = versions[0] ?? null;
 
-  useEffect(() => {
-    if (projectVersions.length === 0) {
-      setVersionNameDrafts({});
-      return;
+  const selectedVersion = useMemo(() => {
+    if (!versions.length) return null;
+    if (initialVersionId) {
+      const found = versions.find((v) => v.id === initialVersionId);
+      if (found) return found;
     }
-    const drafts: Record<string, string> = {};
-    projectVersions.forEach((v) => (drafts[v.id] = v.version_name));
-    setVersionNameDrafts(drafts);
-  }, [projectVersions]);
+    return latestVersion;
+  }, [versions, latestVersion, initialVersionId]);
 
-  useEffect(() => {
-    setCoverDraft(projectCoverLink ?? projectCoverUrl ?? "");
-    setDescriptionDraft(projectDescriptionValue ?? "");
-    setCoverUrl(projectCoverUrl);
-  }, [projectCoverLink, projectCoverUrl, projectDescriptionValue]);
+  const profileLabel = getTekkinGenreLabel(project?.genre ?? null) ?? "Minimal / Deep Tech";
 
-  useEffect(() => {
-    return () => {
-      if (tempCoverUrlRef.current) URL.revokeObjectURL(tempCoverUrlRef.current);
-    };
-  }, []);
+  const ensurePreviewUrl = useCallback(
+  async (v: ProjectVersionRow) => {
+    const rawUrl = typeof v.audio_url === "string" ? v.audio_url.trim() : "";
+    const rawPath = typeof v.audio_path === "string" ? v.audio_path.trim() : "";
 
-  useEffect(() => {
-    if (!expandedVersion) return;
-    const state = audioStates[expandedVersion.id];
-    if (expandedVersion.audio_url && !state?.url && !state?.loading) {
-      void fetchAudioPreviewForVersion(expandedVersion);
-    }
-  }, [expandedVersion, audioStates, fetchAudioPreviewForVersion]);
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    if (!file) {
-      setSelectedFileName(null);
-      setSelectedFileSize(null);
-      setFileTooLarge(false);
-      setUploadError(null);
-      return;
+    // cache
+    if (audioPreviewByVersionId[v.id] !== undefined) {
+      return audioPreviewByVersionId[v.id];
     }
 
-    const tooLarge = file.size > MAX_FILE_SIZE_BYTES;
-    setSelectedFileName(file.name);
-    setSelectedFileSize(file.size);
-    setFileTooLarge(tooLarge);
-
-    if (tooLarge) {
-      setUploadError("File troppo grande. Limite massimo server: 50 MB per file.");
-    } else {
-      setUploadError(null);
+    // 1) se ho già un URL http, uso quello
+    if (rawUrl && rawUrl.startsWith("http")) {
+      setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: rawUrl }));
+      return rawUrl;
     }
+
+    // 2) altrimenti firmo una path: preferisco audio_path, fallback audio_url (legacy path)
+    const path = rawPath || rawUrl;
+    if (!path) {
+      setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: null }));
+      return null;
+    }
+
+    try {
+      const signed = await buildSignedUrlFromStoragePath(path);
+      setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: signed }));
+      return signed;
+    } catch (e) {
+      console.error("ensurePreviewUrl error:", e);
+      setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: null }));
+      return null;
+    }
+  },
+  [audioPreviewByVersionId]
+);
+
+
+  const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
   };
 
-  const handleUploadNewVersion = async (e: FormEvent<HTMLFormElement>) => {
+  const handleUploadVersion = async (e: FormEvent) => {
     e.preventDefault();
     if (!projectId) return;
 
-    setUploadError(null);
-
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-    const file = fd.get("file") as File | null;
+    setErrorMsg(null);
 
     if (!file) {
-      setUploadError("Seleziona un file audio.");
+      setErrorMsg("Seleziona un file audio.");
       return;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      setUploadError(
-        "File troppo grande. Limite massimo server: 50 MB per file. Ti consigliamo MP3 320 kbps."
-      );
+      setErrorMsg("File troppo grande (max 50MB).");
       return;
     }
-
-    fd.append("project_id", projectId);
-    fd.append("mix_type", versionMixType);
 
     try {
       setUploading(true);
 
-      const res = await fetch("/api/projects/add-version", { method: "POST", body: fd });
+      // 1) Upload diretto a Storage
+      const supabase = createClient();
+      const ext = extFromName(file.name) || "mp3";
+      const contentType = guessContentType(file);
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setUploadError(data?.error ?? "Errore durante upload nuova versione.");
-        return;
+      // path stabile e pulita
+      const seed = `${projectId}:${file.name}:${file.size}:${file.lastModified}:${Date.now()}`;
+      const hash = await sha1Hex(seed);
+      const storagePath = `${projectId}/${hash}.${ext}`;
+
+      const { error: upErr } = await supabase.storage
+        .from("tracks")
+        .upload(storagePath, file, {
+          contentType,
+          upsert: true,
+          cacheControl: "3600",
+        });
+
+      if (upErr) {
+        console.error("upload storage error:", upErr);
+        throw new Error("Errore upload su Storage");
       }
 
-      form.reset();
-      setSelectedFileName(null);
-      setSelectedFileSize(null);
-      setFileTooLarge(false);
-      setVersionMixType(TEKKIN_MIX_TYPES[0]);
+      // 2) Crea versione nel DB via JSON (audio_path è il path nel bucket)
+      const addVersionRes = await fetch("/api/projects/add-version", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          version_name: versionName?.trim() || null,
+          mix_type: versionMixType,
+          audio_path: storagePath,
+        }),
+      });
 
+      const addVersionPayload = (await addVersionRes.json().catch(() => null)) as { version_id?: string; version?: { id?: string } | null; error?: string } | null;
+      if (!addVersionRes.ok) throw new Error(addVersionPayload?.error ?? "Errore add-version");
+
+      const createdVersionId = addVersionPayload?.version?.id ?? addVersionPayload?.version_id;
+      if (!createdVersionId) throw new Error("add-version: version_id mancante");
+
+      // 3) Lancia analyzer per popolare waveform/metriche
+      const runRes = await fetch("/api/projects/run-analyzer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version_id: createdVersionId }),
+      });
+
+      if (!runRes.ok) {
+        const t = await runRes.text().catch(() => "");
+        throw new Error(t || "Errore run-analyzer");
+      }
+
+      // 4) reload
+      setVersionName("");
+      setFile(null);
       await loadProject();
     } catch (err) {
-      console.error("Upload new version error:", err);
-      setUploadError("Errore imprevisto durante upload nuova versione.");
+      console.error("handleUploadVersion error:", err);
+      const msg = err instanceof Error ? err.message : "Errore upload versione.";
+      setErrorMsg(msg);
     } finally {
       setUploading(false);
     }
   };
 
-  const startEditingTitle = () => {
-    setTitleFeedback(null);
-    setTitleError(null);
-    setEditingTitle(true);
-    setTitleDraft(project?.title ?? "");
-  };
-
-  const cancelEditingTitle = () => {
-    setTitleError(null);
-    setTitleDraft(project?.title ?? "");
-    setEditingTitle(false);
-  };
-
-  const handleSaveProjectTitle = async (event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault();
-    if (!project) return;
-
-    const nextTitle = titleDraft.trim();
-    if (!nextTitle) {
-      setTitleError("Il nome project non può essere vuoto.");
-      return;
-    }
-
-    setTitleSaving(true);
-    setTitleError(null);
-
-    try {
-      const res = await fetch("/api/projects/update-project", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: project.id, title: nextTitle }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? "Errore aggiornando il nome project.");
-      }
-
-      const data = (await res.json()) as { project?: { title?: string } };
-      if (data.project?.title) {
-        setProject((prev) => (prev ? { ...prev, title: data.project?.title ?? prev.title } : prev));
-        setTitleDraft(data.project.title);
-        setTitleFeedback("Nome aggiornato correttamente.");
-      }
-
-      setEditingTitle(false);
-    } catch (err) {
-      console.error("Update project title error:", err);
-      const msg = err instanceof Error ? err.message : "Errore aggiornando il nome.";
-      setTitleError(msg);
-    } finally {
-      setTitleSaving(false);
-    }
-  };
-
-  const openCoverEditor = () => {
-    setCoverEditorOpen(true);
-    setCoverUploadError(null);
-    setCoverUploadMessage(null);
-    setInfoError(null);
-    setInfoFeedback(null);
-  };
-
-  const closeCoverEditor = () => {
-    setCoverEditorOpen(false);
-    setCoverUploadError(null);
-    setCoverUploadMessage(null);
-  };
-
-  const handleSaveProjectInfo = async () => {
-    const resolvedProjectId = project?.id ?? projectId;
-    if (!resolvedProjectId) throw new Error("projectId mancante lato client");
-
-    const payload = {
-      projectId: resolvedProjectId,
-      coverLink: coverDraft || null,
-      description: descriptionDraft || null,
-    };
-
-    setIsSavingInfo(true);
-    setInfoError(null);
-    setInfoFeedback(null);
-
-    try {
-      const res = await fetch("/api/projects/update-info", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = (await res.json().catch(() => null)) as UpdateInfoResponse | null;
-
-      if (!res.ok || !data?.ok) {
-        const msg = data?.error ?? `Errore aggiornando le info (status ${res.status})`;
-        setInfoError(msg);
-        throw new Error(msg);
-      }
-
-      if (data.project) {
-        setProject((prev) => {
-          const next = data.project ?? {};
-          if (!prev) return { ...next, versions: [] };
-          return {
-            ...prev,
-            ...next,
-            cover_url: next.cover_url ?? prev.cover_url,
-            description: next.description ?? prev.description,
-            versions: prev.versions,
-          };
-        });
-      }
-
-      setCoverDraft(payload.coverLink ?? "");
-      setDescriptionDraft(payload.description ?? "");
-      setCoverUrl(payload.coverLink ?? null);
-      setInfoFeedback("Copertina e descrizione aggiornate.");
-    } finally {
-      setIsSavingInfo(false);
-    }
-  };
-
-  const handleCoverFileUpload = async (file: File, pid: string): Promise<UploadCoverResponse> => {
-    setIsUploadingCover(true);
-    setCoverUploadError(null);
-    setCoverUploadMessage(null);
-
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("projectId", pid);
-
-    try {
-      const res = await fetch("/api/projects/upload-cover", { method: "POST", body: fd });
-      const payload = (await res.json().catch(() => null)) as UploadCoverResponse | null;
-
-      if (!res.ok || !payload?.ok) {
-        const msg = payload?.error ?? `Errore caricando la cover. Status ${res.status}`;
-        setCoverUploadError(msg);
-        throw new Error(msg);
-      }
-
-      const nextCoverUrl = payload.coverUrl ?? null;
-
-      setCoverUrl(nextCoverUrl);
-      setCoverDraft(nextCoverUrl ?? "");
-      setProject((prev) => (prev ? { ...prev, cover_url: nextCoverUrl } : prev));
-      setCoverUploadMessage("Cover caricata correttamente.");
-
-      if (tempCoverUrlRef.current) {
-        URL.revokeObjectURL(tempCoverUrlRef.current);
-        tempCoverUrlRef.current = null;
-      }
-      setTempCoverPreview(null);
-
-      return payload;
-    } finally {
-      setIsUploadingCover(false);
-    }
-  };
-
-  const handleCoverFileChange = (event: ChangeEvent<HTMLInputElement>, pid: string) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const objectUrl = URL.createObjectURL(file);
-    if (tempCoverUrlRef.current) URL.revokeObjectURL(tempCoverUrlRef.current);
-    tempCoverUrlRef.current = objectUrl;
-    setTempCoverPreview(objectUrl);
-
-    handleCoverFileUpload(file, pid).catch((err) => {
-      console.error("[cover upload] failed:", err);
-      if (tempCoverUrlRef.current) {
-        URL.revokeObjectURL(tempCoverUrlRef.current);
-        tempCoverUrlRef.current = null;
-      }
-      setTempCoverPreview(null);
-    });
-
-    event.target.value = "";
-  };
-
-  const handleVersionNameChange = (versionId: string, value: string) => {
-    setVersionNameDrafts((prev) => ({ ...prev, [versionId]: value }));
-  };
-
-  const handleSaveVersionName = async (versionId: string) => {
-    const nextName = (versionNameDrafts[versionId] ?? "").trim();
-    if (!nextName) {
-      setVersionNameFeedback((prev) => ({
-        ...prev,
-        [versionId]: { error: "Il nome versione non può essere vuoto.", success: null },
-      }));
-      return;
-    }
-
-    setVersionNameFeedback((prev) => ({ ...prev, [versionId]: { error: null, success: null } }));
-
-    try {
-      const res = await fetch("/api/projects/update-version", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version_id: versionId, version_name: nextName }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? "Errore durante l'aggiornamento della versione.");
-      }
-
-      setVersionNameFeedback((prev) => ({
-        ...prev,
-        [versionId]: { error: null, success: "Nome versione aggiornato." },
-      }));
-
-      await loadProject();
-    } catch (err) {
-      console.error("Update version name error:", err);
-      const msg = err instanceof Error ? err.message : "Errore aggiornando la versione.";
-      setVersionNameFeedback((prev) => ({ ...prev, [versionId]: { error: msg, success: null } }));
-    }
-  };
-
-  const handleDeleteVersion = async () => {
-    if (!versionToDelete) return;
-
-    setVersionDeleteError(null);
-    setDeletingVersionId(versionToDelete.id);
-
-    try {
-      const res = await fetch("/api/projects/delete-version", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version_id: versionToDelete.id }),
-      });
-
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error ?? "Errore durante l'eliminazione della versione.");
-      }
-
-      setVersionToDelete(null);
-      setExpandedVersionId(null);
-      await loadProject();
-    } catch (err) {
-      console.error("Delete version error:", err);
-      const msg = err instanceof Error ? err.message : "Errore eliminando la versione.";
-      setVersionDeleteError(msg);
-    } finally {
-      setDeletingVersionId(null);
-    }
-  };
-
   const handleAnalyzeVersion = async (versionId: string) => {
-    if (!projectId) return;
-
     setErrorMsg(null);
     setAnalyzingVersionId(versionId);
     setAnalyzerStatus("starting");
@@ -1102,21 +338,18 @@ export default function ProjectDetailPage() {
       }
 
       setAnalyzerStatus("analyzing");
-      const runData = (await res.json()) as AnalyzerRunResponse | null;
+      const runData = (await res.json().catch(() => null)) as AnalyzerRunResponse | null;
 
       setFixSuggestionsByVersion((prev) => ({
         ...prev,
         [versionId]: runData?.analyzer_result?.fix_suggestions ?? null,
       }));
 
-      const mixV1 = (runData?.analyzer_result as any)?.mix_v1 ?? null;
-      setMixV1ByVersion((prev) => ({ ...prev, [versionId]: mixV1 as AnalyzerV1Result }));
-
       setAnalyzerStatus("saving");
       await loadProject();
 
       setAnalyzerStatus("done");
-      window.setTimeout(() => setAnalyzerStatus("idle"), 1500);
+      window.setTimeout(() => setAnalyzerStatus("idle"), 1200);
     } catch (err) {
       console.error("Analyze version error:", err);
       setErrorMsg("Errore durante l'analisi della versione.");
@@ -1126,34 +359,35 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleGenerateAiForVersion = async (versionId: string) => {
-    try {
-      setAiLoadingVersionId(versionId);
-      setAiErrorByVersion((prev) => ({ ...prev, [versionId]: null }));
+  const previewAudioUrl = useMemo(() => {
+    if (!selectedVersion) return null;
+    return audioPreviewByVersionId[selectedVersion.id] ?? null;
+  }, [selectedVersion, audioPreviewByVersionId]);
 
-      const res = await fetch("/api/analyzer/ai-summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version_id: versionId, force: true }),
-      });
+  useEffect(() => {
+    if (!selectedVersion) return;
+    void ensurePreviewUrl(selectedVersion);
+  }, [selectedVersion, ensurePreviewUrl]);
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || "Errore Tekkin AI");
-      }
+  const isActive = useMemo(() => {
+    if (!selectedVersion || !previewAudioUrl) return false;
+    return player.versionId === selectedVersion.id && player.audioUrl === previewAudioUrl;
+  }, [player, selectedVersion, previewAudioUrl]);
 
-      const data = (await res.json()) as { ok: boolean; version_id: string; ai: AnalyzerAiCoach };
-      if (!data.ok || !data.ai) throw new Error("Risposta Tekkin AI non valida");
+  const progressRatio = useMemo(() => {
+    if (!isActive) return 0;
+    if (!Number.isFinite(player.duration) || player.duration <= 0) return 0;
+    return player.currentTime / player.duration;
+  }, [isActive, player.currentTime, player.duration]);
 
-      setAiByVersion((prev) => ({ ...prev, [versionId]: data.ai }));
-    } catch (err) {
-      console.error("[AI coach] unexpected error:", err);
-      const msg = err instanceof Error ? err.message : "Errore Tekkin AI";
-      setAiErrorByVersion((prev) => ({ ...prev, [versionId]: msg }));
-    } finally {
-      setAiLoadingVersionId((prev) => (prev === versionId ? null : prev));
-    }
-  };
+  const durationForLabel = useMemo(() => {
+    const d1 = selectedVersion?.waveform_duration;
+    if (typeof d1 === "number" && Number.isFinite(d1) && d1 > 0) return d1;
+    if (isActive && Number.isFinite(player.duration) && player.duration > 0) return player.duration;
+    return null;
+  }, [selectedVersion?.waveform_duration, isActive, player.duration]);
+
+  const timeLabel = durationForLabel ? formatTime(durationForLabel) : "--:--";
 
   if (!projectId) {
     return (
@@ -1169,521 +403,223 @@ export default function ProjectDetailPage() {
         ← Back to Projects
       </Link>
 
-      {loading && <p className="text-sm text-white/50">Caricamento project...</p>}
-
+      {loading && <p className="text-sm text-white/50">Caricamento project.</p>}
       {errorMsg && !loading && <p className="text-sm text-red-400 mb-4">{errorMsg}</p>}
 
       {!loading && project && (
         <>
-          <section className="space-y-6 mb-6">
-            <div className="rounded-3xl border border-white/10 bg-black/60 p-5 grid gap-5 lg:grid-cols-[280px_1fr]">
-              <div className="group relative overflow-hidden rounded-2xl">
-                <div className="relative h-56 w-full shadow-lg">
-                  {effectiveCover ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={effectiveCover}
-                      alt={`Cover ${project.title}`}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-slate-900 to-black text-[11px] uppercase tracking-[0.4em] text-white/40">
-                      <span>Artwork mancante</span>
-                      <span>Tekkin Projects</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/30 to-black/90" />
-
-                <div className="absolute inset-x-4 bottom-4 flex flex-col gap-3 rounded-2xl bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
-                  <p className="text-sm text-white/80 line-clamp-3">
-                    {project.description ?? "Aggiorna cover e descrizione per far risaltare il tuo progetto Tekkin."}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openCoverEditor}
-                    className="self-start rounded-full border border-white/30 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.3em] text-white/70 transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    Modifica cover & descrizione
-                  </button>
+          <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-xl font-semibold text-white truncate">{project.title}</div>
+                <div className="mt-1 text-sm text-white/60">
+                  {profileLabel} · {versions.length} versione{versions.length === 1 ? "" : "i"}
                 </div>
               </div>
 
-              <div className="space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="space-y-2">
-                    {editingTitle ? (
-                      <form onSubmit={handleSaveProjectTitle} className="flex flex-wrap items-center gap-2">
-                        <input
-                          value={titleDraft}
-                          onChange={(e) => setTitleDraft(e.target.value)}
-                          className="min-w-[220px] flex-1 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
-                          placeholder="Nome project"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="submit"
-                            disabled={titleSaving}
-                            className="rounded-full px-4 py-1.5 text-[11px] font-semibold text-white bg-[var(--accent)] disabled:opacity-60"
-                          >
-                            {titleSaving ? "Salvataggio..." : "Salva"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={cancelEditingTitle}
-                            className="rounded-full border border-white/20 px-4 py-1.5 text-[11px] text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                          >
-                            Annulla
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-3">
-                        <h1 className="text-2xl font-semibold">{project.title}</h1>
-                        <button
-                          type="button"
-                          onClick={startEditingTitle}
-                          className="text-xs text-white/70 underline-offset-2 transition hover:text-[var(--accent)]"
-                        >
-                          Rinomina
-                        </button>
-                      </div>
-                    )}
-
-                    {titleError && <p className="text-xs text-red-400">{titleError}</p>}
-                    {titleFeedback && !editingTitle && <p className="text-xs text-emerald-300">{titleFeedback}</p>}
-                  </div>
-
-                  <span className="inline-flex items-center rounded-full border border-white/15 px-3 py-1 text-xs uppercase tracking-wide text-white/80">
-                    {project.status ?? "UNKNOWN"}
+              <div className="flex items-center gap-2">
+                {latestVersion?.lufs != null && (
+                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
+                    {latestVersion.lufs.toFixed(1)} LUFS
                   </span>
-                </div>
-
-                <div className="flex flex-wrap gap-4 text-[11px] text-white/60">
-                  <span>Creato il {new Date(project.created_at).toLocaleDateString("it-IT")}</span>
-                  <span>
-                    Ultima versione:{" "}
-                    {latestVersion ? new Date(latestVersion.created_at).toLocaleDateString("it-IT") : "ancora nessuna"}
+                )}
+                {latestVersion?.overall_score != null && (
+                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
+                    Tekkin {latestVersion.overall_score.toFixed(1)}
                   </span>
-                  <span>Versioni: {project.versions.length}</span>
-                </div>
-
-                <div className="flex flex-wrap gap-4 text-[11px] text-white/50">
-                  <span>Mix type: {getMixTypeLabel(project.mix_type, "master")}</span>
-                  <span>Genere: {getTekkinGenreLabel(project.genre) ?? "n.d."}</span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 text-[11px] text-white/60">
-                  <span className="rounded-full border border-white/15 px-3 py-1 uppercase tracking-[0.3em]">
-                    {latestVersion ? `Score ${latestVersion.overall_score?.toFixed(1) ?? "n.d."}` : "Score n.d."}
-                  </span>
-                  <span className="rounded-full border border-white/15 px-3 py-1 uppercase tracking-[0.3em]">
-                    {latestVersion ? `LUFS ${latestVersion.lufs?.toFixed(1) ?? "n.d."}` : "LUFS n.d."}
-                  </span>
-                </div>
+                )}
               </div>
             </div>
-          </section>
+          </header>
 
-          <div className="mb-6 rounded-2xl border border-white/10 bg-black/40 p-4 space-y-4">
-            <div>
-              <p className="text-xs text-white/60 mb-1 uppercase tracking-wide">New version</p>
-              <p className="text-sm text-white/80">
-                Carica una nuova versione per avere il report Tekkin Analyzer e il piano d’azione.
-              </p>
+          {/* Upload new version */}
+          <section className="rounded-3xl border border-white/10 bg-black/55 p-5 mb-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-white">New version</div>
+                <div className="text-sm text-white/60">Carica una nuova versione per avere il report Tekkin Analyzer e il piano d’azione.</div>
+              </div>
             </div>
 
-            <form
-              onSubmit={handleUploadNewVersion}
-              className="grid gap-3 md:grid-cols-[minmax(0,auto)_auto_auto] md:items-end"
-            >
-              <input
-                name="version_name"
-                placeholder="Version name (es. v2, Master, Alt Mix)"
-                className="min-w-0 rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm text-white"
-              />
+            <form onSubmit={handleUploadVersion} className="mt-4 grid gap-3 lg:grid-cols-[1fr_200px_1fr_auto] items-end">
+              <div>
+                <label className="block text-[11px] text-white/60 mb-1">Version name (es. v2, Master, Alt Mix)</label>
+                <input
+                  value={versionName}
+                  onChange={(e) => setVersionName(e.target.value)}
+                  placeholder="v2"
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/60"
+                />
+              </div>
 
-              <div className="flex flex-col gap-1 text-sm">
-                <label className="text-sm text-white/70">Version mix type</label>
+              <div>
+                <label className="block text-[11px] text-white/60 mb-1">Version mix type</label>
                 <select
-                  name="mix_type"
                   value={versionMixType}
-                  onChange={(e) => setVersionMixType(e.target.value as TekkinMixType)}
-                  className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm"
+                  onChange={(e) => setVersionMixType(normalizeMixType(e.target.value) ?? "master")}
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none focus:border-cyan-400/60"
                 >
-                  {TEKKIN_MIX_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {getMixTypeLabel(type, type)}
+                  {TEKKIN_MIX_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {MIX_TYPE_LABELS[t]}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-white/80">Carica nuova versione</p>
-                <label
-                  className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm transition ${
-                    fileTooLarge
-                      ? "border-red-400 bg-red-500/10 text-red-100"
-                      : "border-white/15 bg-black/60 text-white/80 hover:border-[var(--accent)]"
-                  }`}
-                >
-                  <span className="font-semibold">{selectedFileName ? "File selezionato" : "Scegli file"}</span>
-                  <span className="text-[11px] text-white/60">
-                    {selectedFileName
-                      ? `${selectedFileName}${selectedFileSize ? ` • ${formatBytes(selectedFileSize)}` : ""}`
-                      : "MP3 · WAV · FLAC"}
-                  </span>
-                  <input
-                    type="file"
-                    name="file"
-                    accept=".mp3,.wav,.aiff,.flac"
-                    required
-                    className="sr-only"
-                    onChange={handleFileChange}
-                  />
-                </label>
-
-                {fileTooLarge && <p className="text-xs text-red-400">File troppo grande (max 50 MB)</p>}
-
-                {selectedFileName && !fileTooLarge && (
-                  <p className="text-xs text-white/60">{selectedFileSize ? `${formatBytes(selectedFileSize)} selezionati` : ""}</p>
-                )}
-
-                <p className="text-xs text-white/60">
-                  Formati consigliati: MP3 320 kbps. Limite massimo server: 50 MB per file.
-                </p>
+              <div>
+                <label className="block text-[11px] text-white/60 mb-1">Carica nuova versione</label>
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={onFileChange}
+                  className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white/80"
+                />
+                <div className="mt-1 text-[11px] text-white/45">Formati consigliati: MP3 320 kbps. Limite massimo: 50 MB per file.</div>
               </div>
 
               <button
                 type="submit"
                 disabled={uploading}
-                className="rounded-full bg-[var(--accent)] px-5 py-2 text-xs font-medium text-black disabled:opacity-60"
+                className="h-[46px] rounded-full bg-cyan-400/90 px-6 text-sm font-semibold text-black hover:bg-cyan-300 disabled:opacity-60"
               >
                 {uploading ? "Uploading..." : "Upload version"}
               </button>
             </form>
+          </section>
 
-            {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/40 p-4 space-y-4">
-            <div className="flex items-center justify-between text-xs uppercase tracking-[0.3em] text-white/60">
-              <span>Versions history</span>
-              <span className="text-[10px] text-white/40">Agruppati per data, lancia Analyze dopo ogni upload</span>
-            </div>
-
-            {versionsWithFixes.length === 0 && (
-              <div className="rounded-2xl border border-white/10 bg-black/60 p-4 text-xs text-white/80 space-y-2">
-                <p className="text-sm font-semibold">Nessuna versione ancora.</p>
-                <p>
-                  Carica qui sopra il tuo <span className="font-semibold">master</span> o{" "}
-                  <span className="font-semibold">premaster</span> e lancia <span className="font-semibold">Analyze</span>.
-                </p>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>Consigliato: MP3 320 kbps o WAV 24 bit.</li>
-                  <li>Per il premaster, lascia 4-6 dB di headroom senza limiter brickwall.</li>
-                  <li>Dopo l’analisi vedrai Tekkin Score, match di genere e piano d’azione.</li>
-                </ul>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-3">
-              {versionsWithFixes.map((v, index) => {
-                const isLatest = index === 0;
-                const isExpanded = expandedVersionId === v.id;
-
-                const audioState = audioStates[v.id];
-                const hasAudio = Boolean(v.audio_url);
-                const detailParams = [
-                  v.analyzer_key ? `Key ${v.analyzer_key}` : null,
-                  v.analyzer_bpm ? `${v.analyzer_bpm} BPM` : null,
-                  v.mix_type ? MIX_TYPE_LABELS[v.mix_type] ?? v.mix_type : null,
-                ].filter(Boolean) as string[];
-
-                const ai = aiByVersion[v.id];
-                const aiErr = aiErrorByVersion[v.id] ?? null;
-
-                return (
-                  <div
-                    key={v.id}
-                    className="rounded-2xl border border-white/10 bg-black/60 p-4 space-y-4 transition hover:border-white/20"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                          {editingVersionId === v.id ? (
-                            <input
-                              value={versionNameDrafts[v.id] ?? v.version_name ?? ""}
-                              onChange={(e) => handleVersionNameChange(v.id, e.target.value)}
-                              onBlur={() => {
-                                void handleSaveVersionName(v.id);
-                                setEditingVersionId(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" && !e.shiftKey) {
-                                  e.preventDefault();
-                                  void handleSaveVersionName(v.id);
-                                  (e.target as HTMLInputElement).blur();
-                                  setEditingVersionId(null);
-                                }
-                              }}
-                              className="min-w-[180px] flex-1 rounded-xl bg-black/70 border border-white/15 px-3 py-2 text-sm text-white focus:border-[var(--accent)] focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60"
-                            />
-                          ) : (
-                            <span className="text-base font-semibold text-white">{v.version_name}</span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => setEditingVersionId((prev) => (prev === v.id ? null : v.id))}
-                            className="text-xs font-semibold uppercase tracking-[0.3em] text-white/60 hover:text-white/90"
-                          >
-                            {editingVersionId === v.id ? "Chiudi" : "Rinomina"}
-                          </button>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
-                            {getMixTypeLabel(v.mix_type)}
-                          </span>
-                          {isLatest && (
-                            <span className="inline-flex items-center rounded-full border border-white/20 px-2 py-0.5 text-[11px] uppercase tracking-wide text-white/70">
-                              Latest
-                            </span>
-                          )}
-                        </div>
-
-                        {versionNameFeedback[v.id]?.error && (
-                          <p className="text-[11px] text-red-400">{versionNameFeedback[v.id]?.error}</p>
-                        )}
-                        {versionNameFeedback[v.id]?.success && (
-                          <p className="text-[11px] text-emerald-300">{versionNameFeedback[v.id]?.success}</p>
-                        )}
-
-                        <div className="flex flex-wrap gap-4 text-xs text-white/60">
-                          <span>Score: {v.overall_score != null ? v.overall_score.toFixed(1) : "n.a."}</span>
-                          <span>LUFS: {v.lufs != null ? v.lufs.toFixed(1) : "n.a."}</span>
-                          <span>{new Date(v.created_at).toLocaleString("it-IT")}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => void handleAnalyzeVersion(v.id)}
-                          disabled={analyzingVersionId === v.id}
-                          className="rounded-full px-4 py-1 text-xs font-semibold bg-[var(--accent)] text-black disabled:opacity-60"
-                        >
-                          {analyzingVersionId === v.id ? "Analyzing..." : v.overall_score == null ? "Analyze" : "Re-analyze"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setVersionToDelete(v)}
-                          className="rounded-full border border-white/20 px-4 py-1 text-xs text-white/70 hover:border-red-400 hover:text-red-200 transition"
-                        >
-                          Elimina traccia
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleToggleVersion(v)}
-                          className="rounded-full border border-white/20 px-4 py-1 text-xs text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)] transition"
-                          aria-expanded={isExpanded}
-                        >
-                          {isExpanded ? "Nascondi report" : "Mostra report"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {analyzingVersionId === v.id && (
-                      <p className="mt-1 text-[10px] text-white/60">
-                        {analyzerStatus === "starting" && "Invio la versione al motore Tekkin Analyzer..."}
-                        {analyzerStatus === "analyzing" &&
-                          "Analisi in corso: calcolo loudness, spettro, dinamica e profilo di genere."}
-                        {analyzerStatus === "saving" && "Sto salvando risultati, Tekkin Score e piano d’azione..."}
-                        {analyzerStatus === "done" && "Analisi completata. I dati sono stati aggiornati qui sotto."}
-                        {analyzerStatus === "error" && "Errore durante l’analisi. Controlla la connessione e riprova."}
-                      </p>
-                    )}
-
-                    {isExpanded && (
-                      <div className="space-y-4 border-t border-white/10 pt-4">
-                        {detailParams.length > 0 && (
-                          <div className="flex flex-wrap gap-2 text-[11px] text-white/70">
-                            {detailParams.map((param) => (
-                              <span
-                                key={param}
-                                className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/70"
-                              >
-                                {param}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {hasAudio ? (
-                          audioState?.url ? (
-                            <WaveformPreview
-                              audioUrl={audioState.url}
-                              cacheKey={v.audio_url ?? v.id}
-                              className="w-full"
-                              waveHeight={120}
-                            />
-                          ) : audioState?.error ? (
-                            <p className="text-xs text-red-300">{audioState.error}</p>
-                          ) : (
-                            <p className="text-xs text-white/60">Caricamento anteprima audio...</p>
-                          )
-                        ) : (
-                          <p className="text-xs text-white/60">Anteprima audio non disponibile per questa versione.</p>
-                        )}
-
-                        {aiErr && <p className="text-xs text-red-300">{aiErr}</p>}
-
-                        <AnalyzerProPanel
-                          version={v}
-                          aiSummary={ai?.summary ?? v.analyzer_ai_summary ?? null}
-                          aiActions={ai?.actions ?? v.analyzer_ai_actions ?? null}
-                          aiMeta={ai?.meta ?? v.analyzer_ai_meta ?? null}
-                          aiLoading={aiLoadingVersionId === v.id}
-                          onAskAi={() => void handleGenerateAiForVersion(v.id)}
-                          analyzerResult={v.analyzer_json ?? null}
-                          referenceAi={v.reference_ai ?? null}
-                        />
-                      </div>
-                    )}
+          {/* Selected version preview + actions */}
+          {selectedVersion && (
+            <section className="rounded-3xl border border-white/10 bg-black/55 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-white truncate">{selectedVersion.version_name ?? "Versione"}</div>
+                    <span className="rounded-full border border-white/12 bg-white/5 px-2 py-0.5 text-[11px] text-white/75">
+                      {selectedVersion.mix_type ? MIX_TYPE_LABELS[selectedVersion.mix_type] : "MIX"}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      )}
-
-      {coverEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 px-4 py-6">
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="w-full max-w-3xl space-y-6 rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 to-black/90 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.9)]"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-6">
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-[0.4em] text-white/50">Cover & Description</p>
-                <h2 className="text-3xl font-semibold text-white">Aggiorna il mood del tuo project</h2>
-                <p className="text-sm text-white/60">
-                  Scegli un’immagine rappresentativa e scrivi una descrizione chiara per raccontare l’intento della release.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeCoverEditor}
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.3em] text-white/70 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-              >
-                Chiudi
-              </button>
-            </div>
-
-            <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-              <div className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="relative h-24 w-full overflow-hidden rounded-xl border border-white/5 bg-gradient-to-br from-slate-900 via-black to-black">
-                  {previewCoverUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={previewCoverUrl} alt="Anteprima cover progetto" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center text-[10px] uppercase tracking-[0.4em] text-white/40">
-                      Nessuna cover
-                    </div>
-                  )}
+                  <div className="mt-1 text-[11px] text-white/55">Creata: {new Date(selectedVersion.created_at).toLocaleString()}</div>
                 </div>
 
-                <p className="text-[11px] text-white/60">PNG, JPG, WEBP, max 5 MB</p>
-
-                <div className="flex flex-col gap-2">
-                  <input
-                    type="file"
-                    accept=".png,.jpg,.jpeg,.webp"
-                    id="project-cover-file"
-                    className="sr-only"
-                    onChange={(e) => project && handleCoverFileChange(e, project.id)}
-                  />
-                  <label
-                    htmlFor="project-cover-file"
-                    className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.4em] text-black transition hover:bg-white/90"
-                  >
-                    {isUploadingCover ? "Caricamento..." : "Scegli un file"}
-                  </label>
-                </div>
-
-                {coverUploadError && <p className="text-xs text-red-400">{coverUploadError}</p>}
-                {coverUploadMessage && <p className="text-xs text-emerald-300">{coverUploadMessage}</p>}
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-white/5 bg-black/70 p-4">
-                <label className="text-xs font-medium uppercase tracking-[0.4em] text-white/60">Descrizione</label>
-                <textarea
-                  value={descriptionDraft}
-                  onChange={(e) => setDescriptionDraft(e.target.value)}
-                  className="min-h-[160px] w-full rounded-2xl border border-transparent bg-black/50 p-4 text-sm text-white placeholder:text-white/40 focus:border-[var(--accent)] focus:outline-none focus:ring-0"
-                  placeholder="Racconta il mood e le intenzioni del tuo project..."
-                />
-
-                <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/10">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    disabled={isSavingInfo}
-                    onClick={() => {
-                      handleSaveProjectInfo().catch((err) => {
-                        console.error("[Modal] save info error:", err);
-                        const msg = err instanceof Error ? err.message : "Errore aggiornando info.";
-                        setInfoError(msg);
-                      });
-                    }}
-                    className="rounded-full px-5 py-2 text-sm font-semibold bg-[var(--accent)] text-black disabled:opacity-60"
+                    onClick={() => handleAnalyzeVersion(selectedVersion.id)}
+                    disabled={analyzingVersionId === selectedVersion.id}
+                    className="rounded-full bg-cyan-400/90 px-4 py-2 text-[12px] font-semibold text-black hover:bg-cyan-300 disabled:opacity-60"
                   >
-                    {isSavingInfo ? "Salvataggio..." : "Aggiorna cover & descrizione"}
+                    {analyzingVersionId === selectedVersion.id ? "Analyze..." : "Analyze"}
                   </button>
 
-                  {infoFeedback && !infoError && <p className="text-[11px] text-emerald-300">{infoFeedback}</p>}
-                  {infoError && <p className="text-[11px] text-red-400">{infoError}</p>}
+                  <span className="text-[11px] text-white/50">
+                    {analyzerStatus !== "idle" ? `Status: ${analyzerStatus}` : ""}
+                  </span>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {versionToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[var(--sidebar-bg)] p-5 shadow-2xl">
-            <p className="text-sm font-semibold text-white">Elimina versione {versionToDelete.version_name}</p>
-            <p className="mt-2 text-xs text-white/70">
-              L'operazione è irreversibile. Verranno rimossi anche i dati dell'analisi.
-            </p>
+              <div className="mt-4">
+                {previewAudioUrl ? (
+                  <WaveformPreviewUnified
+                    peaks={selectedVersion.waveform_peaks ?? null}
+                    bands={selectedVersion.waveform_bands ?? null}
+                    duration={durationForLabel}
+                    progressRatio={progressRatio}
+                    isPlaying={isActive && player.isPlaying}
+                    timeLabel={timeLabel}
+                    onTogglePlay={() => {
+                      if (!previewAudioUrl) return;
 
-            {versionDeleteError && <p className="mt-2 text-xs text-red-300">{versionDeleteError}</p>}
+                      if (isActive) {
+                        if (player.isPlaying) player.pause();
+                        else player.play();
+                        return;
+                      }
 
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setVersionToDelete(null)}
-                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                disabled={!!deletingVersionId}
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDeleteVersion()}
-                className="rounded-full bg-red-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
-                disabled={deletingVersionId === versionToDelete.id}
-              >
-                {deletingVersionId === versionToDelete.id ? "Elimino..." : "Conferma"}
-              </button>
-            </div>
-          </div>
-        </div>
+                      player.play({
+                        projectId: project.id,
+                        versionId: selectedVersion.id,
+                        title: project.title,
+                        subtitle: selectedVersion.version_name ?? undefined,
+                        audioUrl: previewAudioUrl,
+                        duration: selectedVersion.waveform_duration ?? undefined,
+                      });
+                    }}
+                    onSeekRatio={(r) => {
+                      if (!previewAudioUrl) return;
+
+                      if (isActive) {
+                        player.seekToRatio(r);
+                        return;
+                      }
+
+                      player.playAtRatio(
+                        {
+                          projectId: project.id,
+                          versionId: selectedVersion.id,
+                          title: project.title,
+                          subtitle: selectedVersion.version_name ?? undefined,
+                          audioUrl: previewAudioUrl,
+                          duration: selectedVersion.waveform_duration ?? undefined,
+                        },
+                        r
+                      );
+                    }}
+                  />
+                ) : (
+                  <div className="text-sm text-white/60">Audio non disponibile.</div>
+                )}
+              </div>
+
+              {/* Versions history */}
+              <div className="mt-6 border-t border-white/10 pt-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-[12px] uppercase tracking-[0.2em] text-white/55">Versions history</div>
+                </div>
+
+                <div className="mt-3 grid gap-2">
+                  {versions.map((v) => {
+                    const isSel = v.id === selectedVersion.id;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => {
+                          // cambiamo versione "selezionata" via URL (così resta shareable)
+                          const url = new URL(window.location.href);
+                          url.searchParams.set("version_id", v.id);
+                          window.history.replaceState({}, "", url.toString());
+                          // trigger preview url load
+                          void ensurePreviewUrl(v);
+                          // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
+                          setProject((prev) => (prev ? { ...prev } : prev));
+                        }}
+                        className={[
+                          "w-full text-left rounded-2xl border px-4 py-3 transition",
+                          isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm text-white truncate">{v.version_name ?? "Versione"}</div>
+                            <div className="mt-1 text-[11px] text-white/55">
+                              {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-white/60">
+                            {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
+                            {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {!versions.length && <div className="text-sm text-white/60">Nessuna versione.</div>}
+                </div>
+              </div>
+            </section>
+          )}
+        </>
       )}
     </div>
   );

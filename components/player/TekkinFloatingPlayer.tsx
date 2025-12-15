@@ -20,23 +20,34 @@ export function TekkinFloatingPlayer() {
   const duration = useTekkinPlayer((s) => s.duration);
   const currentTime = useTekkinPlayer((s) => s.currentTime);
   const playRequestId = useTekkinPlayer((s) => s.playRequestId);
-  const pendingSeekRatio = useTekkinPlayer((s) => s.pendingSeekRatio);
+  const volume = useTekkinPlayer((s) => s.volume);
+  const isMuted = useTekkinPlayer((s) => s.isMuted);
 
   const setAudioRef = useTekkinPlayer((s) => s.setAudioRef);
+
   const setDuration = useTekkinPlayer((s) => s.setDuration);
   const setCurrentTime = useTekkinPlayer((s) => s.setCurrentTime);
-  const clearPendingSeek = useTekkinPlayer((s) => s.clearPendingSeek);
 
   const play = useTekkinPlayer((s) => s.play);
   const pause = useTekkinPlayer((s) => s.pause);
   const close = useTekkinPlayer((s) => s.close);
   const seekToSeconds = useTekkinPlayer((s) => s.seekToSeconds);
+  const setVolume = useTekkinPlayer((s) => s.setVolume);
+  const toggleMute = useTekkinPlayer((s) => s.toggleMute);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // registra il ref una volta, senza loop
   useEffect(() => {
-    setAudioRef(audioRef as unknown as React.RefObject<HTMLAudioElement>);
+    setAudioRef(audioRef as unknown as { current: HTMLAudioElement | null });
+
+    const st = useTekkinPlayer.getState();
+    const a = audioRef.current;
+    if (a) {
+      a.volume = st.volume;
+      a.muted = st.isMuted;
+    }
+
     return () => setAudioRef(null);
   }, [setAudioRef]);
 
@@ -46,17 +57,18 @@ export function TekkinFloatingPlayer() {
     if (!a) return;
 
     const onTime = () => setCurrentTime(a.currentTime || 0);
+
     const onLoaded = () => {
       setDuration(a.duration || 0);
-
-      // se c'è un seek pending (click sulla waveform su traccia nuova)
-      if (pendingSeekRatio != null && Number.isFinite(a.duration) && a.duration > 0) {
-        a.currentTime = pendingSeekRatio * a.duration;
-        setCurrentTime(a.currentTime || 0);
-        clearPendingSeek();
-      }
+      useTekkinPlayer.getState().applyPendingSeekIfPossible();
     };
+
+    const onCanPlay = () => {
+      useTekkinPlayer.getState().applyPendingSeekIfPossible();
+    };
+
     const onDuration = () => setDuration(a.duration || 0);
+
     const onEnded = () => {
       pause();
       setCurrentTime(a.duration || 0);
@@ -64,22 +76,34 @@ export function TekkinFloatingPlayer() {
 
     a.addEventListener("timeupdate", onTime);
     a.addEventListener("loadedmetadata", onLoaded);
+    a.addEventListener("canplay", onCanPlay);
     a.addEventListener("durationchange", onDuration);
     a.addEventListener("ended", onEnded);
 
     return () => {
       a.removeEventListener("timeupdate", onTime);
       a.removeEventListener("loadedmetadata", onLoaded);
+      a.removeEventListener("canplay", onCanPlay);
       a.removeEventListener("durationchange", onDuration);
       a.removeEventListener("ended", onEnded);
     };
-  }, [setCurrentTime, setDuration, pendingSeekRatio, clearPendingSeek, pause]);
+  }, [setCurrentTime, setDuration, pause]);
 
   // autoplay affidabile: quando cambia playRequestId, prova a playare davvero
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
     if (!audioUrl || !isOpen) return;
+
+    // allinea sempre volume/mute
+    a.volume = volume;
+    a.muted = isMuted;
+
+    // aggiorna src solo se cambia davvero
+    if (a.src !== audioUrl) {
+      a.src = audioUrl;
+      // niente load forzato qui
+    }
 
     if (!isPlaying) {
       a.pause();
@@ -88,16 +112,22 @@ export function TekkinFloatingPlayer() {
 
     const run = async () => {
       try {
-        // forziamo reload sul nuovo src
-        a.load();
         await a.play();
+        useTekkinPlayer.getState().applyPendingSeekIfPossible();
       } catch {
-        // autoplay bloccato: resta pronto, l'utente clicca play
+        // autoplay bloccato: ok
       }
     };
 
     void run();
-  }, [playRequestId, audioUrl, isOpen, isPlaying]);
+  }, [playRequestId, audioUrl, isOpen, isPlaying, volume, isMuted]);
+
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.volume = volume;
+    a.muted = isMuted;
+  }, [volume, isMuted]);
 
   if (!isOpen || !audioUrl) return null;
 
@@ -144,7 +174,26 @@ export function TekkinFloatingPlayer() {
               </div>
             </div>
 
-            <audio ref={audioRef} src={audioUrl} preload="metadata" />
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="w-24"
+              />
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80 hover:bg-white/10"
+              >
+                {isMuted ? "Muted" : "Sound"}
+              </button>
+            </div>
+
+            <audio ref={audioRef} preload="metadata" />
           </div>
         </div>
       </div>

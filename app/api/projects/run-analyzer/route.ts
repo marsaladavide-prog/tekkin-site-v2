@@ -66,15 +66,13 @@ if (!analyzerUrl) {
   );
 }
 
-    const directUrl =
-  typeof version.audio_url === "string" && version.audio_url.startsWith("http")
-    ? version.audio_url
-    : null;
+const rawAudioUrl = typeof version.audio_url === "string" ? version.audio_url.trim() : "";
+const rawAudioPath = typeof version.audio_path === "string" ? version.audio_path.trim() : "";
 
-const audioPath =
-  typeof version.audio_path === "string" && version.audio_path.trim()
-    ? version.audio_path.trim()
-    : null;
+const directUrl = rawAudioUrl && rawAudioUrl.startsWith("http") ? rawAudioUrl : null;
+
+// Supporto legacy: se audio_url non è http, lo tratto come path
+const audioPath = rawAudioPath || (rawAudioUrl && !rawAudioUrl.startsWith("http") ? rawAudioUrl : null);
 
 if (!directUrl && !audioPath) {
   return NextResponse.json(
@@ -82,6 +80,7 @@ if (!directUrl && !audioPath) {
     { status: 400 }
   );
 }
+
 
 let audioUrl = directUrl;
 if (!audioUrl && audioPath) {

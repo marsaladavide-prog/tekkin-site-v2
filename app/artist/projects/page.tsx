@@ -2,23 +2,20 @@
 
 import Link from "next/link";
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent,
   type FormEvent,
-  type TouchEvent,
 } from "react";
-import { Download, MoreVertical, Pause, Play, Search, Send, Settings, Trash2 } from "lucide-react";
+import { Download, MoreVertical, Search, Send, Settings, Trash2 } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/client";
 import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { WaveformBands } from "@/types/analyzer";
+import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 
 type ProjectVersionRow = {
   id: string;
@@ -52,18 +49,18 @@ type ProjectRow = {
 
 const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBands: boolean) => {
   const versionFields = [
-  "id",
-  "version_name",
-  "created_at",
-  "overall_score",
-  "lufs",
-  "mix_type",
-  "audio_url",
-  // "audio_path", // TOGLI
-  "waveform_peaks",
-  "waveform_duration",
-  includeWaveformBands ? "waveform_bands" : null,
-].filter(Boolean).join(",\n    ");
+    "id",
+    "version_name",
+    "created_at",
+    "overall_score",
+    "lufs",
+    "mix_type",
+    "audio_url",
+    "audio_path",
+    "waveform_peaks",
+    "waveform_duration",
+    includeWaveformBands ? "waveform_bands" : null,
+  ].filter(Boolean).join(",\n    ");
 
   return `
     id,
@@ -101,277 +98,6 @@ const formatTime = (secs: number) => {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
-type WaveformCanvasProps = {
-  peaks: number[];
-  progressRatio: number;
-  height?: number;
-};
-
-const WaveformBandsContext = createContext<WaveformBands | null>(null);
-WaveformBandsContext.displayName = "WaveformBandsContext";
-
-function WaveformCanvas({ peaks, progressRatio, height = 70 }: WaveformCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const waveformBands = useContext(WaveformBandsContext);
-
-  const drawWaveform = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const parent = canvas.parentElement;
-    const cssWidth = Math.max(1, parent?.clientWidth ?? canvas.getBoundingClientRect().width ?? 1);
-    const cssHeight = Math.max(1, height);
-
-    canvas.style.width = `${cssWidth}px`;
-    canvas.style.height = `${cssHeight}px`;
-
-    if (cssWidth <= 0 || cssHeight <= 0) return;
-
-    const dpr = typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
-    const deviceWidth = Math.max(1, Math.round(cssWidth * dpr));
-    const deviceHeight = Math.max(1, Math.round(cssHeight * dpr));
-
-    canvas.width = deviceWidth;
-    canvas.height = deviceHeight;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, deviceWidth, deviceHeight);
-
-    if (!peaks.length) return;
-
-    const widthSteps = Math.max(1, Math.round(cssWidth));
-    const progressRatioClamped = Math.max(0, Math.min(1, progressRatio));
-    const progressLimit = Math.max(0, Math.min(widthSteps, Math.round(widthSteps * progressRatioClamped)));
-    const cssStep = cssWidth / widthSteps;
-    const halfHeight = deviceHeight / 2;
-
-    type ColumnData = {
-      amplitude: number;
-      baseColor: string;
-      progressColor: string;
-    };
-
-    const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-    const clampByte = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
-    const mixRgb = (a: [number, number, number], b: [number, number, number], t: number) => {
-      const ratio = clamp01(t);
-      return [
-        a[0] * (1 - ratio) + b[0] * ratio,
-        a[1] * (1 - ratio) + b[1] * ratio,
-        a[2] * (1 - ratio) + b[2] * ratio,
-      ] as [number, number, number];
-    };
-
-    const RED: [number, number, number] = [239, 68, 68];
-    const YELLOW: [number, number, number] = [250, 204, 21];
-    const MAGENTA: [number, number, number] = [168, 85, 247];
-
-    const hasBandData =
-      waveformBands &&
-      Array.isArray(waveformBands.sub) &&
-      waveformBands.sub.length > 0 &&
-      Array.isArray(waveformBands.mid) &&
-      waveformBands.mid.length > 0 &&
-      Array.isArray(waveformBands.high) &&
-      waveformBands.high.length > 0;
-
-    const sampleCount = peaks.length;
-    const mapBandValue = (band: number[] | undefined, sampleIndex: number) => {
-      if (!band || !band.length || sampleCount <= 0) {
-        return 0;
-      }
-      const ratio = sampleCount > 1 ? sampleIndex / (sampleCount - 1) : 0;
-      const idx = Math.min(band.length - 1, Math.floor(ratio * (band.length - 1)));
-      return clamp01(band[idx] ?? 0);
-    };
-
-    const buildSpectrumColor = (
-      energies: { sub: number; mid: number; high: number },
-      opacity: number,
-      darken: boolean
-    ) => {
-      const totalSubHigh = Math.max(1e-6, energies.sub + energies.high);
-      const highWeight = energies.high / totalSubHigh;
-      const baseMix = mixRgb(RED, YELLOW, highWeight);
-      const midInfluence = clamp01(energies.mid) * 0.65;
-      const midMix = mixRgb(baseMix, MAGENTA, midInfluence);
-      const brightness = darken ? 0.55 : 1;
-      const finalRgb: [number, number, number] = [
-        clampByte(midMix[0] * brightness),
-        clampByte(midMix[1] * brightness),
-        clampByte(midMix[2] * brightness),
-      ];
-      return `rgba(${finalRgb[0]}, ${finalRgb[1]}, ${finalRgb[2]}, ${opacity})`;
-    };
-
-    const columns: ColumnData[] = [];
-    for (let i = 0; i < widthSteps; i += 1) {
-      const sampleIndex =
-        sampleCount > 1
-          ? Math.min(sampleCount - 1, Math.floor((i / widthSteps) * sampleCount))
-          : 0;
-      const peakValue = peaks[sampleIndex] ?? 0;
-      const amplitude = Math.min(1, Math.max(0, Math.abs(peakValue)));
-
-      let baseColor = "rgba(107, 114, 128, 0.35)";
-      let progressColor = "#22d3ee";
-      if (hasBandData && waveformBands) {
-        const energies = {
-          sub: mapBandValue(waveformBands.sub, sampleIndex),
-          mid: mapBandValue(waveformBands.mid, sampleIndex),
-          high: mapBandValue(waveformBands.high, sampleIndex),
-        };
-        baseColor = buildSpectrumColor(energies, 0.35, true);
-        progressColor = buildSpectrumColor(energies, 1, false);
-      }
-
-      columns.push({ amplitude, baseColor, progressColor });
-    }
-
-    const drawRange = (limit: number, useProgressColors: boolean) => {
-      const safeLimit = Math.min(limit, columns.length);
-      ctx.lineWidth = Math.max(1, dpr);
-      ctx.lineCap = "round";
-
-      for (let i = 0; i < safeLimit; i += 1) {
-        const column = columns[i];
-        const lineHeight = Math.max(1, column.amplitude * deviceHeight);
-        const startY = halfHeight - lineHeight / 2;
-        const endY = halfHeight + lineHeight / 2;
-        const cssX = (i + 0.5) * cssStep;
-        const drawX = cssX * dpr;
-        ctx.beginPath();
-        ctx.strokeStyle = useProgressColors ? column.progressColor : column.baseColor;
-        ctx.moveTo(drawX, startY);
-        ctx.lineTo(drawX, endY);
-        ctx.stroke();
-      }
-    };
-
-    drawRange(widthSteps, false);
-    if (progressLimit > 0) {
-      drawRange(progressLimit, true);
-    }
-  }, [height, peaks, progressRatio, waveformBands]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let frameId: number | null = null;
-
-    const scheduleDraw = () => {
-      if (frameId != null) cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(drawWaveform);
-    };
-
-    scheduleDraw();
-
-    const cleanup: (() => void)[] = [];
-
-    if (typeof ResizeObserver === "function") {
-      const observer = new ResizeObserver(scheduleDraw);
-      observer.observe(canvas.parentElement ?? canvas);
-      cleanup.push(() => observer.disconnect());
-    } else if (typeof window !== "undefined") {
-      const handleResize = () => scheduleDraw();
-      window.addEventListener("resize", handleResize);
-      cleanup.push(() => window.removeEventListener("resize", handleResize));
-    }
-
-    return () => {
-      if (frameId != null) cancelAnimationFrame(frameId);
-      cleanup.forEach((fn) => fn());
-    };
-  }, [drawWaveform]);
-
-  return <canvas ref={canvasRef} className="h-full w-full block" style={{ height }} aria-hidden />;
-}
-
-type WaveformPreviewLiteProps = {
-  peaks?: number[] | null;
-  progressRatio: number;
-  isPlaying: boolean;
-  timeLabel: string;
-  onTogglePlay: () => void;
-  onSeekRatio: (ratio: number) => void;
-  bands?: WaveformBands | null;
-};
-
-function WaveformPreviewLite({
-  peaks,
-  progressRatio,
-  isPlaying,
-  timeLabel,
-  onTogglePlay,
-  onSeekRatio,
-  bands,
-}: WaveformPreviewLiteProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const hasPeaks = Array.isArray(peaks) && peaks.length > 0;
-  const normalizedProgress = Math.max(0, Math.min(1, progressRatio));
-
-  const seekFromPointer = (clientX: number | null) => {
-    const container = containerRef.current;
-    if (!container || clientX === null) return;
-    const rect = container.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const x = clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, x / rect.width));
-    onSeekRatio(ratio);
-  };
-
-  const handleMouseDown = (event: MouseEvent<HTMLDivElement>) => {
-    seekFromPointer(event.clientX);
-  };
-
-  const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
-    seekFromPointer(event.touches[0]?.clientX ?? null);
-  };
-
-  return (
-    <div className="p-0">
-      <div className="flex items-center gap-3 min-w-0">
-        <button
-          type="button"
-          onClick={onTogglePlay}
-          className="h-12 w-12 shrink-0 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 flex items-center justify-center"
-          aria-label={isPlaying ? "Pause preview" : "Play preview"}
-        >
-          {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 translate-x-[1px]" />}
-        </button>
-
-        <div
-          ref={containerRef}
-          className="relative flex-1 min-w-0 overflow-hidden rounded-[18px] bg-[#0a0c12] cursor-pointer"
-          style={{ height: 70 }}
-          onMouseDown={handleMouseDown}
-          onTouchStart={handleTouchStart}
-          title="Clicca per spostarti nella traccia"
-        >
-          {hasPeaks ? (
-            <WaveformBandsContext.Provider value={bands ?? null}>
-              <WaveformCanvas peaks={peaks as number[]} progressRatio={normalizedProgress} height={70} />
-            </WaveformBandsContext.Provider>
-          ) : (
-            <div className="flex h-full items-center justify-center text-[11px] text-white/40">
-              waveform non pronta
-            </div>
-          )}
-
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-b from-transparent to-[#0a0c12]" />
-        </div>
-
-        <div className="w-24 shrink-0 text-right text-[11px] text-white/70">{timeLabel}</div>
-      </div>
-
-      <p className="mt-2 text-[10px] uppercase tracking-[0.2em] text-white/55">Stream preview</p>
-    </div>
-  );
-}
-
-
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -399,6 +125,41 @@ export default function ProjectsPage() {
   const [sortMode, setSortMode] = useState<"recent" | "score">("recent");
 
   const player = useTekkinPlayer();
+  const [signedUrlByVersion, setSignedUrlByVersion] = useState<Record<string, string>>({});
+  const signedUrlByVersionRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    signedUrlByVersionRef.current = signedUrlByVersion;
+  }, [signedUrlByVersion]);
+
+  const getPlayableUrl = useCallback(
+    async (versionId: string, audioUrl: string | null, audioPath: string | null) => {
+      const rawUrl = typeof audioUrl === "string" ? audioUrl.trim() : "";
+      const rawPath = typeof audioPath === "string" ? audioPath.trim() : "";
+
+      // cache
+      const cached = signedUrlByVersionRef.current[versionId];
+      if (cached) return cached;
+
+      // 1) se è già un URL http(s), lo uso così com'è
+      if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+        setSignedUrlByVersion((prev) => ({ ...prev, [versionId]: rawUrl }));
+        return rawUrl;
+      }
+
+      // 2) altrimenti firmo una path: preferisco audio_path, fallback a audio_url (legacy path)
+      const storagePath = rawPath || rawUrl;
+      if (!storagePath) return null;
+
+      const supabase = createClient();
+      const { data, error } = await supabase.storage.from("tracks").createSignedUrl(storagePath, 60 * 60);
+      if (error || !data?.signedUrl) return null;
+
+      setSignedUrlByVersion((prev) => ({ ...prev, [versionId]: data.signedUrl }));
+      return data.signedUrl;
+    },
+    []
+  );
 
   const filteredProjects = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -503,20 +264,20 @@ export default function ProjectsPage() {
                       : null;
 
                   return {
-  id: version.id,
-  version_name: version.version_name ?? null,
-  created_at: version.created_at,
-  overall_score: typeof version.overall_score === "number" ? version.overall_score : null,
-  lufs: typeof version.lufs === "number" ? version.lufs : null,
-  mix_type: normalizeMixType(version.mix_type ?? null),
+                    id: version.id,
+                    version_name: version.version_name ?? null,
+                    created_at: version.created_at,
+                    overall_score: typeof version.overall_score === "number" ? version.overall_score : null,
+                    lufs: typeof version.lufs === "number" ? version.lufs : null,
+                    mix_type: normalizeMixType(version.mix_type ?? null),
 
-  audio_path: null,
-  audio_url: rawUrl,
+                    audio_path: typeof version.audio_path === "string" ? version.audio_path : null,
+                    audio_url: rawUrl,
 
-  waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
-  waveform_duration: safeDuration,
-  waveform_bands: version.waveform_bands ?? null,
-} as ProjectVersionRow;
+                    waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
+                    waveform_duration: safeDuration,
+                    waveform_bands: version.waveform_bands ?? null,
+                  } as ProjectVersionRow;
                 })
             );
 
@@ -756,17 +517,19 @@ export default function ProjectsPage() {
             const versions = p.versions;
             const latestVersion = versions[0] ?? null;
 
-            const previewVersion = versions.find((v) => v.audio_url) ?? latestVersion;
-            const audioForPreview = previewVersion?.audio_url ?? null;
+            const previewVersion =
+              versions.find((v) => (v.audio_url || v.audio_path) && (v.waveform_peaks?.length ?? 0) > 0) ??
+              versions.find((v) => v.audio_url || v.audio_path) ??
+              latestVersion;
             const previewVersionId = previewVersion?.id ?? null;
 
             const serverPeaks = previewVersion?.waveform_peaks ?? null;
             const serverDuration = previewVersion?.waveform_duration ?? null;
+            const hasPreviewAudio = !!(previewVersion?.audio_url || previewVersion?.audio_path);
 
             const isActive =
-              !!audioForPreview &&
-              player.audioUrl === audioForPreview &&
-              player.versionId === previewVersionId;
+  !!previewVersionId && player.versionId === previewVersionId;
+
 
             const progressRatio =
               isActive && Number.isFinite(player.duration) && player.duration > 0
@@ -798,7 +561,7 @@ export default function ProjectsPage() {
               ? `/artist/projects/${p.id}?version_id=${latestVersion.id}`
               : `/artist/projects/${p.id}`;
 
-            const canSignal = !!audioForPreview;
+            const canSignal = hasPreviewAudio;
 
             return (
               <article
@@ -888,16 +651,27 @@ export default function ProjectsPage() {
                         </button>
                       </div>
                     </div>
-                    {audioForPreview ? (
-                      <WaveformPreviewLite
+                    {hasPreviewAudio ? (
+                      <WaveformPreviewUnified
                         peaks={serverPeaks}
+                        bands={previewVersion?.waveform_bands ?? null}
+                        duration={durationForLabel ?? null}
                         progressRatio={progressRatio}
                         isPlaying={isActive && player.isPlaying}
                         timeLabel={timeLabel}
-                        onTogglePlay={() => {
-                          if (!audioForPreview || !previewVersionId) return;
+                        onTogglePlay={async () => {
+                          if (!previewVersionId) return;
 
-                          if (isActive) {
+                          const url = await getPlayableUrl(
+                            previewVersionId,
+                            previewVersion?.audio_url ?? null,
+                            previewVersion?.audio_path ?? null
+                          );
+                          if (!url) return;
+
+                          const isActiveNow = player.versionId === previewVersionId && player.audioUrl === url;
+
+                          if (isActiveNow) {
                             if (player.isPlaying) player.pause();
                             else player.play();
                             return;
@@ -908,14 +682,23 @@ export default function ProjectsPage() {
                             versionId: previewVersionId,
                             title: p.title,
                             subtitle: previewVersion?.version_name ?? undefined,
-                            audioUrl: audioForPreview,
+                            audioUrl: url,
                             duration: serverDuration ?? undefined,
                           });
                         }}
-                        onSeekRatio={(r) => {
-                          if (!audioForPreview || !previewVersionId) return;
+                        onSeekRatio={async (r) => {
+                          if (!previewVersionId) return;
 
-                          if (isActive) {
+                          const url = await getPlayableUrl(
+                            previewVersionId,
+                            previewVersion?.audio_url ?? null,
+                            previewVersion?.audio_path ?? null
+                          );
+                          if (!url) return;
+
+                          const isActiveNow = player.versionId === previewVersionId && player.audioUrl === url;
+
+                          if (isActiveNow) {
                             player.seekToRatio(r);
                             return;
                           }
@@ -926,13 +709,12 @@ export default function ProjectsPage() {
                               versionId: previewVersionId,
                               title: p.title,
                               subtitle: previewVersion?.version_name ?? undefined,
-                              audioUrl: audioForPreview,
+                              audioUrl: url,
                               duration: serverDuration ?? undefined,
                             },
                             r
                           );
                         }}
-                        bands={previewVersion?.waveform_bands ?? null}
                       />
                     ) : (
                       <div className="p-1 text-xs text-white/60">Audio non disponibile.</div>
