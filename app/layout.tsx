@@ -2,6 +2,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import SupabaseProvider from "@/components/SupabaseProvider";
 import { TekkinFloatingPlayer } from "@/components/player/TekkinFloatingPlayer";
+import { Toaster } from "sonner";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SupabaseProvider>
           {children}
           <TekkinFloatingPlayer />
+          <Toaster richColors position="bottom-right" />
         </SupabaseProvider>
       </body>
     </html>

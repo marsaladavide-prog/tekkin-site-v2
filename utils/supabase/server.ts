@@ -1,32 +1,28 @@
 // utils/supabase/server.ts
-import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export async function createClient() {
-  // ATTENZIONE: con Next 15 cookies va awaitato
-  const cookieStore = await cookies();
-
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  if (!url || !anonKey) throw new Error("Missing Supabase env vars on server");
 
-  if (!url || !anonKey) {
-    throw new Error("Missing Supabase env vars on server");
-  }
+  const cookieStore = await cookies();
 
-  const supabase = createServerClient(url, anonKey, {
+  return createServerClient(url, anonKey, {
     cookies: {
-      get(name: string) {
-        // qui usiamo solo lettura, basta questo
-        return cookieStore.get(name)?.value;
+      getAll() {
+        return cookieStore.getAll();
       },
-      set() {
-        // no-op: nelle route API non ci serve modificare cookie
-      },
-      remove() {
-        // no-op
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // In alcuni contesti (edge/static) può non essere permesso settare cookie qui
+        }
       },
     },
   });
-
-  return supabase;
 }

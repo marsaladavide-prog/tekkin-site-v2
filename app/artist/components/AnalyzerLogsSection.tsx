@@ -35,6 +35,8 @@ export function AnalyzerLogsSection({
   onToggleFixSuggestions,
   feedbackText,
 }: AnalyzerLogsSectionProps) {
+  const structureBars = mixV1?.metrics?.structure?.bars_total ?? null;
+
   return (
     <div className="space-y-4">
         {warnings.length > 0 && (
@@ -114,12 +116,14 @@ export function AnalyzerLogsSection({
                     : "n.a."}
                 </p>
               </div>
-              <div>
-                <p className="text-[10px] uppercase text-white/50">Structure bars</p>
-                <p className="text-sm font-semibold text-white">
-                  {mixV1.metrics.structure.bars_total} barre
-                </p>
-              </div>
+              {structureBars != null && (
+                <div>
+                  <p className="text-[10px] uppercase text-white/50">Structure bars</p>
+                  <p className="text-sm font-semibold text-white">
+                    {structureBars} barre
+                  </p>
+                </div>
+              )}
             </div>
             {mixV1.issues && mixV1.issues.length > 0 && (
               <div className="mt-3 space-y-3 text-xs text-white/80">

@@ -4,13 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { calculateArtistRankFromMetrics } from "@/lib/tekkinRank/calcArtistRank";
 
-import {
-  Artist,
-  ArtistMetrics,
-  ArtistRank,
-  ArtistRankView,
-  baseFallbackRank,
-} from "@/types/tekkinRank";
+import { Artist, ArtistMetrics, ArtistRankView } from "@/types/tekkinRank";
 
 function toNumber(value: any): number | null {
   const n = Number(value);
@@ -88,7 +82,7 @@ export function useArtistRank() {
             : null;
 
         // artista collegato da tabella artists
-        const { data: artistRow, error: artistErr } = await supabase
+        const { data: artistRow, error: _artistErr } = await supabase
           .from("artists")
           .select(
             "id,user_id,artist_name,artist_photo_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
@@ -227,11 +221,27 @@ export function useArtistRank() {
             toNumber(localProfile.followers) ??
             toNumber(meta.spotify_followers) ??
             null,
+          spotify_followers_30d_ago:
+            toNumber(localProfile.spotify_followers_30d_ago) ??
+            toNumber(meta.spotify_followers_30d_ago) ??
+            null,
+          spotify_followers_diff_30d:
+            toNumber(localProfile.spotify_followers_diff_30d) ??
+            toNumber(meta.spotify_followers_diff_30d) ??
+            null,
           spotify_popularity:
             toNumber(localProfile.spotify_popularity) ??
             toNumber(localProfile.popularity) ??
             toNumber(meta.spotify_popularity) ??
             null,
+          total_releases:
+            toNumber(localProfile.total_releases) ??
+            toNumber(meta.total_releases) ??
+            0,
+          releases_last_12m:
+            toNumber(localProfile.releases_last_12m) ??
+            toNumber(meta.releases_last_12m) ??
+            0,
           beatport_charts:
             toNumber(localProfile.beatport_charts) ??
             toNumber(meta.beatport_charts) ??
@@ -248,6 +258,10 @@ export function useArtistRank() {
             toNumber(localProfile.shows_total) ??
             toNumber(meta.shows_total) ??
             null,
+          analyzed_versions:
+            toNumber(localProfile.analyzed_versions) ??
+            toNumber(meta.analyzed_versions) ??
+            0,
           collected_at: new Date().toISOString(),
         };
 

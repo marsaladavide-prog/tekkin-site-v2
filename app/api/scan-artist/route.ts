@@ -11,10 +11,12 @@ type SpotifyArtist = {
   id: string;
   name: string;
   genres: string[];
+  external_urls?: { spotify?: string };
   followers?: { total?: number };
   popularity?: number;
   images?: { url: string; height?: number; width?: number }[];
 };
+
 
 type BeatstatsSummary = {
   url: string;

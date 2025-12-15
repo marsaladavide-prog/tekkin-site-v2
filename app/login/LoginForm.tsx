@@ -1,43 +1,50 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
 export default function LoginForm() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleLogin(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const supabase = createClient();
 
-    setLoading(false);
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
 
-    if (error) {
-      setError(error.message || "Login non riuscito");
-      return;
+      if (error) {
+        setError(error.message || "Login non riuscito");
+        return;
+      }
+
+      router.replace("/artist");
+      router.refresh();
+    } finally {
+      setLoading(false);
     }
-
-    router.push("/artist");
   }
 
   async function handleGoogle() {
     setError(null);
     setLoading(true);
+
     try {
+      const supabase = createClient();
+
       await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -46,11 +53,9 @@ export default function LoginForm() {
       });
     } catch (err: unknown) {
       const message =
-        err instanceof Error
-          ? err.message
-          : "Accesso con Google non riuscito";
-
+        err instanceof Error ? err.message : "Accesso con Google non riuscito";
       setError(message);
+    } finally {
       setLoading(false);
     }
   }

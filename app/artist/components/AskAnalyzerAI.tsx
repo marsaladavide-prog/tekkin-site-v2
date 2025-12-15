@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 type AskAnalyzerAIProps = {
   versionId: string;
@@ -12,18 +12,18 @@ type AskAnalyzerAIProps = {
  * chiama /api/analyzer/ai-summary e mostra la risposta
  */
 export function AskAnalyzerAI({ versionId }: AskAnalyzerAIProps) {
-  if (!versionId) return null;
-
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const trimmedQuestion = question.trim();
+  const trimmedQuestion = useMemo(() => question.trim(), [question]);
   const canSubmit = trimmedQuestion.length >= 8;
 
+  if (!versionId) return null;
+
   async function handleAsk() {
-    if (!canSubmit) return;
+    if (!canSubmit || loading) return;
 
     setLoading(true);
     setAnswer(null);
@@ -39,16 +39,23 @@ export function AskAnalyzerAI({ versionId }: AskAnalyzerAIProps) {
         }),
       });
 
-      const data = await res.json();
+      const data: unknown = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setErrorMsg(data?.error ?? "Errore parlando con Tekkin AI.");
+        const err =
+          typeof (data as { error?: unknown } | null)?.error === "string"
+            ? (data as { error: string }).error
+            : "Errore parlando con Tekkin AI.";
+        setErrorMsg(err);
         return;
       }
 
-      setAnswer(
-        data?.answer ?? "Nessuna risposta ricevuta dall'assistente Tekkin."
-      );
+      const ans =
+        typeof (data as { answer?: unknown } | null)?.answer === "string"
+          ? (data as { answer: string }).answer
+          : "Nessuna risposta ricevuta dall'assistente Tekkin.";
+
+      setAnswer(ans);
     } catch (err) {
       console.error("[AskAnalyzerAI] Network error:", err);
       setErrorMsg("Errore di rete. Riprovare.");
@@ -104,15 +111,14 @@ export function AskAnalyzerAI({ versionId }: AskAnalyzerAIProps) {
       >
         {loading ? "Analizzo" : "Chiedi qualcosa all'Analyzer"}
       </button>
+
       {!loading && trimmedQuestion.length > 0 && !canSubmit && (
         <p className="mt-1 text-[10px] text-white/50">
           Scrivi almeno 8 caratteri per inviare la domanda.
         </p>
       )}
 
-      {errorMsg && (
-        <p className="mt-2 text-[11px] text-red-400">{errorMsg}</p>
-      )}
+      {errorMsg && <p className="mt-2 text-[11px] text-red-400">{errorMsg}</p>}
 
       {answer && (
         <div className="mt-3 whitespace-pre-line rounded-lg border border-white/10 bg-black/70 p-3 text-[11px] text-white/90">

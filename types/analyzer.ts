@@ -1,5 +1,7 @@
 /* Pulizia types/analyzer.ts per nuova struttura Essentia-centric */
 
+import type { BandsNorm } from "@/lib/reference/types";
+
 // ✅ Conservati
 export interface FixSuggestion {
   issue: string;
@@ -47,6 +49,10 @@ export interface ReferenceAi extends AnalyzerReferenceAi {
   tone_tag?: string | null;
   warnings?: WarningMessage[] | null;
   match_ratio?: number | null;
+  model_match?: {
+    match_percent?: number | null;
+    match_ratio?: number | null;
+  } | null;
 }
 
 export type AnalyzerMetricsFields = {
@@ -77,7 +83,13 @@ export type AnalyzerConfidence = {
   mix_health?: number | null;
 };
 
-export type AnalyzerWarningSeverity = 'info' | 'warning' | 'critical';
+export type AnalyzerWarningSeverity =
+  | 'info'
+  | 'warning'
+  | 'critical'
+  | 'medium'
+  | 'high'
+  | 'error';
 
 export type AnalyzerWarning = {
   message: string;
@@ -127,6 +139,13 @@ export type AnalyzerV1Metrics = {
   spectrum: SpectrumMetrics;
   stereo: StereoMetrics;
   structure: StructureMetrics;
+};
+
+export type AnalyzerV1Result = {
+  version: string;
+  profile: string;
+  metrics: AnalyzerV1Metrics;
+  issues: AnalyzerIssue[];
 };
 
 // ---- TEKKIN AI COACH ----

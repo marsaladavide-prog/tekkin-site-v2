@@ -352,6 +352,39 @@ export function AnalyzerProPanel({
 
   const hasAnalyzerData = !!analyzer || !!refAi;
 
+  const issueHighlights = useMemo(() => {
+    const highlights: string[] = [];
+    const seen = new Set<string>();
+
+    const push = (text?: string | null) => {
+      if (!text) return;
+      const trimmed = text.trim();
+      if (!trimmed || seen.has(trimmed)) return;
+      seen.add(trimmed);
+      highlights.push(trimmed);
+    };
+
+    for (const suggestion of sortedFixSuggestions) {
+      push(suggestion.issue);
+      if (highlights.length >= 3) return highlights;
+    }
+
+    for (const warning of warningsList) {
+      push(warning.message);
+      if (highlights.length >= 3) return highlights;
+    }
+
+    const list = aiActions ?? version.analyzer_ai_actions ?? null;
+    if (list) {
+      for (const action of list) {
+        push(action.title);
+        if (highlights.length >= 3) return highlights;
+      }
+    }
+
+    return highlights;
+  }, [sortedFixSuggestions, warningsList, aiActions, version.analyzer_ai_actions]);
+
   if (!hasAnalyzerData) {
     return (
       <section className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-6 text-sm">
@@ -402,44 +435,6 @@ export function AnalyzerProPanel({
     : null;
 
   // 4 - highlight problemi principali
-  const issueHighlights = useMemo(() => {
-    const highlights: string[] = [];
-    const seen = new Set<string>();
-
-    const push = (text?: string | null) => {
-      if (!text) return;
-      const trimmed = text.trim();
-      if (!trimmed || seen.has(trimmed)) return;
-      seen.add(trimmed);
-      highlights.push(trimmed);
-    };
-
-    for (const suggestion of sortedFixSuggestions) {
-      push(suggestion.issue);
-      if (highlights.length >= 3) {
-        return highlights;
-      }
-    }
-
-    for (const warning of warningsList) {
-      push(warning.message);
-      if (highlights.length >= 3) {
-        return highlights;
-      }
-    }
-
-    if (aiActionsList) {
-      for (const action of aiActionsList) {
-        push(action.title);
-        if (highlights.length >= 3) {
-          return highlights;
-        }
-      }
-    }
-
-    return highlights;
-  }, [sortedFixSuggestions, warningsList, aiActionsList]);
-
   const { label: matchLabel, description: matchDescription } =
     getMatchBucket(matchPercent);
 

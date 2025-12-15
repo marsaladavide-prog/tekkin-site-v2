@@ -3,15 +3,17 @@
 import Link from "next/link";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type MouseEvent,
+  type FormEvent,
   type TouchEvent,
 } from "react";
-import { Download, MoreVertical, Pause, Play, Search, Settings, Trash2 } from "lucide-react";
+import { Download, MoreVertical, Pause, Play, Search, Send, Settings, Trash2 } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/client";
 import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
@@ -57,6 +59,7 @@ const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBa
     "lufs",
     "mix_type",
     "audio_url",
+    "audio_path",
     "waveform_peaks",
     "waveform_duration",
     includeWaveformBands ? "waveform_bands" : null,
@@ -113,150 +116,152 @@ function WaveformCanvas({ peaks, progressRatio, height = 70 }: WaveformCanvasPro
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveformBands = useContext(WaveformBandsContext);
 
+  const drawWaveform = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const parent = canvas.parentElement;
+    const cssWidth = Math.max(1, parent?.clientWidth ?? canvas.getBoundingClientRect().width ?? 1);
+    const cssHeight = Math.max(1, height);
+
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+
+    const dpr = typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+    const deviceWidth = Math.max(1, Math.round(cssWidth * dpr));
+    const deviceHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+    canvas.width = deviceWidth;
+    canvas.height = deviceHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, deviceWidth, deviceHeight);
+
+    if (!peaks.length) return;
+
+    const widthSteps = Math.max(1, Math.round(cssWidth));
+    const progressRatioClamped = Math.max(0, Math.min(1, progressRatio));
+    const progressLimit = Math.max(0, Math.min(widthSteps, Math.round(widthSteps * progressRatioClamped)));
+    const cssStep = cssWidth / widthSteps;
+    const halfHeight = deviceHeight / 2;
+
+    type ColumnData = {
+      amplitude: number;
+      baseColor: string;
+      progressColor: string;
+    };
+
+    const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+    const clampByte = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
+    const mixRgb = (a: [number, number, number], b: [number, number, number], t: number) => {
+      const ratio = clamp01(t);
+      return [
+        a[0] * (1 - ratio) + b[0] * ratio,
+        a[1] * (1 - ratio) + b[1] * ratio,
+        a[2] * (1 - ratio) + b[2] * ratio,
+      ] as [number, number, number];
+    };
+
+    const RED: [number, number, number] = [239, 68, 68];
+    const YELLOW: [number, number, number] = [250, 204, 21];
+    const MAGENTA: [number, number, number] = [168, 85, 247];
+
+    const hasBandData =
+      waveformBands &&
+      Array.isArray(waveformBands.sub) &&
+      waveformBands.sub.length > 0 &&
+      Array.isArray(waveformBands.mid) &&
+      waveformBands.mid.length > 0 &&
+      Array.isArray(waveformBands.high) &&
+      waveformBands.high.length > 0;
+
+    const sampleCount = peaks.length;
+    const mapBandValue = (band: number[] | undefined, sampleIndex: number) => {
+      if (!band || !band.length || sampleCount <= 0) {
+        return 0;
+      }
+      const ratio = sampleCount > 1 ? sampleIndex / (sampleCount - 1) : 0;
+      const idx = Math.min(band.length - 1, Math.floor(ratio * (band.length - 1)));
+      return clamp01(band[idx] ?? 0);
+    };
+
+    const buildSpectrumColor = (
+      energies: { sub: number; mid: number; high: number },
+      opacity: number,
+      darken: boolean
+    ) => {
+      const totalSubHigh = Math.max(1e-6, energies.sub + energies.high);
+      const highWeight = energies.high / totalSubHigh;
+      const baseMix = mixRgb(RED, YELLOW, highWeight);
+      const midInfluence = clamp01(energies.mid) * 0.65;
+      const midMix = mixRgb(baseMix, MAGENTA, midInfluence);
+      const brightness = darken ? 0.55 : 1;
+      const finalRgb: [number, number, number] = [
+        clampByte(midMix[0] * brightness),
+        clampByte(midMix[1] * brightness),
+        clampByte(midMix[2] * brightness),
+      ];
+      return `rgba(${finalRgb[0]}, ${finalRgb[1]}, ${finalRgb[2]}, ${opacity})`;
+    };
+
+    const columns: ColumnData[] = [];
+    for (let i = 0; i < widthSteps; i += 1) {
+      const sampleIndex =
+        sampleCount > 1
+          ? Math.min(sampleCount - 1, Math.floor((i / widthSteps) * sampleCount))
+          : 0;
+      const peakValue = peaks[sampleIndex] ?? 0;
+      const amplitude = Math.min(1, Math.max(0, Math.abs(peakValue)));
+
+      let baseColor = "rgba(107, 114, 128, 0.35)";
+      let progressColor = "#22d3ee";
+      if (hasBandData && waveformBands) {
+        const energies = {
+          sub: mapBandValue(waveformBands.sub, sampleIndex),
+          mid: mapBandValue(waveformBands.mid, sampleIndex),
+          high: mapBandValue(waveformBands.high, sampleIndex),
+        };
+        baseColor = buildSpectrumColor(energies, 0.35, true);
+        progressColor = buildSpectrumColor(energies, 1, false);
+      }
+
+      columns.push({ amplitude, baseColor, progressColor });
+    }
+
+    const drawRange = (limit: number, useProgressColors: boolean) => {
+      const safeLimit = Math.min(limit, columns.length);
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.lineCap = "round";
+
+      for (let i = 0; i < safeLimit; i += 1) {
+        const column = columns[i];
+        const lineHeight = Math.max(1, column.amplitude * deviceHeight);
+        const startY = halfHeight - lineHeight / 2;
+        const endY = halfHeight + lineHeight / 2;
+        const cssX = (i + 0.5) * cssStep;
+        const drawX = cssX * dpr;
+        ctx.beginPath();
+        ctx.strokeStyle = useProgressColors ? column.progressColor : column.baseColor;
+        ctx.moveTo(drawX, startY);
+        ctx.lineTo(drawX, endY);
+        ctx.stroke();
+      }
+    };
+
+    drawRange(widthSteps, false);
+    if (progressLimit > 0) {
+      drawRange(progressLimit, true);
+    }
+  }, [height, peaks, progressRatio, waveformBands]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     let frameId: number | null = null;
-
-    const drawWaveform = () => {
-      if (!canvas) return;
-      const parent = canvas.parentElement;
-      const cssWidth = Math.max(1, parent?.clientWidth ?? canvas.getBoundingClientRect().width ?? 1);
-      const cssHeight = Math.max(1, height);
-
-      canvas.style.width = `${cssWidth}px`;
-      canvas.style.height = `${cssHeight}px`;
-
-      if (cssWidth <= 0 || cssHeight <= 0) return;
-
-      const dpr = typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
-      const deviceWidth = Math.max(1, Math.round(cssWidth * dpr));
-      const deviceHeight = Math.max(1, Math.round(cssHeight * dpr));
-
-      canvas.width = deviceWidth;
-      canvas.height = deviceHeight;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      ctx.clearRect(0, 0, deviceWidth, deviceHeight);
-
-      if (!peaks.length) return;
-
-      const widthSteps = Math.max(1, Math.round(cssWidth));
-      const progressRatioClamped = Math.max(0, Math.min(1, progressRatio));
-      const progressLimit = Math.max(0, Math.min(widthSteps, Math.round(widthSteps * progressRatioClamped)));
-      const cssStep = cssWidth / widthSteps;
-      const halfHeight = deviceHeight / 2;
-
-      type ColumnData = {
-        amplitude: number;
-        baseColor: string;
-        progressColor: string;
-      };
-
-      const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-      const clampByte = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
-      const mixRgb = (a: [number, number, number], b: [number, number, number], t: number) => {
-        const ratio = clamp01(t);
-        return [
-          a[0] * (1 - ratio) + b[0] * ratio,
-          a[1] * (1 - ratio) + b[1] * ratio,
-          a[2] * (1 - ratio) + b[2] * ratio,
-        ] as [number, number, number];
-      };
-
-      const RED: [number, number, number] = [239, 68, 68];
-      const YELLOW: [number, number, number] = [250, 204, 21];
-      const MAGENTA: [number, number, number] = [168, 85, 247];
-
-      const hasBandData =
-        waveformBands &&
-        Array.isArray(waveformBands.sub) &&
-        waveformBands.sub.length > 0 &&
-        Array.isArray(waveformBands.mid) &&
-        waveformBands.mid.length > 0 &&
-        Array.isArray(waveformBands.high) &&
-        waveformBands.high.length > 0;
-
-      const sampleCount = peaks.length;
-      const mapBandValue = (band: number[] | undefined, sampleIndex: number) => {
-        if (!band || !band.length || sampleCount <= 0) {
-          return 0;
-        }
-        const ratio = sampleCount > 1 ? sampleIndex / (sampleCount - 1) : 0;
-        const idx = Math.min(band.length - 1, Math.floor(ratio * (band.length - 1)));
-        return clamp01(band[idx] ?? 0);
-      };
-
-      const buildSpectrumColor = (
-        energies: { sub: number; mid: number; high: number },
-        opacity: number,
-        darken: boolean
-      ) => {
-        const totalSubHigh = Math.max(1e-6, energies.sub + energies.high);
-        const highWeight = energies.high / totalSubHigh;
-        const baseMix = mixRgb(RED, YELLOW, highWeight);
-        const midInfluence = clamp01(energies.mid) * 0.65;
-        const midMix = mixRgb(baseMix, MAGENTA, midInfluence);
-        const brightness = darken ? 0.55 : 1;
-        const finalRgb: [number, number, number] = [
-          clampByte(midMix[0] * brightness),
-          clampByte(midMix[1] * brightness),
-          clampByte(midMix[2] * brightness),
-        ];
-        return `rgba(${finalRgb[0]}, ${finalRgb[1]}, ${finalRgb[2]}, ${opacity})`;
-      };
-
-      const columns: ColumnData[] = [];
-      for (let i = 0; i < widthSteps; i += 1) {
-        const sampleIndex =
-          sampleCount > 1
-            ? Math.min(sampleCount - 1, Math.floor((i / widthSteps) * sampleCount))
-            : 0;
-        const peakValue = peaks[sampleIndex] ?? 0;
-        const amplitude = Math.min(1, Math.max(0, Math.abs(peakValue)));
-
-        let baseColor = "rgba(107, 114, 128, 0.35)";
-        let progressColor = "#22d3ee";
-        if (hasBandData && waveformBands) {
-          const energies = {
-            sub: mapBandValue(waveformBands.sub, sampleIndex),
-            mid: mapBandValue(waveformBands.mid, sampleIndex),
-            high: mapBandValue(waveformBands.high, sampleIndex),
-          };
-          baseColor = buildSpectrumColor(energies, 0.35, true);
-          progressColor = buildSpectrumColor(energies, 1, false);
-        }
-
-        columns.push({ amplitude, baseColor, progressColor });
-      }
-
-      const drawRange = (limit: number, useProgressColors: boolean) => {
-        const safeLimit = Math.min(limit, columns.length);
-        ctx.lineWidth = Math.max(1, dpr);
-        ctx.lineCap = "round";
-
-        for (let i = 0; i < safeLimit; i += 1) {
-          const column = columns[i];
-          const lineHeight = Math.max(1, column.amplitude * deviceHeight);
-          const startY = halfHeight - lineHeight / 2;
-          const endY = halfHeight + lineHeight / 2;
-          const cssX = (i + 0.5) * cssStep;
-          const drawX = cssX * dpr;
-          ctx.beginPath();
-          ctx.strokeStyle = useProgressColors ? column.progressColor : column.baseColor;
-          ctx.moveTo(drawX, startY);
-          ctx.lineTo(drawX, endY);
-          ctx.stroke();
-        }
-      };
-
-      drawRange(widthSteps, false);
-      if (progressLimit > 0) {
-        drawRange(progressLimit, true);
-      }
-    };
 
     const scheduleDraw = () => {
       if (frameId != null) cancelAnimationFrame(frameId);
@@ -281,7 +286,7 @@ function WaveformCanvas({ peaks, progressRatio, height = 70 }: WaveformCanvasPro
       if (frameId != null) cancelAnimationFrame(frameId);
       cleanup.forEach((fn) => fn());
     };
-  }, [height, peaks, progressRatio, waveformBands]);
+  }, [drawWaveform]);
 
   return <canvas ref={canvasRef} className="h-full w-full block" style={{ height }} aria-hidden />;
 }
@@ -393,6 +398,17 @@ export default function ProjectsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [signalPanelProjectId, setSignalPanelProjectId] = useState<string | null>(null);
+  const [signalProjectId, setSignalProjectId] = useState<string | null>(null);
+  const [signalArtists, setSignalArtists] = useState<{ id: string; artist_name: string | null }[]>([]);
+  const [signalArtistId, setSignalArtistId] = useState<string>("");
+  const [signalArtistError, setSignalArtistError] = useState<string | null>(null);
+  const [signalLoadingArtists, setSignalLoadingArtists] = useState(false);
+  const [signalKind, setSignalKind] = useState<"collab" | "promo">("collab");
+  const [signalMessage, setSignalMessage] = useState("");
+  const [signalFeedback, setSignalFeedback] = useState<string | null>(null);
+  const [signalSending, setSignalSending] = useState(false);
+
   const allowProjectInfoSelectRef = useRef(true);
   const waveformBandsSelectableRef = useRef(true);
   const [q, setQ] = useState("");
@@ -455,12 +471,34 @@ export default function ProjectsPage() {
 
         const { data, error } = selectResult;
         if (error) {
-          console.error("Supabase load projects error:", error);
-          setErrorMsg("Errore nel caricamento dei projects.");
-          setProjects([]);
-          setLoading(false);
-          return;
-        }
+  console.error("Supabase load projects error (raw):", error);
+
+  console.log("error typeof:", typeof error);
+  console.log("error ctor:", (error as any)?.constructor?.name);
+
+  try {
+    console.log("error String():", String(error));
+  } catch {}
+
+  try {
+    console.log("error keys:", Object.keys(error as any));
+    console.log("error ownProps:", Object.getOwnPropertyNames(error as any));
+  } catch {}
+
+  try {
+    console.log("error json:", JSON.stringify(error));
+  } catch {}
+
+  try {
+    console.dir(error, { depth: 6 });
+  } catch {}
+
+  setErrorMsg("Errore nel caricamento dei projects.");
+  setProjects([]);
+  setLoading(false);
+  return;
+}
+
 
         const mapped = await Promise.all(
           (data ?? []).map(async (p: any) => {
@@ -470,7 +508,7 @@ export default function ProjectsPage() {
               [...rawVersions]
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                 .map(async (version) => {
-                  const rawPath = typeof version.audio_url === "string" ? version.audio_url : null;
+                  const rawPath = typeof version.audio_path === "string" ? version.audio_path : null;
                   const durationRaw = version.waveform_duration;
                   const durationNum =
                     typeof durationRaw === "number"
@@ -533,6 +571,47 @@ export default function ProjectsPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    const shouldLoadArtists =
+      !!signalPanelProjectId && !signalLoadingArtists && signalArtists.length === 0;
+    if (!shouldLoadArtists) return;
+
+    const fetchArtists = async () => {
+      try {
+        setSignalLoadingArtists(true);
+        setSignalArtistError(null);
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("users_profile")
+          .select("id, artist_name")
+          .eq("role", "artist")
+          .order("artist_name", { ascending: true })
+          .limit(100);
+
+        if (error) {
+          console.error("Signal artists load error:", error);
+          setSignalArtistError("Errore caricando gli artisti Tekkin.");
+          return;
+        }
+
+        const list = (data ?? []).map((row) => ({
+          id: row.id,
+          artist_name: row.artist_name ?? "Artista Tekkin",
+        }));
+
+        setSignalArtists(list);
+        setSignalArtistId((prev) => prev || list[0]?.id || "");
+      } catch (err) {
+        console.error("Signal artists load unexpected:", err);
+        setSignalArtistError("Errore inatteso caricando gli artisti Tekkin.");
+      } finally {
+        setSignalLoadingArtists(false);
+      }
+    };
+
+    void fetchArtists();
+  }, [signalArtists.length, signalLoadingArtists, signalPanelProjectId]);
+
   async function handleDeleteProject(project: ProjectRow) {
     setDeleteError(null);
     setDeletingId(project.id);
@@ -559,6 +638,66 @@ export default function ProjectsPage() {
       setDeletingId(null);
     }
   }
+
+  const handleOpenSignal = (projectId: string, canOpen: boolean) => {
+    if (!canOpen) return;
+    setSignalFeedback(null);
+    setSignalArtistError(null);
+    setSignalMessage("");
+    setSignalKind("collab");
+    setSignalPanelProjectId((current) => (current === projectId ? null : projectId));
+    setSignalProjectId(projectId);
+  };
+
+  const handleSendSignal = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!signalArtistId) {
+      setSignalArtistError("Seleziona un artista.");
+      return;
+    }
+
+    const targetProjectId = signalProjectId ?? signalPanelProjectId;
+    if (!targetProjectId) {
+      setSignalFeedback("Nessun project selezionato.");
+      return;
+    }
+
+    try {
+      setSignalSending(true);
+      setSignalFeedback(null);
+      const res = await fetch("/api/discovery/request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiver_id: signalArtistId,
+          project_id: targetProjectId,
+          kind: signalKind,
+          message: signalMessage.trim() || null,
+        }),
+      });
+
+      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+
+      if (!res.ok) {
+        setSignalFeedback(payload?.error ?? "Errore inviando il Signal.");
+        return;
+      }
+
+      setSignalMessage("");
+      setSignalKind("collab");
+      setSignalFeedback(null);
+      setSignalPanelProjectId(null);
+    } catch (err) {
+      console.error("Send signal error:", err);
+      setSignalFeedback("Errore inatteso inviando il Signal.");
+    } finally {
+      setSignalSending(false);
+    }
+  };
+
+  const isSuccessFeedback =
+    signalFeedback && /successo|inviato/.test(signalFeedback.toLowerCase());
 
   return (
     <div className="w-full max-w-6xl mx-auto pt-8 pb-28">
@@ -644,14 +783,6 @@ export default function ProjectsPage() {
             const serverPeaks = previewVersion?.waveform_peaks ?? null;
             const serverDuration = previewVersion?.waveform_duration ?? null;
 
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[WF]", p.title, previewVersionId, {
-                hasPeaks: Array.isArray(serverPeaks),
-                peaksLen: Array.isArray(serverPeaks) ? serverPeaks.length : null,
-                duration: serverDuration,
-              });
-            }
-
             const isActive =
               !!audioForPreview &&
               player.audioUrl === audioForPreview &&
@@ -686,6 +817,8 @@ export default function ProjectsPage() {
             const latestVersionHref = latestVersion
               ? `/artist/projects/${p.id}?version_id=${latestVersion.id}`
               : `/artist/projects/${p.id}`;
+
+            const canSignal = !!audioForPreview;
 
             return (
               <article
@@ -842,6 +975,17 @@ export default function ProjectsPage() {
 
                       <button
                         type="button"
+                        onClick={() => handleOpenSignal(p.id, canSignal)}
+                        className="inline-flex items-center gap-2 rounded-full border border-cyan-400/60 px-3 py-1 text-[11px] text-cyan-200 hover:bg-cyan-400/10 disabled:opacity-50 disabled:hover:bg-transparent"
+                        disabled={!canSignal}
+                        title={canSignal ? undefined : "Carica una versione con audio per inviare un Signal"}
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Signal Tekkin
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => {
                           setDeleteError(null);
                           setConfirmProject(p);
@@ -852,6 +996,129 @@ export default function ProjectsPage() {
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
+
+                    {signalPanelProjectId === p.id && (
+  <div className="mt-4">
+    <div className="relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-[#06080f]/80 via-[#070a12]/60 to-[#05070d]/80 p-5 shadow-[0_0_0_1px_rgba(34,211,238,0.06),0_20px_60px_-40px_rgba(34,211,238,0.35)] backdrop-blur-xl">
+      {/* glow */}
+      <div className="pointer-events-none absolute -top-24 left-1/2 h-48 w-[520px] -translate-x-1/2 rounded-full bg-cyan-400/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 right-[-120px] h-56 w-56 rounded-full bg-emerald-400/10 blur-3xl" />
+
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-[13px] font-semibold tracking-wide text-white">
+            Invia Signal
+            <span className="ml-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-200">
+              anonimo
+            </span>
+          </p>
+          <p className="text-[12px] leading-5 text-white/60">
+            Contatta un artista Tekkin per collab o promo, legando la richiesta a questo project.
+          </p>
+        </div>
+
+        <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/70">
+          <Send className="h-4 w-4" />
+        </div>
+      </div>
+
+      <form onSubmit={handleSendSignal} className="relative mt-4 space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-white/60">Artista</label>
+            <select
+              value={signalArtistId}
+              onChange={(e) => setSignalArtistId(e.target.value)}
+              className="h-10 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-400/15"
+              disabled={signalLoadingArtists || !signalArtists.length}
+            >
+              {signalArtists.length === 0 ? (
+                <option value="">Nessun artista disponibile</option>
+              ) : (
+                signalArtists.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.artist_name}
+                  </option>
+                ))
+              )}
+            </select>
+            {signalArtistError && <p className="text-[11px] text-red-300">{signalArtistError}</p>}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-white/60">Tipo</label>
+            <select
+              value={signalKind}
+              onChange={(e) => setSignalKind(e.target.value as "collab" | "promo")}
+              className="h-10 w-full rounded-xl border border-white/10 bg-black/40 px-3 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-400/15"
+            >
+              <option value="collab">Collab</option>
+              <option value="promo">Promo</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-white/60">Project</label>
+            <input
+              value={p.title}
+              readOnly
+              className="h-10 w-full rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-white/70"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[11px] font-medium text-white/60">Messaggio</label>
+          <textarea
+            value={signalMessage}
+            onChange={(e) => setSignalMessage(e.target.value)}
+            rows={3}
+            className="w-full resize-none rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-400/15"
+            placeholder="Esempio: traccia pronta, cerco collab o support promo. 130 BPM, minimal deep tech."
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] text-white/40">Suggerimento: scrivi 1 frase chiara + BPM + vibe.</p>
+            <p className="text-[11px] text-white/40">{signalMessage.trim().length}/240</p>
+          </div>
+        </div>
+
+        {signalFeedback && (
+          <div
+            className={`rounded-xl border px-3 py-2 text-[12px] ${
+              isSuccessFeedback
+                ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-200"
+                : "border-red-400/25 bg-red-400/10 text-red-200"
+            }`}
+          >
+            {signalFeedback}
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => setSignalPanelProjectId(null)}
+            className="h-10 rounded-full border border-white/12 bg-white/5 px-4 text-xs font-semibold text-white/75 hover:border-white/20 hover:bg-white/10"
+            disabled={signalSending}
+          >
+            Chiudi
+          </button>
+
+          <button
+            type="submit"
+            className="h-10 inline-flex items-center gap-2 rounded-full bg-cyan-300 px-4 text-xs font-semibold text-black shadow-[0_12px_35px_-18px_rgba(34,211,238,0.9)] hover:opacity-95 disabled:opacity-60"
+            disabled={signalSending || !signalArtistId}
+            onClick={() => setSignalProjectId(p.id)}
+          >
+            <Send className="h-4 w-4" />
+            {signalSending ? "Invio..." : "Invia Signal"}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
                   </div>
                 </div>
               </article>

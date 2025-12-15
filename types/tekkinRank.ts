@@ -40,6 +40,10 @@ export type ArtistRank = {
   presence_score: number;    // 0-30
   catalog_score: number;     // 0-25
   activity_score: number;    // 0-20
+  release_score: number;     // derived release-performance score
+  support_score: number;     // derived support engagement
+  production_score: number;  // fallback or derived production quality
+  branding_score: number;    // derived branding influence
 };
 
 
@@ -49,6 +53,9 @@ export type ArtistMetrics = {
   spotify_followers_30d_ago: number | null;   // followers ~30 giorni fa
   spotify_followers_diff_30d: number | null;  // diff calcolata (oggi - 30 giorni fa)
   spotify_popularity: number | null;          // popularity 0-100
+  spotify_monthly_listeners?: number | null;
+  spotify_streams_total?: number | null;
+  spotify_streams_change?: number | null;
 
   // Catalogo Spotify
   total_releases: number;                     // tutte le release note
@@ -56,6 +63,10 @@ export type ArtistMetrics = {
 
   // Attività Tekkin (progetti/versioni analizzate)
   analyzed_versions: number;                  // quante versioni con analyzer attivo
+  beatport_charts?: number | null;
+  beatport_hype_charts?: number | null;
+  shows_last_90_days?: number | null;
+  shows_total?: number | null;
 
   // Metadato temporale
   collected_at: string | null;                // ultima data da metrics (ISO)
@@ -75,4 +86,8 @@ export const baseFallbackRank: ArtistRank = {
   presence_score: 15,
   catalog_score: 15,
   activity_score: 10,
+  release_score: 0,
+  support_score: 0,
+  production_score: 0,
+  branding_score: 0,
 };

@@ -66,7 +66,7 @@ export default function ArtistLayout({ children }: { children: ReactNode }) {
     let active = true;
 
     async function checkAuth() {
-      const supabase = createClient();
+      const supabase = await createClient();
 
       try {
         const {

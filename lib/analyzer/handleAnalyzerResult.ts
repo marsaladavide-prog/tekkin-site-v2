@@ -1,7 +1,10 @@
-import type { AnalyzerResult } from "@/types/analyzer";
+import type { AnalyzerResult, AnalyzerV1Result, FixSuggestion } from "@/types/analyzer";
 import type { BandKey, BandsNorm } from "@/lib/reference/types";
+import type { JsonObject } from "@/types/json";
 
-type AnyRecord = Record<string, unknown>;
+import { isJsonObject } from "@/types/json";
+
+type AnalyzerPayloadInput = AnalyzerResult | AnalyzerV1Result | JsonObject;
 
 function isFiniteNumber(x: unknown): x is number {
   return typeof x === "number" && Number.isFinite(x);
@@ -11,22 +14,31 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-function getObj(x: unknown): AnyRecord | null {
-  return x && typeof x === "object" ? (x as AnyRecord) : null;
+function getObj(value: unknown): JsonObject | null {
+  return isJsonObject(value) ? value : null;
 }
 
-function getNum(obj: unknown, key: string): number | null {
-  const o = getObj(obj);
-  const v = o ? o[key] : null;
+function getNum(obj: JsonObject | null, key: string): number | null {
+  if (!obj) return null;
+  const v = obj[key];
   return isFiniteNumber(v) ? v : null;
+}
+
+function isAnalyzerResult(value: AnalyzerPayloadInput): value is AnalyzerResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "overall_score" in value
+  );
 }
 
 const BAND_KEYS: BandKey[] = ["sub", "low", "lowmid", "mid", "presence", "high", "air"];
 
-export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm {
-  const anyR = result as unknown as AnyRecord;
+export function extractBandsNormFromAnalyzer(result: AnalyzerResult | JsonObject): BandsNorm {
+  const resultObj = (isJsonObject(result) ? result : null) as JsonObject | null;
+  if (!resultObj) return {};
 
-  const rootBands = getObj(anyR.band_energy_norm);
+  const rootBands = getObj(resultObj["band_energy_norm"] ?? null);
   if (rootBands) {
     const normalized: BandsNorm = {};
     for (const key of BAND_KEYS) {
@@ -36,13 +48,13 @@ export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm 
     return normalized;
   }
 
-  const spectralRaw = getObj(anyR.spectral);
-  const bandNormRaw = spectralRaw ? getObj((spectralRaw as AnyRecord).band_norm) : null;
+  const spectralRaw = getObj(resultObj?.["spectral"] ?? null);
+  const bandNormRaw = spectralRaw ? getObj(spectralRaw["band_norm"] ?? null) : null;
   if (!bandNormRaw) return {};
 
   const normalized: BandsNorm = {};
   for (const key of BAND_KEYS) {
-    const v = (bandNormRaw as AnyRecord)[key];
+    const v = bandNormRaw[key];
     if (isFiniteNumber(v)) normalized[key] = v;
   }
   return normalized;
@@ -51,96 +63,132 @@ export function extractBandsNormFromAnalyzer(result: AnalyzerResult): BandsNorm 
 /**
  * Mapping risultato Tekkin Analyzer -> colonne project_versions.
  */
-export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
-  const resultAny = result as unknown as AnyRecord;
+export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
+  const resultObj = getObj(result);
 
-  // loudness_stats.integrated_lufs (nuovo) fallback a result.lufs (vecchio)
-  const integratedFromStats = (() => {
-    const ls = (result as any)?.loudness_stats;
-    const v = ls?.integrated_lufs;
-    return typeof v === "number" && Number.isFinite(v) ? v : null;
-  })();
+  const loudnessStats = getObj(resultObj?.["loudness_stats"] ?? null);
+  const integratedFromStats = getNum(loudnessStats, "integrated_lufs");
+  const fallbackLufs =
+    isAnalyzerResult(result) && isFiniteNumber(result.lufs) ? result.lufs : null;
 
-  const lufs = integratedFromStats;
+  const lufs = integratedFromStats ?? fallbackLufs ?? null;
 
-  // spectral nested (nuovo) fallback ai campi flat (vecchio)
-  const spectralObj = getObj(resultAny.spectral);
+  const spectralObj = getObj(resultObj?.["spectral"] ?? null);
   const spectralCentroid =
     getNum(spectralObj, "spectral_centroid_hz") ??
-    (isFiniteNumber((result as any).spectral_centroid_hz) ? (result as any).spectral_centroid_hz : null);
-
+    (isAnalyzerResult(result) ? result.spectral_centroid_hz : null);
   const spectralRolloff =
     getNum(spectralObj, "spectral_rolloff_hz") ??
-    (isFiniteNumber((result as any).spectral_rolloff_hz) ? (result as any).spectral_rolloff_hz : null);
-
+    (isAnalyzerResult(result) ? result.spectral_rolloff_hz : null);
   const spectralBandwidth =
     getNum(spectralObj, "spectral_bandwidth_hz") ??
-    (isFiniteNumber((result as any).spectral_bandwidth_hz) ? (result as any).spectral_bandwidth_hz : null);
-
+    (isAnalyzerResult(result) ? result.spectral_bandwidth_hz : null);
   const spectralFlatness =
     getNum(spectralObj, "spectral_flatness") ??
-    (isFiniteNumber((result as any).spectral_flatness) ? (result as any).spectral_flatness : null);
+    (isAnalyzerResult(result) ? result.spectral_flatness : null);
 
-  // model_match (nuovo) fallback a reference_ai (vecchio)
-  const modelMatchRatio = (() => {
-    const mm = getObj(resultAny.model_match);
-    const v1 = mm ? getNum(mm, "match_ratio") : null;
-    if (v1 != null) return v1;
-
-    const ra = getObj((result as any).reference_ai);
-    const v2 = ra ? getNum(ra, "match_ratio") : null;
-    return v2;
-  })();
-
+  const modelMatchFromBody = getObj(resultObj?.["model_match"] ?? null);
+  const modelMatchFromRef = getObj(resultObj?.["reference_ai"] ?? null);
+  const modelMatchRatio =
+    getNum(modelMatchFromBody, "match_ratio") ??
+    getNum(modelMatchFromRef, "match_ratio");
   const modelMatchPercent =
-    modelMatchRatio == null ? null : clamp(modelMatchRatio <= 1 ? modelMatchRatio * 100 : modelMatchRatio, 0, 100);
+    modelMatchRatio == null
+      ? null
+      : clamp(
+          modelMatchRatio <= 1 ? modelMatchRatio * 100 : modelMatchRatio,
+          0,
+          100
+        );
 
-  const effectiveBpm = isFiniteNumber((result as any).bpm) ? Math.round((result as any).bpm) : null;
+  const bpmValue =
+    getNum(resultObj, "bpm") ?? (isAnalyzerResult(result) ? result.bpm : null);
+  const effectiveBpm = isFiniteNumber(bpmValue) ? Math.round(bpmValue) : null;
 
+  const rawAnalyzerKey =
+    resultObj?.["key"] ?? (isAnalyzerResult(result) ? result.key : null);
   const analyzerKey =
-    typeof (result as any).key === "string" && (result as any).key.trim().length > 0
-      ? (result as any).key.trim()
+    typeof rawAnalyzerKey === "string" && rawAnalyzerKey.trim().length > 0
+      ? rawAnalyzerKey.trim()
       : null;
 
-  const arraysBlobPathRaw = resultAny.arrays_blob_path;
+  const arraysBlobPathRaw =
+    resultObj?.["arrays_blob_path"] ??
+    (isAnalyzerResult(result) ? result.arrays_blob_path : null);
   const arraysBlobPath =
     typeof arraysBlobPathRaw === "string" && arraysBlobPathRaw.trim().length > 0
       ? arraysBlobPathRaw.trim()
       : null;
 
-  const arraysBlobSizeRaw = resultAny.arrays_blob_size_bytes;
-  const arraysBlobSize = isFiniteNumber(arraysBlobSizeRaw) ? Math.round(arraysBlobSizeRaw) : null;
+  const arraysBlobSizeRaw =
+    getNum(resultObj, "arrays_blob_size_bytes") ??
+    (isAnalyzerResult(result) ? result.arrays_blob_size_bytes : null);
+  const arraysBlobSize = isFiniteNumber(arraysBlobSizeRaw)
+    ? Math.round(arraysBlobSizeRaw)
+    : null;
 
+  const waveformPeaksCandidate =
+    resultObj?.["waveform_peaks"] ??
+    (isAnalyzerResult(result) ? result.waveform_peaks : null);
   const waveformPeaks =
-    Array.isArray((result as any).waveform_peaks) && (result as any).waveform_peaks.length
-      ? (result as any).waveform_peaks.filter((v: unknown): v is number => isFiniteNumber(v))
+    Array.isArray(waveformPeaksCandidate) && waveformPeaksCandidate.length
+      ? waveformPeaksCandidate.filter((v): v is number => isFiniteNumber(v))
       : null;
 
-  const waveformDuration =
-    isFiniteNumber((result as any).waveform_duration) ? (result as any).waveform_duration : null;
+  const waveformDurationRaw =
+    getNum(resultObj, "waveform_duration") ??
+    (isAnalyzerResult(result) ? result.waveform_duration : null);
+  const waveformDuration = isFiniteNumber(waveformDurationRaw)
+    ? waveformDurationRaw
+    : null;
 
-  const waveformBands = (() => {
-    const wb = getObj(resultAny.waveform_bands);
-    return wb ? (wb as AnalyzerResult["waveform_bands"]) : null;
-  })();
+  const waveformBandsObj = getObj(resultObj?.["waveform_bands"] ?? null);
+  const waveformBands = waveformBandsObj
+    ? (waveformBandsObj as AnalyzerResult["waveform_bands"])
+    : null;
 
-  // analysis_pro nel minimal analyzer non c’è (a meno che tu lo aggiunga), quindi qui spesso null
-  const analysisPro = (() => {
-    const ap = getObj(resultAny.analysis_pro);
-    return ap ? ap : null;
-  })();
+  const analysisPro = isAnalyzerResult(result) ? result.analysis_pro ?? null : null;
+
+  const feedbackValue =
+    resultObj?.["feedback"] ??
+    (isAnalyzerResult(result) ? result.feedback : null);
+  const feedback =
+    typeof feedbackValue === "string" ? feedbackValue : null;
+
+  const overallScoreFromResult = isAnalyzerResult(result)
+    ? result.overall_score
+    : null;
+  const overallScore =
+    getNum(resultObj, "overall_score") ??
+    (isFiniteNumber(overallScoreFromResult) ? overallScoreFromResult : null);
+
+  const fixSuggestions =
+    isAnalyzerResult(result) && Array.isArray(result.fix_suggestions)
+      ? result.fix_suggestions
+      : Array.isArray(resultObj?.["fix_suggestions"])
+      ? (resultObj["fix_suggestions"] as unknown as FixSuggestion[])
+      : null;
+
+  const zeroCrossingRate =
+    getNum(resultObj, "zero_crossing_rate") ??
+    (isAnalyzerResult(result) ? result.zero_crossing_rate : null);
+
+  const analyzerReferenceAi = resultObj?.["model_match"] ?? null;
+
+  const analyzerBandsNorm = isAnalyzerResult(result)
+    ? extractBandsNormFromAnalyzer(result)
+    : {};
 
   return {
-    lufs: lufs ?? null,
-    overall_score: isFiniteNumber((result as any).overall_score) ? (result as any).overall_score : null,
-    feedback: (result as any).feedback ?? null,
+    lufs,
+    overall_score: overallScore,
+    feedback,
 
     model_match_percent: modelMatchPercent,
 
     analyzer_json: result,
 
-    // Salviamo sempre il blocco model_match nel campo coerente
-    analyzer_reference_ai: resultAny.model_match ?? null,
+    analyzer_reference_ai: analyzerReferenceAi ?? null,
 
     analysis_pro: analysisPro,
 
@@ -149,12 +197,10 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
     analyzer_spectral_rolloff_hz: spectralRolloff,
     analyzer_spectral_bandwidth_hz: spectralBandwidth,
     analyzer_spectral_flatness: spectralFlatness,
-    analyzer_zero_crossing_rate: isFiniteNumber((result as any).zero_crossing_rate)
-      ? (result as any).zero_crossing_rate
-      : null,
+    analyzer_zero_crossing_rate: zeroCrossingRate,
     analyzer_key: analyzerKey,
 
-    fix_suggestions: Array.isArray((result as any).fix_suggestions) ? (result as any).fix_suggestions : null,
+    fix_suggestions: fixSuggestions,
     arrays_blob_path: arraysBlobPath,
     arrays_blob_size_bytes: arraysBlobSize,
 
@@ -162,6 +208,6 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerResult) {
     waveform_duration: waveformDuration,
     waveform_bands: waveformBands,
 
-    analyzer_bands_norm: extractBandsNormFromAnalyzer(result),
+    analyzer_bands_norm: analyzerBandsNorm,
   };
 }

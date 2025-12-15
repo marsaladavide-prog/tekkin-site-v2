@@ -75,10 +75,14 @@ export async function POST(req: NextRequest) {
     return new NextResponse(stream as unknown as BodyInit, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
-  } catch (error: any) {
-    console.error("Analyzer stream error:", error);
+  } catch (error: unknown) {
+    const err =
+      error instanceof Error
+        ? error
+        : new Error(typeof error === "string" ? error : "Unknown analyzer error");
+    console.error("Analyzer stream error:", err);
     return NextResponse.json(
-      { error: error.message, stack: error.stack },
+      { error: err.message, stack: err.stack ?? null },
       { status: 500 }
     );
   }

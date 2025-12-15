@@ -1,20 +1,22 @@
 "use client";
 
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 
 type AnalyzerCollapsibleSectionProps = {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
+  defaultOpen?: boolean;
 };
 
 export function AnalyzerCollapsibleSection({
   title,
   subtitle,
   children,
+  defaultOpen = false,
 }: AnalyzerCollapsibleSectionProps) {
-const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <section className="rounded-2xl border border-white/10 bg-black/80 p-4">
@@ -27,16 +29,20 @@ const [open, setOpen] = useState(false);
         <div className="flex flex-col gap-0.5 text-left">
           <span>{title}</span>
           {subtitle ? (
-            <span className="text-[11px] font-normal text-white/60">{subtitle}</span>
+            <span className="text-[11px] font-normal text-white/60">
+              {subtitle}
+            </span>
           ) : null}
         </div>
+
         {open ? (
           <ChevronUp className="h-4 w-4 text-white/70" />
         ) : (
           <ChevronDown className="h-4 w-4 text-white/70" />
         )}
       </button>
-      {open && <div className="mt-4 space-y-4">{children}</div>}
+
+      {open ? <div className="mt-4 space-y-4">{children}</div> : null}
     </section>
   );
 }

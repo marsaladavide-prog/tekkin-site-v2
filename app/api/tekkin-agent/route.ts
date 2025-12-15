@@ -206,7 +206,7 @@ export async function POST(req: Request) {
     let response: any = null;
     try {
       response = JSON.parse(content);
-    } catch (parseErr) {
+    } catch (_parseErr) {
       const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         try {

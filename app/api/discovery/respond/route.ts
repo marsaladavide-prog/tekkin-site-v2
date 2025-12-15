@@ -3,112 +3,67 @@ import { createClient } from "@/utils/supabase/server";
 
 export const runtime = "nodejs";
 
+type Body = {
+  request_id?: string;
+  action?: "accept" | "reject";
+};
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    const { data, error: authError } = await supabase.auth.getUser();
+    const user = data?.user ?? null;
 
     if (authError || !user) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => null);
-
+    const body = (await req.json().catch(() => null)) as Body | null;
     if (!body) {
       return NextResponse.json({ error: "Body mancante" }, { status: 400 });
     }
 
-    const { request_id, action } = body;
+    const requestId = body.request_id?.trim();
+    const action = body.action;
 
-    if (!request_id || !action) {
+    if (!requestId || (action !== "accept" && action !== "reject")) {
       return NextResponse.json(
-        { error: "request_id e action sono obbligatori" },
+        { error: "request_id e action validi sono obbligatori" },
         { status: 400 }
       );
     }
 
-    if (action !== "accept" && action !== "reject") {
-      return NextResponse.json(
-        { error: "action deve essere 'accept' o 'reject'" },
-        { status: 400 }
-      );
-    }
+    const patch =
+      action === "reject"
+        ? { status: "rejected", updated_at: new Date().toISOString() }
+        : {
+            status: "accepted",
+            revealed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
 
-    const { data: request, error: fetchError } = await supabase
+    const { data: updated, error: updateError } = await supabase
       .from("discovery_requests")
-      .select("*")
-      .eq("id", request_id)
+      .update(patch)
+      .eq("id", requestId)
+      .eq("receiver_id", user.id)
+      .eq("status", "pending")
+      .select("id, kind, sender_id, status, revealed_at")
       .single();
 
-    if (fetchError || !request) {
+    if (updateError || !updated) {
       return NextResponse.json(
-        { error: "Richiesta non trovata" },
-        { status: 404 }
-      );
-    }
-
-    if (request.receiver_id !== user.id) {
-      return NextResponse.json(
-        { error: "Non autorizzato su questa richiesta" },
-        { status: 403 }
-      );
-    }
-
-    if (request.status !== "pending") {
-      return NextResponse.json(
-        { error: "Richiesta già gestita" },
+        { error: "Richiesta non trovata o già gestita" },
         { status: 400 }
       );
     }
 
     if (action === "reject") {
-      const { error: updateError } = await supabase
-        .from("discovery_requests")
-        .update({
-          status: "rejected",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", request_id);
-
-      if (updateError) {
-        console.error("[discovery][respond] reject updateError", updateError);
-        return NextResponse.json(
-          { error: "Errore aggiornando la richiesta" },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json(
-        { status: "rejected" },
-        { status: 200 }
-      );
+      return NextResponse.json({ status: "rejected" }, { status: 200 });
     }
 
-    // accept
-    const { data: updated, error: acceptError } = await supabase
-      .from("discovery_requests")
-      .update({
-        status: "accepted",
-        revealed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request_id)
-      .select()
-      .single();
-
-    if (acceptError || !updated) {
-      console.error("[discovery][respond] acceptError", acceptError);
-      return NextResponse.json(
-        { error: "Errore accettando la richiesta" },
-        { status: 500 }
-      );
-    }
-
-    // prendo info base del sender
+    // accept: prendo info base del sender
     const { data: senderProfile, error: profileError } = await supabase
       .from("users_profile")
       .select("id, artist_name, avatar_url")
@@ -116,31 +71,31 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (profileError) {
-      console.error("[discovery][respond] profileError", profileError);
-      // anche se il profilo manca, riveliamo comunque l id
+      // Non bloccare la risposta: riveliamo almeno l'id
+      return NextResponse.json(
+        {
+          status: "accepted",
+          kind: updated.kind,
+          sender: { id: updated.sender_id },
+        },
+        { status: 200 }
+      );
     }
 
     return NextResponse.json(
       {
         status: "accepted",
         kind: updated.kind,
-        sender: senderProfile
-          ? {
-              id: senderProfile.id,
-              artist_name: senderProfile.artist_name,
-              avatar_url: senderProfile.avatar_url,
-            }
-          : {
-              id: updated.sender_id,
-            },
+        sender: {
+          id: senderProfile.id,
+          artist_name: senderProfile.artist_name ?? null,
+          avatar_url: senderProfile.avatar_url ?? null,
+        },
       },
       { status: 200 }
     );
   } catch (err) {
     console.error("[discovery][respond] unexpected", err);
-    return NextResponse.json(
-      { error: "Errore inatteso" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Errore inatteso" }, { status: 500 });
   }
 }

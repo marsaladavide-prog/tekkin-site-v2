@@ -27,6 +27,10 @@ export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
       presence_score: 0,
       catalog_score: 0,
       activity_score: 0,
+      release_score: 0,
+      support_score: 0,
+      production_score: 0,
+      branding_score: 0,
     };
   }
 
@@ -201,6 +205,10 @@ export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
     presence_score,
     catalog_score,
     activity_score,
+    release_score: 0,
+    support_score: 0,
+    production_score: 0,
+    branding_score: 0,
   };
 }
 

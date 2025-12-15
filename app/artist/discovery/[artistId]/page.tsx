@@ -38,12 +38,10 @@ type ArtistDetailResponse = {
 };
 
 type Props = {
-  params: Promise<{
-    artistId: string;
-  }>;
+  params: Promise<{ artistId: string }>;
 };
 
-export default async function ArtistDetailPage({ params }: Props) {
+export default async function ArtistDiscoveryPage({ params }: Props) {
   const { artistId } = await params;
 
   const detailRes = await fetch(
@@ -134,6 +132,7 @@ export default async function ArtistDetailPage({ params }: Props) {
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
       <div className="w-full max-w-5xl mx-auto space-y-8">
         <ArtistProfileHeader
+          artistId={artistId}
           artistName={artist.artist_name || "Artista Tekkin"}
           mainGenreLabel={mainGenreLabel}
           locationLabel={locationLabel}

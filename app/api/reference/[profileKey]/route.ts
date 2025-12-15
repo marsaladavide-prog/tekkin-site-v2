@@ -13,7 +13,7 @@ export async function GET(
     const raw = await fs.readFile(filePath, "utf8");
     const json = JSON.parse(raw);
     return NextResponse.json(json, { status: 200 });
-  } catch (err) {
+  } catch (_err) {
     return NextResponse.json(
       { error: "Reference not found", profileKey },
       { status: 404 }

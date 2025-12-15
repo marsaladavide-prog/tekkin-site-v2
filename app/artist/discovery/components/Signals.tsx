@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 type DiscoveryInboxItem = {
   request_id: string;
@@ -28,15 +29,22 @@ export function Signals() {
     const loadInbox = async () => {
       try {
         setErrorMsg(null);
-        const res = await fetch("/api/discovery/inbox");
+        setLoading(true);
+
+        const res = await fetch("/api/discovery/inbox", {
+          credentials: "include",
+          cache: "no-store",
+        });
+
         if (!res.ok) {
           const text = await res.text();
           console.error("Signals inbox error:", text);
           setErrorMsg("Errore caricando i Signals.");
           return;
         }
+
         const data = await res.json();
-        setItems(data);
+        setItems(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("Signals inbox unexpected:", err);
         setErrorMsg("Errore inatteso caricando i Signals.");
@@ -45,16 +53,24 @@ export function Signals() {
       }
     };
 
-    loadInbox();
+    void loadInbox();
   }, []);
 
   const handleRespond = async (requestId: string, action: "accept" | "reject") => {
+    const prevItems = items;
+
+    // optimistic: rimuovo subito dalla UI
+    setItems((curr) => curr.filter((i) => i.request_id !== requestId));
+
+    const tId = toast.loading(action === "accept" ? "Accetto il Signal..." : "Rifiuto il Signal...");
+
     try {
       setRespondingId(requestId);
       setErrorMsg(null);
 
       const res = await fetch("/api/discovery/respond", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: requestId, action }),
       });
@@ -62,21 +78,29 @@ export function Signals() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        console.error("Signals respond error:", data ?? "no body");
-        setErrorMsg(data?.error ?? "Errore gestendo il Signal.");
+        // rollback UI
+        setItems(prevItems);
+
+        const msg = data?.error ?? "Errore gestendo il Signal.";
+        setErrorMsg(msg);
+        toast.error(msg, { id: tId });
         return;
       }
 
-      setItems((prev) => prev.filter((i) => i.request_id !== requestId));
-
       if (action === "accept") {
-        console.log("Signal accepted, sender revealed:", data?.sender);
-        // Per ora alert semplice, poi lo sostituisci con un toast Tekkin style
-        alert("Signal accettato. Identità artista sbloccata (vedi console).");
+        const name = data?.sender?.artist_name ?? "Artista";
+        toast.success(`Signal accettato. Identità sbloccata: ${name}`, { id: tId });
+      } else {
+        toast.success("Signal rifiutato", { id: tId });
       }
     } catch (err) {
       console.error("Signals respond unexpected:", err);
+
+      // rollback UI
+      setItems(prevItems);
+
       setErrorMsg("Errore inatteso gestendo il Signal.");
+      toast.error("Errore inatteso gestendo il Signal.", { id: tId });
     } finally {
       setRespondingId(null);
     }
@@ -114,25 +138,20 @@ export function Signals() {
                   Genere: {item.genre ?? "n.d."}
                 </span>
               </div>
-              <p className="text-sm text-white/80">
-                Progetto: {item.project_title}
-              </p>
+
+              <p className="text-sm text-white/80">Progetto: {item.project_title}</p>
 
               <div className="text-xs text-muted-foreground">
                 Score: {item.overall_score ?? "N/A"}
                 {item.mix_score != null && <> · Mix: {item.mix_score}</>}
                 {item.master_score != null && <> · Master: {item.master_score}</>}
                 {item.bass_energy != null && <> · Bass: {item.bass_energy}</>}
-                {item.has_vocals != null && (
-                  <> · Vocals: {item.has_vocals ? "Sì" : "No"}</>
-                )}
+                {item.has_vocals != null && <> · Vocals: {item.has_vocals ? "Sì" : "No"}</>}
                 {item.bpm != null && <> · {Math.round(item.bpm)} BPM</>}
               </div>
 
               {item.message && (
-                <p className="text-xs italic text-muted-foreground">
-                  “{item.message}”
-                </p>
+                <p className="text-xs italic text-muted-foreground">“{item.message}”</p>
               )}
 
               <div className="flex gap-2 pt-2">
@@ -144,6 +163,7 @@ export function Signals() {
                 >
                   {respondingId === item.request_id ? "Accetto..." : "Accetta"}
                 </button>
+
                 <button
                   type="button"
                   onClick={() => handleRespond(item.request_id, "reject")}

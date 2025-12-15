@@ -63,11 +63,13 @@ function ActionButton({
   children,
   tone = "neutral",
   className,
+  onClick,
 }: {
   mode: ThemeMode;
   children: React.ReactNode;
   tone?: "neutral" | "primary";
   className?: string;
+  onClick?: React.MouseEventHandler<HTMLButtonElement>;
 }) {
   const isNight = mode === "night";
 
@@ -82,6 +84,7 @@ function ActionButton({
   return (
     <button
       type="button"
+      onClick={onClick}
       className={cn(
         "inline-flex h-10 items-center justify-center gap-2 rounded-2xl border px-4 text-xs font-semibold transition",
         tone === "primary" ? primary : neutral,

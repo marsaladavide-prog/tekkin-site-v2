@@ -174,17 +174,21 @@ export async function POST(req: NextRequest) {
 
     // fallback se analyzer_key non esiste nel DB
     const payloadWithoutKey = (() => {
-      const { analyzer_key, ...rest } = updatePayload as any;
+      const { analyzer_key: _analyzer_key, ...rest } = updatePayload as any;
       return rest as Omit<typeof updatePayload, "analyzer_key">;
     })();
 
     const payloadWithoutArrays = (() => {
-      const { arrays_blob_path, arrays_blob_size_bytes, ...rest } = updatePayload as any;
+      const {
+        arrays_blob_path: _arrays_blob_path,
+        arrays_blob_size_bytes: _arrays_blob_size_bytes,
+        ...rest
+      } = updatePayload as any;
       return rest as typeof updatePayload;
     })();
 
     const payloadWithoutKeyAndArrays = (() => {
-      const { analyzer_key, ...rest } = payloadWithoutArrays as any;
+      const { analyzer_key: _analyzer_key, ...rest } = payloadWithoutArrays as any;
       return rest as typeof updatePayload;
     })();
 

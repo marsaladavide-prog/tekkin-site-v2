@@ -1,7 +1,13 @@
 "use client";
 
-import type { AnalyzerAiCoach } from "@/types/analyzer";
+import { useMemo } from "react";
+import type { AnalyzerAiCoach, AnalyzerAiAction } from "@/types/analyzer";
 import { AnalyzerActionGroups } from "./AnalyzerActionGroups";
+import {
+  mapAiFocusAreaToCategory,
+  type ActionCategoryKey,
+  type AnalyzerInterventionAction,
+} from "./analyzerActionUtils";
 
 type TekkinAiPlanSectionProps = {
   aiCoach: AnalyzerAiCoach | null;
@@ -17,6 +23,23 @@ export function TekkinAiPlanSection({
   onGenerateAi,
 }: TekkinAiPlanSectionProps) {
   const hasAi = Boolean(aiCoach);
+
+  const aiActionsMapped: AnalyzerInterventionAction[] = useMemo(() => {
+    const list = aiCoach?.actions ?? [];
+    return list.map((a: AnalyzerAiAction, idx) => {
+      const category: ActionCategoryKey =
+        mapAiFocusAreaToCategory(a.focus_area) ?? "dynamics";
+      const priority = a.priority === "high" || a.priority === "low" ? a.priority : "medium";
+      return {
+        id: a.title ? `ai-${idx}-${a.title}` : `ai-${idx}`,
+        title: a.title,
+        description: a.description,
+        category,
+        priority,
+        source: "ai",
+      } satisfies AnalyzerInterventionAction;
+    });
+  }, [aiCoach?.actions]);
 
   return (
     <section className="rounded-xl border border-white/10 bg-black/40 p-5">
@@ -66,7 +89,7 @@ export function TekkinAiPlanSection({
             </p>
           </div>
 
-          <AnalyzerActionGroups actions={aiCoach.actions ?? []} />
+          <AnalyzerActionGroups actions={aiActionsMapped} />
 
           <div className="grid gap-3 rounded-lg bg-white/5 p-3 text-[11px] text-white/80 md:grid-cols-2">
             <div>

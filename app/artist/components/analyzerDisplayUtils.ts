@@ -145,9 +145,18 @@ export function getBandDisplayName(band: string): string {
 }
 
 export function getWarningBadgeClass(severity?: AnalyzerWarningSeverity): string {
-  if (severity === "error") return "text-red-200 bg-red-500/20";
-  if (severity === "warning") return "text-amber-200 bg-amber-500/20";
-  return "text-emerald-200 bg-emerald-500/20";
+  switch (severity ?? "info") {
+    case "critical":
+    case "high":
+    case "error":
+      return "text-red-200 bg-red-500/20";
+    case "warning":
+    case "medium":
+      return "text-amber-200 bg-amber-500/20";
+    case "info":
+    default:
+      return "text-emerald-200 bg-emerald-500/20";
+  }
 }
 
 export function getReferenceGenreLabel(ref?: ReferenceAi | null): string | null {

@@ -4,15 +4,14 @@ import TekkinShell from "@/app/artist/components/TekkinShell";
 import { MessagesPanel } from "./components/MessagesPanel";
 
 type MessagesPageProps = {
-  searchParams: {
-    with?: string;
-  };
+  searchParams?: Promise<{ with?: string }>;
 };
 
-export default function MessagesPage({ searchParams }: MessagesPageProps) {
-  const otherId = searchParams.with;
+export default async function MessagesPage({ searchParams }: MessagesPageProps) {
+  const sp = (await searchParams) ?? {};
+  const withId = sp.with;
 
-  if (!otherId) {
+  if (!withId) {
     // per ora niente inbox globale, solo chat 1-to-1 da "Send Message"
     notFound();
   }
@@ -21,8 +20,8 @@ export default function MessagesPage({ searchParams }: MessagesPageProps) {
     <TekkinShell>
       <div className="max-w-4xl mx-auto mt-10 px-4">
         <Suspense fallback={<div className="text-tekkin-muted">Loading chat...</div>}>
-          <MessagesPanel otherUserId={otherId} />
-        </Suspense>
+            <MessagesPanel otherUserId={withId} />
+          </Suspense>
       </div>
     </TekkinShell>
   );

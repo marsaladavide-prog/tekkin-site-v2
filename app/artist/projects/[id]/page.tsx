@@ -22,6 +22,7 @@ import type {
   AnalyzerMetricsFields,
   AnalyzerResult,
   AnalyzerRunResponse,
+  AnalyzerV1Result,
   FixSuggestion,
   ReferenceAi,
   AnalyzerAiCoach,
@@ -44,7 +45,6 @@ const MIX_TYPE_LABELS: Record<TekkinMixType, string> = {
 };
 
 type AnalyzerStatus = "idle" | "starting" | "analyzing" | "saving" | "done" | "error";
-type AnalyzerV1Result = unknown;
 
 type UploadCoverResponse = {
   ok: boolean;
@@ -212,7 +212,11 @@ function formatBytes(bytes: number) {
   return `${mb.toFixed(1)} MB`;
 }
 
-type CachedPeaks = { peaks: number[]; duration: number; ts: number };
+type CachedPeaks = {
+  peaks: Array<number[]>;
+  duration: number;
+  ts: number;
+};
 const PEAKS_STORAGE_PREFIX = "tekkin:wavesurfer:peaks:v2:";
 const MAX_IN_MEMORY = 40;
 const waveformPeaksCache = new Map<string, CachedPeaks>();
@@ -224,6 +228,12 @@ const hashKey = (s: string) => {
 };
 const storageKey = (k: string) => PEAKS_STORAGE_PREFIX + hashKey(k);
 
+const isNumericArray = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "number");
+
+const isPeaksArray = (value: unknown): value is Array<number[]> =>
+  Array.isArray(value) && value.length > 0 && value.every((channel) => isNumericArray(channel));
+
 const readPeaksFromStorage = (key: string): CachedPeaks | null => {
   const mem = waveformPeaksCache.get(key);
   if (mem) return mem;
@@ -231,7 +241,7 @@ const readPeaksFromStorage = (key: string): CachedPeaks | null => {
     const raw = localStorage.getItem(storageKey(key));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedPeaks;
-    if (!parsed?.peaks?.length || !Number.isFinite(parsed.duration)) return null;
+    if (!parsed || !isPeaksArray(parsed.peaks) || !Number.isFinite(parsed.duration)) return null;
     waveformPeaksCache.set(key, parsed);
     return parsed;
   } catch {
@@ -255,10 +265,20 @@ const writePeaksToStorage = (key: string, value: CachedPeaks) => {
 function WaveformPreview({
   audioUrl,
   cacheKey,
+  className,
+  waveHeight,
 }: {
   audioUrl?: string | null;
   cacheKey: string;
+  className?: string;
+  waveHeight?: number;
 }) {
+  const waveformHeight =
+    typeof waveHeight === "number" && Number.isFinite(waveHeight) && waveHeight > 0
+      ? waveHeight
+      : 90;
+  const rootClassName = ["p-0", className].filter(Boolean).join(" ");
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const waveRef = useRef<any>(null);
@@ -296,18 +316,14 @@ function WaveformPreview({
     const WaveSurfer = (await import('wavesurfer.js')).default;
     const wave = WaveSurfer.create({
       container: containerRef.current,
-      height: 90,
+      height: waveformHeight,
       waveColor: '#6b7280',
       progressColor: '#22d3ee',
       cursorColor: '#8efacb',
       cursorWidth: 1,
       normalize: true,
-      responsive: true,
-      partialRender: true,
       dragToSeek: true,
       fillParent: true,
-      pixelRatio: 1,
-      removeMediaElementOnDestroy: true,
     });
 
     waveRef.current = wave;
@@ -323,10 +339,17 @@ function WaveformPreview({
       requestAnimationFrame(applyFit);
 
       if (!cached) {
-        try {
-          writePeaksToStorage(cacheKey, { peaks, duration: d, ts: Date.now() });
-        } catch {
-          // ignore
+        const exportedPeaks = wave.exportPeaks();
+        if (exportedPeaks.length && Number.isFinite(d)) {
+          try {
+            writePeaksToStorage(cacheKey, {
+              peaks: exportedPeaks,
+              duration: d,
+              ts: Date.now(),
+            });
+          } catch {
+            // ignore
+          }
         }
       }
     });
@@ -338,23 +361,34 @@ function WaveformPreview({
       setProgress(Math.min(1, wave.getCurrentTime() / d));
     });
 
-    wave.on('seek', (ratio: number) => setProgress(ratio));
+    wave.on('seeking', (currentTime: number) => {
+      const totalDuration = wave.getDuration() || 0;
+      if (!totalDuration) {
+        setProgress(0);
+        return;
+      }
+      setProgress(Math.min(1, Math.max(0, currentTime / totalDuration)));
+    });
     wave.on('play', () => setPlaying(true));
     wave.on('pause', () => setPlaying(false));
     wave.on('finish', () => {
       setPlaying(false);
       setProgress(1);
     });
-  }, [audioUrl, cacheKey, applyFit]);
+  }, [audioUrl, cacheKey, applyFit, waveformHeight]);
 
   useEffect(() => {
     void ensureWave();
+    const waveInstance = waveRef.current;
+    const containerEl = containerRef.current;
     return () => {
-      if (waveRef.current) {
-        waveRef.current.destroy();
-        waveRef.current = null;
+      if (waveInstance) {
+        waveInstance.destroy();
       }
-      if (containerRef.current) containerRef.current.replaceChildren();
+      if (containerEl) {
+        containerEl.replaceChildren();
+      }
+      waveRef.current = null;
       setPlaying(false);
       setProgress(0);
       setDuration(0);
@@ -399,7 +433,7 @@ function WaveformPreview({
   }
 
   return (
-    <div className="p-0">
+    <div className={rootClassName}>
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -415,7 +449,11 @@ function WaveformPreview({
           className="relative flex-1 overflow-hidden rounded-xl bg-[#0a0c12] cursor-pointer"
           onClick={seek}
         >
-          <div ref={containerRef} className="h-24 w-full" />
+          <div
+            ref={containerRef}
+            className="w-full"
+            style={{ height: waveformHeight }}
+          />
           {!ready && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-white/40">
               loading waveform...
@@ -521,6 +559,12 @@ export default function ProjectDetailPage() {
     () => versionsWithFixes.find((v) => v.id === expandedVersionId) ?? null,
     [versionsWithFixes, expandedVersionId]
   );
+
+  const projectTitleValue = project?.title ?? "";
+  const projectVersions = useMemo(() => project?.versions ?? [], [project?.versions]);
+  const projectCoverLink = project?.cover_link ?? null;
+  const projectCoverUrl = project?.cover_url ?? null;
+  const projectDescriptionValue = project?.description ?? "";
 
   const effectiveCover = useMemo(() => coverUrl ?? project?.cover_url ?? project?.cover_link ?? null, [coverUrl, project]);
   const previewCoverUrl = useMemo(
@@ -681,30 +725,24 @@ export default function ProjectDetailPage() {
   }, [loadProject]);
 
   useEffect(() => {
-    if (project) setTitleDraft(project.title);
-    else setTitleDraft("");
-  }, [project?.title]);
+    setTitleDraft(projectTitleValue);
+  }, [projectTitleValue]);
 
   useEffect(() => {
-    if (!project) {
+    if (projectVersions.length === 0) {
       setVersionNameDrafts({});
       return;
     }
     const drafts: Record<string, string> = {};
-    project.versions.forEach((v) => (drafts[v.id] = v.version_name));
+    projectVersions.forEach((v) => (drafts[v.id] = v.version_name));
     setVersionNameDrafts(drafts);
-  }, [project?.versions]);
+  }, [projectVersions]);
 
   useEffect(() => {
-    if (!project) {
-      setCoverDraft("");
-      setDescriptionDraft("");
-      return;
-    }
-    setCoverDraft(project.cover_link ?? project.cover_url ?? "");
-    setDescriptionDraft(project.description ?? "");
-    setCoverUrl(project.cover_url ?? null);
-  }, [project?.cover_link, project?.cover_url, project?.description]);
+    setCoverDraft(projectCoverLink ?? projectCoverUrl ?? "");
+    setDescriptionDraft(projectDescriptionValue ?? "");
+    setCoverUrl(projectCoverUrl);
+  }, [projectCoverLink, projectCoverUrl, projectDescriptionValue]);
 
   useEffect(() => {
     return () => {
