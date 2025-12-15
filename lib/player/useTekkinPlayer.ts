@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { RefObject } from "react";
 
+type AudioRef = RefObject<HTMLAudioElement | null>;
+
 type PlayPayload = {
   projectId: string;
   versionId: string;
@@ -29,14 +31,14 @@ type TekkinPlayerState = {
 
   playRequestId: number;
 
-  audioRef: RefObject<HTMLAudioElement> | null;
+  audioRef: AudioRef | null;
 
   pendingSeekRatio: number | null;
 
   volume: number; // 0..1
   isMuted: boolean;
 
-  setAudioRef: (ref: RefObject<HTMLAudioElement> | null) => void;
+  setAudioRef: (ref: AudioRef) => void;
   setDuration: (d: number) => void;
   setCurrentTime: (t: number) => void;
 

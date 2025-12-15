@@ -39,7 +39,7 @@ export function TekkinFloatingPlayer() {
 
   // registra il ref una volta, senza loop
   useEffect(() => {
-    setAudioRef(audioRef as unknown as { current: HTMLAudioElement | null });
+    setAudioRef(audioRef);
 
     const st = useTekkinPlayer.getState();
     const a = audioRef.current;
@@ -47,8 +47,6 @@ export function TekkinFloatingPlayer() {
       a.volume = st.volume;
       a.muted = st.isMuted;
     }
-
-    return () => setAudioRef(null);
   }, [setAudioRef]);
 
   // eventi audio -> store
