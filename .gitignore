@@ -37,3 +37,4 @@ venv/
 .tekkin-analyzer-venv/
 .tekkin-analyzer-venv-essentia/
 .tekkin-analyzer-venv-linux/
+tsconfig.tsbuildinfo
