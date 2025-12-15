@@ -30,11 +30,11 @@ export async function POST(req: NextRequest) {
     }
 
     // 1) Recupero versione
-    const { data: version, error: versionError } = await supabase
-      .from("project_versions")
-      .select("id, project_id, audio_url, version_name")
-      .eq("id", versionId)
-      .maybeSingle();
+const { data: version, error: versionError } = await supabase
+  .from("project_versions")
+  .select("id, project_id, audio_url, audio_path, version_name")
+  .eq("id", versionId)
+  .maybeSingle();
 
     if (versionError || !version) {
       console.error("[run-analyzer] Version not found:", versionError);
@@ -59,31 +59,40 @@ export async function POST(req: NextRequest) {
     const analyzerUrl =
       process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
 
-    const audioPath = version.audio_url;
-    if (!audioPath) {
-      return NextResponse.json(
-        { error: "Nessun audio_url per questa versione" },
-        { status: 400 }
-      );
-    }
+    const directUrl =
+  typeof version.audio_url === "string" && version.audio_url.startsWith("http")
+    ? version.audio_url
+    : null;
 
-    // 3) Signed URL se serve
-    let audioUrl = audioPath;
-    if (!audioPath.startsWith("http")) {
-      const { data: signed, error: signedError } = await supabase.storage
-        .from("tracks")
-        .createSignedUrl(audioPath, 60 * 30);
+const audioPath =
+  typeof version.audio_path === "string" && version.audio_path.trim()
+    ? version.audio_path.trim()
+    : null;
 
-      if (signedError || !signed?.signedUrl) {
-        console.error("[run-analyzer] Signed URL error:", signedError);
-        return NextResponse.json(
-          { error: "Impossibile generare URL audio firmata" },
-          { status: 500 }
-        );
-      }
+if (!directUrl && !audioPath) {
+  return NextResponse.json(
+    { error: "Nessun audio_path o audio_url valido per questa versione" },
+    { status: 400 }
+  );
+}
 
-      audioUrl = signed.signedUrl;
-    }
+let audioUrl = directUrl;
+if (!audioUrl && audioPath) {
+  const { data: signed, error: signedError } = await supabase.storage
+    .from("tracks")
+    .createSignedUrl(audioPath, 60 * 30);
+
+  if (signedError || !signed?.signedUrl) {
+    console.error("[run-analyzer] Signed URL error:", signedError);
+    return NextResponse.json(
+      { error: "Impossibile generare URL audio firmata" },
+      { status: 500 }
+    );
+  }
+
+  audioUrl = signed.signedUrl;
+}
+
 
     const payload = {
       version_id: version.id,

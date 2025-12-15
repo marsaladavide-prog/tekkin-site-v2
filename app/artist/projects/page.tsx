@@ -52,20 +52,18 @@ type ProjectRow = {
 
 const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBands: boolean) => {
   const versionFields = [
-    "id",
-    "version_name",
-    "created_at",
-    "overall_score",
-    "lufs",
-    "mix_type",
-    "audio_url",
-    "audio_path",
-    "waveform_peaks",
-    "waveform_duration",
-    includeWaveformBands ? "waveform_bands" : null,
-  ]
-    .filter(Boolean)
-    .join(",\n    ");
+  "id",
+  "version_name",
+  "created_at",
+  "overall_score",
+  "lufs",
+  "mix_type",
+  "audio_url",
+  // "audio_path", // TOGLI
+  "waveform_peaks",
+  "waveform_duration",
+  includeWaveformBands ? "waveform_bands" : null,
+].filter(Boolean).join(",\n    ");
 
   return `
     id,
@@ -374,20 +372,6 @@ function WaveformPreviewLite({
 }
 
 
-async function getSignedAudioUrl(
-  supabase: ReturnType<typeof createClient>,
-  path: string | null
-): Promise<string | null> {
-  if (!path) return null;
-
-  const lower = path.toLowerCase();
-  if (lower.startsWith("http://") || lower.startsWith("https://")) return path;
-
-  const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 3600);
-  if (error || !data?.signedUrl) return null;
-
-  return data.signedUrl;
-}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -444,6 +428,9 @@ export default function ProjectsPage() {
 
         const supabase = createClient();
 
+        const { data: auth } = await supabase.auth.getUser();
+        console.log("projects: user id =", auth.user?.id);
+
         const fetchProjects = async (includeProjectInfo: boolean, includeWaveformBands: boolean) =>
           supabase
             .from("projects")
@@ -470,34 +457,27 @@ export default function ProjectsPage() {
         }
 
         const { data, error } = selectResult;
+
         if (error) {
-  console.error("Supabase load projects error (raw):", error);
+          const e = error as unknown;
 
-  console.log("error typeof:", typeof error);
-  console.log("error ctor:", (error as any)?.constructor?.name);
+          const asErr = e instanceof Error ? e : null;
+          const asObj = e && typeof e === "object" ? (e as Record<string, unknown>) : null;
 
-  try {
-    console.log("error String():", String(error));
-  } catch {}
+          console.error("Supabase load projects error:", {
+            name: asErr?.name ?? (asObj?.["name"] as string | undefined),
+            message: asErr?.message ?? (asObj?.["message"] as string | undefined),
+            stack: asErr?.stack,
+            code: asObj?.["code"],
+            details: asObj?.["details"],
+            hint: asObj?.["hint"],
+            status: asObj?.["status"],
+            statusText: asObj?.["statusText"],
+            raw: e,
+          });
 
-  try {
-    console.log("error keys:", Object.keys(error as any));
-    console.log("error ownProps:", Object.getOwnPropertyNames(error as any));
-  } catch {}
-
-  try {
-    console.log("error json:", JSON.stringify(error));
-  } catch {}
-
-  try {
-    console.dir(error, { depth: 6 });
-  } catch {}
-
-  setErrorMsg("Errore nel caricamento dei projects.");
-  setProjects([]);
-  setLoading(false);
-  return;
-}
+          return;
+        }
 
 
         const mapped = await Promise.all(
@@ -508,7 +488,7 @@ export default function ProjectsPage() {
               [...rawVersions]
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                 .map(async (version) => {
-                  const rawPath = typeof version.audio_path === "string" ? version.audio_path : null;
+                  const rawUrl = typeof version.audio_url === "string" ? version.audio_url : null;
                   const durationRaw = version.waveform_duration;
                   const durationNum =
                     typeof durationRaw === "number"
@@ -523,20 +503,20 @@ export default function ProjectsPage() {
                       : null;
 
                   return {
-                    id: version.id,
-                    version_name: version.version_name ?? null,
-                    created_at: version.created_at,
-                    overall_score: typeof version.overall_score === "number" ? version.overall_score : null,
-                    lufs: typeof version.lufs === "number" ? version.lufs : null,
-                    mix_type: normalizeMixType(version.mix_type ?? null),
+  id: version.id,
+  version_name: version.version_name ?? null,
+  created_at: version.created_at,
+  overall_score: typeof version.overall_score === "number" ? version.overall_score : null,
+  lufs: typeof version.lufs === "number" ? version.lufs : null,
+  mix_type: normalizeMixType(version.mix_type ?? null),
 
-                    audio_path: rawPath,
-                    audio_url: await getSignedAudioUrl(supabase, rawPath),
+  audio_path: null,
+  audio_url: rawUrl,
 
-                    waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
-                    waveform_duration: safeDuration,
-                    waveform_bands: version.waveform_bands ?? null,
-                  } as ProjectVersionRow;
+  waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
+  waveform_duration: safeDuration,
+  waveform_bands: version.waveform_bands ?? null,
+} as ProjectVersionRow;
                 })
             );
 
