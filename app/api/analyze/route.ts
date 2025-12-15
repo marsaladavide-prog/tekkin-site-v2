@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       [
         "-u", // output unbuffered
         "-Xutf8",
-        path.resolve("analyze_master_web.py"),
+        path.resolve("tools", "analyze_master_web.py"),
         lang,
         genre,
         mode,
