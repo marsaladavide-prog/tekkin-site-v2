@@ -47,7 +47,8 @@ const menuItems = [
   { label: "Manage cookies", href: "#" },
   { label: "Terms & policies", href: "#" },
   { label: "Help", href: "#" },
-  { label: "Profile", href: "http://localhost:3000/artist/settings/profile" },
+  { label: "Profile", href: "/artist/settings/profile" }
+
 ];
 
 export default function ArtistLayout({ children }: { children: ReactNode }) {

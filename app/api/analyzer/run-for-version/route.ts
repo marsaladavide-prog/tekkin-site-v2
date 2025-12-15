@@ -63,16 +63,15 @@ export async function POST(req: NextRequest) {
     const mode = project.mix_type || "master";
 
 
-    const analyzerUrl =
-      process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
+const analyzerUrl = process.env.TEKKIN_ANALYZER_URL;
 
-    if (!analyzerUrl) {
-      console.error("[run-analyzer] TEKKIN_ANALYZER_URL mancante");
-      return NextResponse.json(
-        { error: "Analyzer non configurato sul server" },
-        { status: 500 }
-      );
-    }
+if (!analyzerUrl) {
+  console.error("[run-analyzer] TEKKIN_ANALYZER_URL mancante");
+  return NextResponse.json(
+    { error: "Analyzer non configurato sul server" },
+    { status: 500 }
+  );
+}
 
     const audioPath = version.audio_url as string | null;
 

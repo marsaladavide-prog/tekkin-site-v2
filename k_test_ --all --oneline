@@ -1,0 +1,11 @@
+[33me1aa8003[m nuovi datei essentia e player con primo rgb
+[33m0aadade5[m[33m ([m[1;33mtag: [m[1;33mCHECKPOINT_pre_refactor_analyzer[m[33m)[m CHECKPOINT: analyzer+ui state before refactor
+[33m0b648b69[m[33m ([m[1;33mtag: [m[1;33mCHECKPOINT_2025-12-09_build-ok[m[33m, [m[1;32mbackup-setup-2025-12-09[m[33m)[m backup: stato locale prima pulizia git
+[33ma9557692[m[33m ([m[1;32manalyzer-ui-v1[m[33m)[m feat(projects): cover upload with preview and project info update
+[33m5344c769[m[33m ([m[1;33mtag: [m[1;33mv0.4.2-analyzer-ai[m[33m)[m Tekkin Analyzer v3.6 pipeline + AI Coach + genres/mix_type centralizzati
+[33mc5c35136[m[33m ([m[1;33mtag: [m[1;33mv0.5-artist-stable[m[33m)[m Checkpoint: Artist Discovery + Profile stable on users_profile
+[33m2165d758[m[33m ([m[1;32mtekkin-checkpoint-1[m[33m)[m Checkpoint stabile – Artist Hero + Tekkin Rank sistemati
+[33m091456d6[m Revert: ripristina pagina Identity Sync su /login
+[33me1ffa33d[m Cleanup: remove Spotlight and temp files
+[33m6a457d65[m Remove Tekkin Spotlight cron workflow
+[33m612dbfdc[m Add Tekkin Spotlight Cron workflow

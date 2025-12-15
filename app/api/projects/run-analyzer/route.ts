@@ -56,8 +56,15 @@ const { data: version, error: versionError } = await supabase
     const profileKey = project.genre || "minimal_deep_tech";
     const mode = project.mix_type || "master";
 
-    const analyzerUrl =
-      process.env.TEKKIN_ANALYZER_URL || "http://127.0.0.1:8000/analyze";
+const analyzerUrl = process.env.TEKKIN_ANALYZER_URL;
+
+if (!analyzerUrl) {
+  console.error("[run-analyzer] TEKKIN_ANALYZER_URL mancante");
+  return NextResponse.json(
+    { error: "Analyzer non configurato sul server" },
+    { status: 500 }
+  );
+}
 
     const directUrl =
   typeof version.audio_url === "string" && version.audio_url.startsWith("http")

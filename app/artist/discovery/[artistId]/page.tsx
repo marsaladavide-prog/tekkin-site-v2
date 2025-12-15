@@ -1,41 +1,12 @@
 import { ArtistProfileHeader } from "@/app/artist/components/ArtistProfileHeader";
 import { ReleasesHighlights } from "@/app/artist/components/ReleasesHighlights";
 import { TekkinRankSection } from "@/app/artist/components/TekkinRankSection";
-import { Artist, ArtistMetrics, ArtistRankView } from "@/types/tekkinRank";
+import {
+  getArtistDetail,
+  type ArtistDetailResponse,
+} from "@/lib/artist/discovery/getArtistDetail";
+import type { Artist, ArtistRankView } from "@/types/tekkinRank";
 import { EditArtistProfileButton } from "../components/EditArtistProfileButton";
-
-const PUBLIC_SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
-type DiscoveryArtist = {
-  id: string;
-  artist_name: string | null;
-  artist_photo_url: string | null;
-  main_genres: string[] | null;
-  bio_short: string | null;
-  city: string | null;
-  country: string | null;
-  spotify_url?: string | null;
-  instagram_username?: string | null;
-  beatport_url?: string | null;
-  open_to_collab?: boolean | null;
-  presskit_link?: string | null;
-};
-
-type ArtistDetailResponse = {
-  artist: DiscoveryArtist | null;
-  metrics: ArtistMetrics | null;
-  rank: ArtistRankView["rank"];
-  releases?: {
-    id: string;
-    title: string;
-    release_date: string | null;
-    cover_url: string | null;
-    spotify_url: string | null;
-    album_type: string | null;
-  }[];
-  error?: string | null;
-};
 
 type Props = {
   params: Promise<{ artistId: string }>;
@@ -44,19 +15,9 @@ type Props = {
 export default async function ArtistDiscoveryPage({ params }: Props) {
   const { artistId } = await params;
 
-  const detailRes = await fetch(
-    `${PUBLIC_SITE_URL}/api/artist/discovery/${artistId}`,
-    { cache: "no-store" }
-  );
+  const detail = await getArtistDetail(artistId);
 
-  const detail = (await detailRes.json().catch(() => null)) as
-    | ArtistDetailResponse
-    | null;
-
-  const fetchError =
-    !detailRes.ok || !detail
-      ? detail?.error ?? "Errore caricando l'artista."
-      : null;
+  const fetchError = detail.error ?? null;
 
   if (fetchError) {
     return (
@@ -69,7 +30,7 @@ export default async function ArtistDiscoveryPage({ params }: Props) {
     );
   }
 
-  const artist = detail?.artist;
+  const artist = detail.artist;
   if (!artist) {
     return (
       <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
@@ -91,12 +52,16 @@ export default async function ArtistDiscoveryPage({ params }: Props) {
       : [];
 
   const mainGenreLabel = genres[0] ?? null;
+
   const locationParts = [artist.city, artist.country].filter(Boolean);
-  const locationBase = locationParts.length > 0 ? locationParts.join(" · ") : null;
+  const locationBase =
+    locationParts.length > 0 ? locationParts.join(" · ") : null;
+
   const locationLabel =
     locationBase && artist.open_to_collab
       ? `${locationBase} · Open to collab`
       : locationBase || (artist.open_to_collab ? "Open to collab" : null);
+
   const instagramUrl = artist.instagram_username
     ? `https://instagram.com/${artist.instagram_username}`
     : null;
@@ -112,11 +77,7 @@ export default async function ArtistDiscoveryPage({ params }: Props) {
   };
 
   const rankView: ArtistRankView | null = detail.rank
-    ? {
-        artist: rankArtist,
-        rank: detail.rank,
-        metrics: detail.metrics,
-      }
+    ? { artist: rankArtist, rank: detail.rank as any, metrics: detail.metrics }
     : null;
 
   const highlightReleases = (detail.releases ?? []).map((rel) => ({
@@ -142,6 +103,7 @@ export default async function ArtistDiscoveryPage({ params }: Props) {
           instagramUrl={instagramUrl}
           presskitUrl={artist.presskit_link ?? null}
         />
+
         <div className="flex justify-center mt-3">
           <EditArtistProfileButton artistId={artist.id} />
         </div>
