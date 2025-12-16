@@ -210,7 +210,9 @@ export default function ProjectDetailPage() {
     }
 
     // 2) altrimenti firmo una path: preferisco audio_path, fallback audio_url (legacy path)
-    const path = rawPath || rawUrl;
+    // 2) altrimenti firmo SOLO audio_path
+const path = rawPath;
+
     if (!path) {
       setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: null }));
       return null;

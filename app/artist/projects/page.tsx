@@ -12,6 +12,7 @@ import {
 import { Download, MoreVertical, Search, Send, Settings, Trash2 } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/client";
+import { getPlayableUrl } from "@/lib/player/getPlayableUrl";
 import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { WaveformBands } from "@/types/analyzer";
@@ -125,41 +126,6 @@ export default function ProjectsPage() {
   const [sortMode, setSortMode] = useState<"recent" | "score">("recent");
 
   const player = useTekkinPlayer();
-  const [signedUrlByVersion, setSignedUrlByVersion] = useState<Record<string, string>>({});
-  const signedUrlByVersionRef = useRef<Record<string, string>>({});
-
-  useEffect(() => {
-    signedUrlByVersionRef.current = signedUrlByVersion;
-  }, [signedUrlByVersion]);
-
-  const getPlayableUrl = useCallback(
-    async (versionId: string, audioUrl: string | null, audioPath: string | null) => {
-      const rawUrl = typeof audioUrl === "string" ? audioUrl.trim() : "";
-      const rawPath = typeof audioPath === "string" ? audioPath.trim() : "";
-
-      // cache
-      const cached = signedUrlByVersionRef.current[versionId];
-      if (cached) return cached;
-
-      // 1) se è già un URL http(s), lo uso così com'è
-      if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
-        setSignedUrlByVersion((prev) => ({ ...prev, [versionId]: rawUrl }));
-        return rawUrl;
-      }
-
-      // 2) altrimenti firmo una path: preferisco audio_path, fallback a audio_url (legacy path)
-      const storagePath = rawPath || rawUrl;
-      if (!storagePath) return null;
-
-      const supabase = createClient();
-      const { data, error } = await supabase.storage.from("tracks").createSignedUrl(storagePath, 60 * 60);
-      if (error || !data?.signedUrl) return null;
-
-      setSignedUrlByVersion((prev) => ({ ...prev, [versionId]: data.signedUrl }));
-      return data.signedUrl;
-    },
-    []
-  );
 
   const filteredProjects = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -660,61 +626,65 @@ export default function ProjectsPage() {
                         isPlaying={isActive && player.isPlaying}
                         timeLabel={timeLabel}
                         onTogglePlay={async () => {
-                          if (!previewVersionId) return;
+  if (!previewVersionId) return;
 
-                          const url = await getPlayableUrl(
-                            previewVersionId,
-                            previewVersion?.audio_url ?? null,
-                            previewVersion?.audio_path ?? null
-                          );
-                          if (!url) return;
+  const isThis = player.versionId === previewVersionId;
 
-                          const isActiveNow = player.versionId === previewVersionId && player.audioUrl === url;
+  // se è la stessa traccia, toggle play/pause senza rigenerare url
+  if (isThis) {
+    if (player.isPlaying) player.pause();
+    else player.play();
+    return;
+  }
 
-                          if (isActiveNow) {
-                            if (player.isPlaying) player.pause();
-                            else player.play();
-                            return;
-                          }
+  // nuova traccia: qui sì, risolvo url una volta
+  const url = await getPlayableUrl(
+    previewVersionId,
+    previewVersion?.audio_url ?? null,
+    previewVersion?.audio_path ?? null
+  );
+  if (!url) return;
 
-                          player.play({
-                            projectId: p.id,
-                            versionId: previewVersionId,
-                            title: p.title,
-                            subtitle: previewVersion?.version_name ?? undefined,
-                            audioUrl: url,
-                            duration: serverDuration ?? undefined,
-                          });
-                        }}
+  player.play({
+    projectId: p.id,
+    versionId: previewVersionId,
+    title: p.title,
+    subtitle: previewVersion?.version_name ?? undefined,
+    audioUrl: url,
+    duration: serverDuration ?? undefined,
+  });
+}}
+
                         onSeekRatio={async (r) => {
-                          if (!previewVersionId) return;
+  if (!previewVersionId) return;
 
-                          const url = await getPlayableUrl(
-                            previewVersionId,
-                            previewVersion?.audio_url ?? null,
-                            previewVersion?.audio_path ?? null
-                          );
-                          if (!url) return;
+  const isThis = player.versionId === previewVersionId;
 
-                          const isActiveNow = player.versionId === previewVersionId && player.audioUrl === url;
+  if (isThis) {
+    player.seekToRatio(r);
+    return;
+  }
 
-                          if (isActiveNow) {
-                            player.seekToRatio(r);
-                            return;
-                          }
+  const url = await getPlayableUrl(
+    previewVersionId,
+    previewVersion?.audio_url ?? null,
+    previewVersion?.audio_path ?? null
+  );
+  if (!url) return;
 
-                          player.playAtRatio(
-                            {
-                              projectId: p.id,
-                              versionId: previewVersionId,
-                              title: p.title,
-                              subtitle: previewVersion?.version_name ?? undefined,
-                              audioUrl: url,
-                              duration: serverDuration ?? undefined,
-                            },
-                            r
-                          );
-                        }}
+  player.playAtRatio(
+    {
+      projectId: p.id,
+      versionId: previewVersionId,
+      title: p.title,
+      subtitle: previewVersion?.version_name ?? undefined,
+      audioUrl: url,
+      duration: serverDuration ?? undefined,
+    },
+    r
+  );
+}}
+
                       />
                     ) : (
                       <div className="p-1 text-xs text-white/60">Audio non disponibile.</div>
