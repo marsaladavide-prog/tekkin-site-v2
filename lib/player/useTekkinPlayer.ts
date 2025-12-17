@@ -15,6 +15,7 @@ export type PlayPayload = {
 };
 
 type TekkinPlayerState = {
+  open: any;
   isOpen: boolean;
   isPlaying: boolean;
 
@@ -40,6 +41,9 @@ type TekkinPlayerState = {
   volume: number; // 0..1
   isMuted: boolean;
 
+  setIsPlaying: (v: boolean) => void;
+
+  toggle: () => void;
   setAudioRef: (ref: AudioRef) => void;
   setDuration: (d: number) => void;
   setCurrentTime: (t: number) => void;
@@ -69,6 +73,7 @@ function safePositive(n: unknown): number {
 }
 
 export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
+  open: false,
   isOpen: false,
   isPlaying: false,
 
@@ -91,6 +96,14 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
 
   volume: 0.9,
   isMuted: false,
+
+  setIsPlaying: (v) => set({ isPlaying: !!v }),
+
+  toggle: () => {
+    const st = get();
+    if (st.isPlaying) st.pause();
+    else st.play();
+  },
 
   setAudioRef: (ref) => {
     const prev = get().audioRef;
@@ -148,18 +161,20 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       return;
     }
 
-    // Se è la stessa versione: NON resettare, NON ricaricare, chiedi solo play
     const sameVersion = st.versionId === payload.versionId;
 
     if (sameVersion) {
-      // aggiorna solo i metadati se vuoi (titolo/sottotitolo), ma non azzerare time
+      // Non toccare audioUrl qui: è signed, cambia spesso e crea mismatch UI.
+      // Non incrementare playRequestId se stai già suonando.
       set({
         isOpen: true,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
-        audioUrl: payload.audioUrl, // ok aggiornarlo, ma NON deve causare reload
-        playRequestId: st.playRequestId + 1,
       });
+
+      if (!st.isPlaying) {
+        set({ playRequestId: st.playRequestId + 1 });
+      }
       return;
     }
 
@@ -187,15 +202,22 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
     const sameVersion = st.versionId === payload.versionId;
 
     if (sameVersion) {
-      // stessa traccia: fai seek e play
+      // stessa versione: non cambiare audioUrl (signed url cambia spesso)
       set({
         isOpen: true,
         pendingSeekRatio: r,
-        audioUrl: payload.audioUrl,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
-        playRequestId: st.playRequestId + 1,
       });
+
+      // retrigger play solo se non stai già suonando
+      if (!st.isPlaying) {
+        set({ playRequestId: st.playRequestId + 1 });
+      } else {
+        // se stai già suonando, applica seek appena possibile senza ripartire
+        queueMicrotask(() => get().applyPendingSeekIfPossible());
+      }
+
       return;
     }
 

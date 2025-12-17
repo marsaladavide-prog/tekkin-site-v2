@@ -1,6 +1,9 @@
+//C:\Users\marsa\Desktop\tekkin-site-v2\app\artist\projects\[id]\page.tsx
+
 "use client";
 
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
@@ -121,6 +124,9 @@ export default function ProjectDetailPage() {
   const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
   const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<Record<string, FixSuggestion[] | null>>({});
   const [aiByVersion, setAiByVersion] = useState<Record<string, AnalyzerAiCoach | null>>({});
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<ProjectVersionRow | null>(null);
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
+  const [deleteVersionError, setDeleteVersionError] = useState<string | null>(null);
 
   const loadProject = useCallback(async () => {
     if (!projectId) return;
@@ -321,10 +327,10 @@ const path = rawPath;
     }
   };
 
-  const handleAnalyzeVersion = async (versionId: string) => {
-    setErrorMsg(null);
-    setAnalyzingVersionId(versionId);
-    setAnalyzerStatus("starting");
+    const handleAnalyzeVersion = async (versionId: string) => {
+      setErrorMsg(null);
+      setAnalyzingVersionId(versionId);
+      setAnalyzerStatus("starting");
 
     try {
       const res = await fetch("/api/projects/run-analyzer", {
@@ -352,14 +358,52 @@ const path = rawPath;
 
       setAnalyzerStatus("done");
       window.setTimeout(() => setAnalyzerStatus("idle"), 1200);
-    } catch (err) {
-      console.error("Analyze version error:", err);
-      setErrorMsg("Errore durante l'analisi della versione.");
-      setAnalyzerStatus("error");
-    } finally {
-      setAnalyzingVersionId(null);
-    }
-  };
+      } catch (err) {
+        console.error("Analyze version error:", err);
+        setErrorMsg("Errore durante l'analisi della versione.");
+        setAnalyzerStatus("error");
+      } finally {
+        setAnalyzingVersionId(null);
+      }
+    };
+
+    const handleDeleteVersion = useCallback(
+      async (version: ProjectVersionRow) => {
+        if (!version?.id) return;
+
+        setDeleteVersionError(null);
+        setDeletingVersionId(version.id);
+
+        try {
+          const res = await fetch("/api/projects/delete-version", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ version_id: version.id }),
+          });
+
+          const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+          if (!res.ok) throw new Error(payload?.error ?? "Impossibile eliminare la versione.");
+
+          if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get("version_id") === version.id) {
+              url.searchParams.delete("version_id");
+              window.history.replaceState({}, "", url.toString());
+            }
+          }
+
+          await loadProject();
+          setConfirmDeleteVersion(null);
+        } catch (err) {
+          console.error("Delete version error:", err);
+          const msg = err instanceof Error ? err.message : "Errore eliminando la versione.";
+          setDeleteVersionError(msg);
+        } finally {
+          setDeletingVersionId(null);
+        }
+      },
+      [loadProject]
+    );
 
   const previewAudioUrl = useMemo(() => {
     if (!selectedVersion) return null;
@@ -372,9 +416,9 @@ const path = rawPath;
   }, [selectedVersion, ensurePreviewUrl]);
 
   const isActive = useMemo(() => {
-    if (!selectedVersion || !previewAudioUrl) return false;
-    return player.versionId === selectedVersion.id && player.audioUrl === previewAudioUrl;
-  }, [player, selectedVersion, previewAudioUrl]);
+    if (!selectedVersion) return false;
+    return player.versionId === selectedVersion.id;
+  }, [player.versionId, selectedVersion]);
 
   const progressRatio = useMemo(() => {
     if (!isActive) return 0;
@@ -529,12 +573,11 @@ const path = rawPath;
                     progressRatio={progressRatio}
                     isPlaying={isActive && player.isPlaying}
                     timeLabel={timeLabel}
-                    onTogglePlay={() => {
+                    onTogglePlay={async () => {
                       if (!previewAudioUrl) return;
 
                       if (isActive) {
-                        if (player.isPlaying) player.pause();
-                        else player.play();
+                        useTekkinPlayer.getState().toggle();
                         return;
                       }
 
@@ -582,6 +625,7 @@ const path = rawPath;
                 <div className="mt-3 grid gap-2">
                   {versions.map((v) => {
                     const isSel = v.id === selectedVersion.id;
+                    const versionLabel = v.version_name ?? "Versione";
                     return (
                       <button
                         key={v.id}
@@ -603,14 +647,38 @@ const path = rawPath;
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-sm text-white truncate">{v.version_name ?? "Versione"}</div>
+                            <div className="text-sm text-white truncate">{versionLabel}</div>
                             <div className="mt-1 text-[11px] text-white/55">
                               {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-white/60">
-                            {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
-                            {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 text-[11px] text-white/60">
+                              {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
+                              {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                            </div>
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Elimina versione ${versionLabel}`}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setDeleteVersionError(null);
+                                setConfirmDeleteVersion(v);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setDeleteVersionError(null);
+                                  setConfirmDeleteVersion(v);
+                                }
+                              }}
+                              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </span>
                           </div>
                         </div>
                       </button>
@@ -622,6 +690,39 @@ const path = rawPath;
             </section>
           )}
         </>
+      )}
+      {confirmDeleteVersion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[var(--sidebar-bg)] p-5 shadow-2xl">
+            <p className="text-sm font-semibold text-white">
+              Elimina {confirmDeleteVersion.version_name ?? "versione"}
+            </p>
+            <p className="mt-2 text-xs text-white/70">
+              L'operazione rimuove definitivamente la versione e i file associati dal project.
+            </p>
+
+            {deleteVersionError && <p className="mt-2 text-xs text-red-300">{deleteVersionError}</p>}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteVersion(null)}
+                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-white/20 hover:text-white"
+                disabled={deletingVersionId === confirmDeleteVersion.id}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteVersion(confirmDeleteVersion)}
+                className="rounded-full bg-red-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                disabled={deletingVersionId === confirmDeleteVersion.id}
+              >
+                {deletingVersionId === confirmDeleteVersion.id ? "Eliminando..." : "Conferma"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

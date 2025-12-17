@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Pause, Play, X } from "lucide-react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 
@@ -22,6 +22,7 @@ export function TekkinFloatingPlayer() {
   const playRequestId = useTekkinPlayer((s) => s.playRequestId);
   const volume = useTekkinPlayer((s) => s.volume);
   const isMuted = useTekkinPlayer((s) => s.isMuted);
+  const setIsPlaying = useTekkinPlayer((s) => s.setIsPlaying);
 
   const setAudioRef = useTekkinPlayer((s) => s.setAudioRef);
 
@@ -41,87 +42,104 @@ export function TekkinFloatingPlayer() {
   useEffect(() => {
     setAudioRef(audioRef);
 
-    const st = useTekkinPlayer.getState();
     const a = audioRef.current;
     if (a) {
-      a.volume = st.volume;
-      a.muted = st.isMuted;
+      a.volume = volume;
+      a.muted = isMuted;
     }
-  }, [setAudioRef]);
+  }, [setAudioRef, volume, isMuted]);
 
   // eventi audio -> store (durata, currentTime, stato play/pause, seek pending)
+  const handleTimeUpdate = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      const t = Number.isFinite(a.currentTime) ? a.currentTime : 0;
+      setCurrentTime(t);
+    }
+  }, [setCurrentTime]);
+
+  const handleLoadedMetadata = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+      if (d > 0) setDuration(d);
+      useTekkinPlayer.getState().applyPendingSeekIfPossible();
+    }
+  }, [setDuration]);
+
+  const handleEnded = useCallback(() => {
+    const a = audioRef.current;
+    setCurrentTime(a && Number.isFinite(a.duration) ? a.duration : 0);
+    setIsPlaying(false);
+  }, [setCurrentTime, setIsPlaying]);
+
+  const handleError = useCallback(() => {
+    const a = audioRef.current;
+    if (a && a.error) {
+      console.error("[player] audio error:", a.error);
+      setIsPlaying(false);
+    }
+  }, [setIsPlaying]);
+
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
 
-    const onTime = () => {
-      const t = Number.isFinite(a.currentTime) ? a.currentTime : 0;
-      setCurrentTime(t);
+    a.addEventListener("timeupdate", handleTimeUpdate);
+    a.addEventListener("loadedmetadata", handleLoadedMetadata);
+    a.addEventListener("canplay", handleLoadedMetadata);
+    a.addEventListener("durationchange", handleLoadedMetadata);
+    a.addEventListener("ended", handleEnded);
+    a.addEventListener("error", handleError);
+
+    return () => {
+      a.removeEventListener("timeupdate", handleTimeUpdate);
+      a.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      a.removeEventListener("canplay", handleLoadedMetadata);
+      a.removeEventListener("durationchange", handleLoadedMetadata);
+      a.removeEventListener("ended", handleEnded);
+      a.removeEventListener("error", handleError);
     };
+  }, [handleTimeUpdate, handleLoadedMetadata, handleEnded, handleError]);
 
-    const pushDuration = () => {
-      const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
-      if (d > 0) setDuration(d);
-    };
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
 
-    const onLoaded = () => {
-      pushDuration();
-      useTekkinPlayer.getState().applyPendingSeekIfPossible();
-    };
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
 
-    const onCanPlay = () => {
-      useTekkinPlayer.getState().applyPendingSeekIfPossible();
-    };
-
-    const onDuration = () => pushDuration();
-
-    const onPlay = () => {
-      // stato reale
-      useTekkinPlayer.setState({ isPlaying: true });
-    };
-
-    const onPause = () => {
-      useTekkinPlayer.setState({ isPlaying: false });
-    };
-
-    const onEnded = () => {
-      useTekkinPlayer.setState({ isPlaying: false });
-      setCurrentTime(Number.isFinite(a.duration) ? a.duration : 0);
-    };
-
-    const onError = () => {
-      const err = a.error;
-      console.error("[player] audio error:", err);
-      useTekkinPlayer.setState({ isPlaying: false });
-    };
-
-    a.addEventListener("timeupdate", onTime);
-    a.addEventListener("loadedmetadata", onLoaded);
-    a.addEventListener("canplay", onCanPlay);
-    a.addEventListener("durationchange", onDuration);
     a.addEventListener("play", onPlay);
     a.addEventListener("pause", onPause);
     a.addEventListener("ended", onEnded);
-    a.addEventListener("error", onError);
 
     return () => {
-      a.removeEventListener("timeupdate", onTime);
-      a.removeEventListener("loadedmetadata", onLoaded);
-      a.removeEventListener("canplay", onCanPlay);
-      a.removeEventListener("durationchange", onDuration);
       a.removeEventListener("play", onPlay);
       a.removeEventListener("pause", onPause);
       a.removeEventListener("ended", onEnded);
-      a.removeEventListener("error", onError);
     };
-  }, [setCurrentTime, setDuration]);
+  }, [setIsPlaying]);
+
+  const onTogglePlay = useCallback(() => {
+    const a = audioRef.current;
+    if (!a) return;
+
+    if (a.paused) {
+      // riprende usando la logica già prevista (playRequestId)
+      play();
+    } else {
+      pause();
+    }
+  }, [play, pause]);
 
   // sync volume/mute sempre
   useEffect(() => {
     const a = audioRef.current;
-    if (!a) return;
-    a.volume = volume;
-    a.muted = isMuted;
+    if (a) {
+      a.volume = volume;
+      a.muted = isMuted;
+    }
   }, [volume, isMuted]);
 
   // driver di playback: playRequestId è il "trigger", audioUrl è la sorgente
@@ -137,9 +155,6 @@ export function TekkinFloatingPlayer() {
       setCurrentTime(0);
       return;
     }
-
-    a.volume = volume;
-    a.muted = isMuted;
 
     const st = useTekkinPlayer.getState();
 
@@ -159,15 +174,16 @@ export function TekkinFloatingPlayer() {
     const run = async () => {
       try {
         await a.play();
+        setIsPlaying(true);
         useTekkinPlayer.getState().applyPendingSeekIfPossible();
       } catch (err) {
         console.error("[player] play() failed:", err);
-        useTekkinPlayer.setState({ isPlaying: false });
+        setIsPlaying(false);
       }
     };
 
     void run();
-  }, [playRequestId, audioUrl, isOpen, volume, isMuted, setCurrentTime, setDuration]);
+  }, [playRequestId, audioUrl, isOpen, setCurrentTime]);
 
   if (!isOpen || !audioUrl) return null;
 
@@ -194,7 +210,7 @@ export function TekkinFloatingPlayer() {
 
           <div className="mt-3 flex items-center gap-3">
             <button
-              onClick={() => (isPlaying ? pause() : play())}
+              onClick={onTogglePlay}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10"
               aria-label={isPlaying ? "Pause" : "Play"}
             >
@@ -203,11 +219,18 @@ export function TekkinFloatingPlayer() {
 
             <div className="min-w-0 flex-1">
               {(() => {
-                const d = Number.isFinite(duration) && duration > 0 ? duration : 0;
-                const tRaw = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
-                const t = Math.min(tRaw, d || tRaw);
+                const a = audioRef.current;
+
+                const dStore = Number.isFinite(duration) && duration > 0 ? duration : 0;
+                const dEl = a && Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+                const d = dStore || dEl;
+
+                const tStore = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+                const tEl = a && Number.isFinite(a.currentTime) && a.currentTime >= 0 ? a.currentTime : 0;
+                const t = Math.min(tStore || tEl, d || (tStore || tEl));
                 const maxMs = Math.max(1, Math.floor(d * 1000));
                 const valMs = Math.max(0, Math.min(maxMs, Math.floor(t * 1000)));
+                const pct = maxMs > 0 ? (valMs / maxMs) * 100 : 0;
                 return (
                   <>
                     <input
@@ -216,7 +239,10 @@ export function TekkinFloatingPlayer() {
                       max={maxMs}
                       value={valMs}
                       onChange={(e) => seekToSeconds(Number(e.target.value) / 1000)}
-                      className="w-full"
+                      className="w-full h-2 appearance-none rounded-full bg-white/10"
+                      style={{
+                        background: `linear-gradient(to right, rgba(255,255,255,0.85) ${pct}%, rgba(255,255,255,0.12) ${pct}%)`,
+                      }}
                     />
                     <div className="mt-1 flex justify-between text-[11px] text-white/50">
                       <span>{fmt(t)}</span>

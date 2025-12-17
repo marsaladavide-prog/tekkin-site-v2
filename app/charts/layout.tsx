@@ -1,8 +1,9 @@
+// app/charts/layout.tsx
 import type { ReactNode } from "react";
 import AppShell from "@/components/ui/AppShell";
 import ArtistSidebar from "@/components/nav/ArtistSidebar";
 
-export default function ArtistLayout({ children }: { children: ReactNode }) {
+export default function ChartsLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
       <ArtistSidebar />

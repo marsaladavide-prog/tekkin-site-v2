@@ -1,35 +1,18 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import ChartsHub from "@/components/charts/ChartsHub";
-import { type ChartSnapshotEntry, type TopArtistSummary } from "@/components/charts/types";
 import { createClient } from "@/utils/supabase/server";
+import TopArtistsHero from "@/components/charts/TopArtistsHero";
+import PlaylistShelf from "@/components/charts/PlaylistShelf";
+import ChartsSplitBoard from "@/components/charts/ChartsSplitBoard";
+import {
+  mapChartsToUi,
+  RegisteredArtistProfile,
+} from "@/lib/charts/mapChartsToUi";
 
-const SNAPSHOTS_TABLE = "tekkin_charts_snapshots";
-
-async function fetchPeriod(supabase: SupabaseClient) {
-  const { data, error } = await supabase
-    .from(SNAPSHOTS_TABLE)
-    .select("period_start, period_end")
-    .order("period_start", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[charts] supabase error:", {
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-      details: (error as any)?.details,
-      hint: (error as any)?.hint,
-    });
-    throw error;
-  }
-
-  console.log("[charts] rows:", data ? 1 : 0);
-  return data ?? null;
-}
+export const dynamic = "force-dynamic";
 
 type SnapshotRow = {
+  profile_key: string;
   project_id: string;
-  version_id: string;
+  version_id?: string | null;
   track_title: string | null;
   artist_name: string | null;
   artist_id?: string | null;
@@ -40,285 +23,118 @@ type SnapshotRow = {
   score_public: number | null;
 };
 
-function normalizeAudioUrl(raw: string | null, supabaseBaseUrl: string | null): string | null {
-  if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
+type PeriodRow = {
+  period_start: string | null;
+  period_end: string | null;
+};
 
-  if (!supabaseBaseUrl) return null;
+const PROFILE_COLUMNS = `
+  user_id,
+  artist_name,
+  avatar_url,
+  photo_url,
+  spotify_url
+`;
 
-  // raw può essere:
-  // - "<project_id>/<file>.mp3"
-  // - "tracks/<project_id>/<file>.mp3"
-  const clean = raw.startsWith("tracks/") ? raw.replace(/^tracks\//, "") : raw;
-  return `${supabaseBaseUrl}/storage/v1/object/public/tracks/${clean}`;
-}
+export default async function ChartsPageRoute() {
+  const supabase = await createClient();
 
-async function fetchSnapshots(
-  supabase: SupabaseClient,
-  profileKey: string,
-  periodStart: string
-): Promise<ChartSnapshotEntry[]> {
-  const { data, error } = await supabase
-    .from(SNAPSHOTS_TABLE)
+  const { data: period, error: periodErr } = await supabase
+    .from("tekkin_charts_latest_period_v1")
+    .select("period_start, period_end")
+    .maybeSingle<PeriodRow>();
+
+  if (periodErr) console.error("[charts] period error:", periodErr);
+
+  const { data: rows, error: snapshotsErr } = await supabase
+    .from("tekkin_charts_latest_snapshots_v1")
     .select(
-      "project_id, version_id, track_title, artist_name, artist_id, cover_url, audio_url, mix_type, rank_position, score_public"
+      "profile_key, project_id, version_id, track_title, artist_name, artist_id, cover_url, audio_url, mix_type, rank_position, score_public"
+    );
+
+  if (snapshotsErr) console.error("[charts] snapshots error:", snapshotsErr);
+
+  const all = (rows ?? []) as SnapshotRow[];
+
+  // 1) Risaliamo ai proprietari dei project usando project_id -> projects.user_id
+  const projectIds = Array.from(
+    new Set(
+      all
+        .map((r) => r.project_id)
+        .filter((v): v is string => typeof v === "string" && v.length > 0)
     )
-    .eq("profile_key", profileKey)
-    .eq("period_start", periodStart)
-    .order("rank_position", { ascending: true })
-    .limit(profileKey === "global" ? 100 : 10);
-
-  if (error) {
-    console.error("[charts] supabase error:", {
-      code: (error as any)?.code,
-      message: (error as any)?.message,
-      details: (error as any)?.details,
-      hint: (error as any)?.hint,
-    });
-    throw error;
-  }
-
-  const rows = (data ?? []) as SnapshotRow[];
-
-  // Se audio_url è già un https assoluto lo usiamo,
-  // se invece è un path (tipo projectId/file.mp3) generiamo signed url dal bucket "tracks"
-  const signed = await Promise.all(
-    rows.map(async (row) => {
-      const raw = row.audio_url ?? null;
-
-      let audioUrl: string | null = null;
-
-      if (raw && /^https?:\/\//i.test(raw)) {
-        audioUrl = raw;
-      } else if (raw) {
-        const clean = raw.startsWith("tracks/") ? raw.replace(/^tracks\//, "") : raw;
-
-        const { data: signedData, error: signedErr } = await supabase.storage
-          .from("tracks")
-          .createSignedUrl(clean, 60 * 60); // 1 ora
-
-        if (signedErr) {
-          console.error("[charts] signed url error:", {
-            message: (signedErr as any)?.message,
-            name: (signedErr as any)?.name,
-          });
-          audioUrl = null;
-        } else {
-          audioUrl = signedData?.signedUrl ?? null;
-        }
-      }
-
-      return {
-        project_id: row.project_id,
-        version_id: row.version_id,
-        track_title: row.track_title,
-        artist_name: row.artist_name,
-        cover_url: row.cover_url,
-        audio_url: audioUrl,
-        mix_type: row.mix_type,
-        rank_position: row.rank_position,
-        score_public: row.score_public ?? null,
-      } satisfies ChartSnapshotEntry;
-    })
   );
 
-  return signed;
-}
+  const { data: projectOwners, error: projectOwnersErr } = await supabase
+    .from("projects")
+    .select("id, user_id")
+    .in("id", projectIds);
 
-
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string") {
-    const s = value.trim();
-    if (!s) return null;
-    const n = Number(s);
-    return Number.isFinite(n) ? n : null;
+  if (projectOwnersErr) {
+    console.error("[charts] projects owner error:", projectOwnersErr);
   }
-  return null;
-}
 
-async function loadTopArtistsFromArtistRank(supabase: SupabaseClient): Promise<Array<{ artist_id: string; score: number | null }>> {
-  const scoreCandidates = ["tekkin_score", "score_public", "score_0_100"] as const;
+  const ownerByProjectId = new Map<string, string>();
+  (projectOwners ?? []).forEach((p) => {
+    if (p?.id && p?.user_id) ownerByProjectId.set(p.id, p.user_id);
+  });
 
-  for (const col of scoreCandidates) {
-    const res = await supabase
-      .from("artist_rank")
-      .select(`artist_id, ${col}`)
-      .order(col, { ascending: false })
-      .limit(20);
+  const ownerUserIds = Array.from(
+    new Set(Array.from(ownerByProjectId.values()).filter(Boolean))
+  );
 
-    if (!res.error) {
-      const rows = (res.data ?? []) as Array<{ artist_id: string | null } & Record<string, unknown>>;
-      return rows
-        .filter((r) => typeof r.artist_id === "string" && r.artist_id)
-        .map((r) => ({
-          artist_id: r.artist_id as string,
-          score: toFiniteNumber(r[col]),
-        }));
+  // 2) Carichiamo i profili degli artisti registrati (users_profile)
+  let registeredArtists: RegisteredArtistProfile[] = [];
+
+  if (ownerUserIds.length) {
+    const { data: artistProfiles, error: artistProfilesErr } = await supabase
+      .from("users_profile")
+      .select("user_id, artist_name, photo_url, avatar_url, role")
+      .in("user_id", ownerUserIds)
+      .eq("role", "artist");
+
+    if (artistProfilesErr) {
+      console.error("[charts] artist profiles error:", artistProfilesErr);
     }
 
-    if ((res.error as any)?.code === "42703") continue;
-
-    console.error("[charts][artist_rank] supabase error:", {
-      code: (res.error as any)?.code,
-      message: (res.error as any)?.message,
-      details: (res.error as any)?.details,
-      hint: (res.error as any)?.hint,
-    });
-    throw res.error;
+    registeredArtists = artistProfiles ?? [];
   }
 
-  return [];
-}
+  // 3) Arricchiamo le righe chart con artist_id/artist_name reali
+  const profileByUserId = new Map<string, RegisteredArtistProfile>();
+  registeredArtists.forEach((p) => {
+    if (p?.user_id) profileByUserId.set(p.user_id, p);
+  });
 
-async function loadTopArtistsFromSnapshots(
-  supabase: SupabaseClient,
-  periodStart: string
-): Promise<Array<{ artist_id: string; score: number | null }>> {
-  // Fallback coerente con charts: prendo le righe della settimana e aggrego per artist_id in JS.
-  // Se la colonna artist_id non esiste nel DB, qui avrai errore 42703 e te lo loggo.
-  const res = await supabase
-    .from(SNAPSHOTS_TABLE)
-    .select("artist_id, score_public")
-    .eq("profile_key", "global")
-    .eq("period_start", periodStart)
-    .limit(500);
+  const enriched = all.map((r) => {
+    const uid = ownerByProjectId.get(r.project_id) ?? null;
+    const prof = uid ? profileByUserId.get(uid) : null;
 
-  if (res.error) {
-    console.error("[charts][snapshots->artists] supabase error:", {
-      code: (res.error as any)?.code,
-      message: (res.error as any)?.message,
-      details: (res.error as any)?.details,
-      hint: (res.error as any)?.hint,
-    });
-    return [];
-  }
+    return {
+      ...r,
+      artist_id: uid ?? r.artist_id ?? null,
+      artist_name: (prof?.artist_name ?? r.artist_name ?? null) as string | null,
+      cover_url: r.cover_url ?? null,
+      __artist_avatar_url: (prof?.avatar_url ?? prof?.photo_url ?? null) as string | null,
+    };
+  });
 
-  const rows = (res.data ?? []) as Array<{ artist_id: string | null; score_public: number | null }>;
-
-  const map = new Map<string, { sum: number; count: number }>();
-  for (const r of rows) {
-    if (!r.artist_id) continue;
-    const score = typeof r.score_public === "number" && Number.isFinite(r.score_public) ? r.score_public : 0;
-    const cur = map.get(r.artist_id) ?? { sum: 0, count: 0 };
-    cur.sum += score;
-    cur.count += 1;
-    map.set(r.artist_id, cur);
-  }
-
-  // rank: somma score_public (o puoi cambiare in media)
-  return Array.from(map.entries())
-    .map(([artist_id, v]) => ({ artist_id, score: v.sum }))
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-    .slice(0, 20);
-}
-async function fetchArtistsByIds(
-  supabase: SupabaseClient,
-  ids: string[]
-): Promise<Array<{ id: string; artist_name: string | null; ig_profile_picture: string | null; artist_photo_url: string | null }>> {
-  const selects = [
-    "id, artist_name, artist_photo_url, ig_profile_picture",
-    "id, artist_name, artist_photo_url",
-    "id, artist_name, ig_profile_picture",
-    "id, artist_name",
-  ] as const;
-
-  for (const sel of selects) {
-    const res = await supabase.from("artists").select(sel).in("id", ids);
-
-    if (!res.error) {
-      const rows = (res.data ?? []) as Array<Record<string, unknown>>;
-      return rows
-        .filter((r) => typeof r.id === "string" && r.id)
-        .map((r) => ({
-          id: r.id as string,
-          artist_name: typeof r.artist_name === "string" ? (r.artist_name as string) : null,
-          ig_profile_picture: typeof r.ig_profile_picture === "string" ? (r.ig_profile_picture as string) : null,
-          artist_photo_url: typeof r.artist_photo_url === "string" ? (r.artist_photo_url as string) : null,
-        }));
-    }
-
-    if ((res.error as any)?.code === "42703") continue;
-
-    console.error("[charts][artists] supabase error raw:", res.error);
-    console.error("[charts][artists] supabase error fields:", {
-      code: (res.error as any)?.code,
-      message: (res.error as any)?.message,
-      details: (res.error as any)?.details,
-      hint: (res.error as any)?.hint,
-    });
-    throw res.error;
-  }
-
-  return [];
-}
-
-async function loadTopArtists(
-  supabase: SupabaseClient,
-  periodStart: string | null
-): Promise<TopArtistSummary[]> {
-  type ArtistRow = {
-    id: string;
-    artist_name: string | null;
-    ig_profile_picture: string | null;
-    artist_photo_url: string | null;
-  };
-
-  // 1) Tentativo primario: artist_rank (se esiste e ha dati)
-  let rankRows = await loadTopArtistsFromArtistRank(supabase);
-
-  // 2) Fallback: aggregazione da snapshot settimanale (solo se ho un periodo)
-  if (rankRows.length === 0 && periodStart) {
-    rankRows = await loadTopArtistsFromSnapshots(supabase, periodStart);
-  }
-
-  if (rankRows.length === 0) return [];
-
-  const ids = Array.from(new Set(rankRows.map((r) => r.artist_id)));
-
-  const artistsRows = await fetchArtistsByIds(supabase, ids);
-
-  // Merge rank + artist mantenendo l’ordine del rank
-  return rankRows
-    .map((rankRow) => {
-      const artist = artistsRows.find((a) => a.id === rankRow.artist_id);
-      if (!artist) return null;
-
-      return {
-        id: artist.id,
-        artist_name: artist.artist_name ?? null,
-        ig_profile_picture: artist.ig_profile_picture ?? null,
-        artist_photo_url: artist.artist_photo_url ?? null,
-        // Nota: qui stai mettendo score in spotify_followers per compatibilità col type attuale
-        spotify_followers: rankRow.score ?? null,
-      };
-    })
-    .filter(Boolean) as TopArtistSummary[];
-}
-
-export default async function ChartsPage() {
-  const supabase = await createClient();
-  const period = await fetchPeriod(supabase);
-
-  let globalSnapshots: ChartSnapshotEntry[] = [];
-  let qualitySnapshots: ChartSnapshotEntry[] = [];
-
-  if (period?.period_start) {
-    [globalSnapshots, qualitySnapshots] = await Promise.all([
-      fetchSnapshots(supabase, "global", period.period_start),
-      fetchSnapshots(supabase, "quality", period.period_start),
-    ]);
-  }
-
-  const topArtists = await loadTopArtists(supabase, period?.period_start ?? null);
+  const uiState = mapChartsToUi(enriched as any, registeredArtists, period ?? null);
 
   return (
-    <ChartsHub
-      periodStart={period?.period_start ?? null}
-      periodEnd={period?.period_end ?? null}
-      globalSnapshots={globalSnapshots}
-      qualitySnapshots={qualitySnapshots}
-      topArtists={topArtists}
-    />
+    <main className="min-h-screen bg-black px-6 py-10 text-white">
+      <div className="mx-auto flex max-w-7xl flex-col gap-12 px-2 sm:px-6">
+        <TopArtistsHero
+          artists={uiState.topArtists}
+          periodStart={uiState.periodStart}
+          periodEnd={uiState.periodEnd}
+        />
+        <PlaylistShelf playlists={uiState.playlists} />
+        <ChartsSplitBoard
+          globalItems={uiState.globalTop100}
+          qualityItems={uiState.qualityTop10}
+        />
+      </div>
+    </main>
   );
 }

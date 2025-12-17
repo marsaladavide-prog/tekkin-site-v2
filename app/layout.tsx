@@ -22,7 +22,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="it" suppressHydrationWarning>
-      <body className={`${inter.className} bg-[#0a0a0a] text-zinc-200`}>
+      <body className={`${inter.className} bg-[var(--bg)] text-[var(--text)]`}>
         <SupabaseProvider>
           {children}
           <TekkinFloatingPlayer />

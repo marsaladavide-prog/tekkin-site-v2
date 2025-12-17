@@ -6,14 +6,28 @@ const config: Config = {
     extend: {
       colors: {
         tekkin: {
-          bg: "#0a0a0a",
-          panel: "#0f0f0f",
-          border: "#1e1e1e",
-          primary: "#06b6d4",
-          muted: "#b3b3b3",
-          success: "#10b981",
-          warning: "#f59e0b",
+          bg: "var(--bg)",
+          panel: "var(--panel)",
+          panelSoft: "var(--panel-soft)",
+          border: "var(--border)",
+          fg: "var(--text)",
+          muted: "var(--muted)",
+          accent: "var(--accent)",
+          accentSoft: "var(--accent-soft)",
+          accentGlow: "var(--accent-glow)",
+          grid: "var(--grid)",
+          primary: "var(--accent)",
+          warning: "var(--accent)",
         },
+      },
+      boxShadow: {
+        "soft-xl": "var(--shadow-soft)",
+        "panel-xl": "0 25px 45px rgba(0, 0, 0, 0.55)",
+      },
+      borderRadius: {
+        "soft-xl": "1.25rem",
+        "soft-lg": "1rem",
+        "pill": "999px",
       },
       fontFamily: {
         sans: ["Inter", "sans-serif"],

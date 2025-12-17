@@ -12,7 +12,6 @@ import {
 import { Download, MoreVertical, Search, Send, Settings, Trash2 } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/client";
-import { getPlayableUrl } from "@/lib/player/getPlayableUrl";
 import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { WaveformBands } from "@/types/analyzer";
@@ -28,6 +27,9 @@ type ProjectVersionRow = {
 
   audio_url: string | null;
   audio_path: string | null;
+
+  visibility?: "public" | "private_with_secret_link" | null;
+
 
   waveform_peaks?: number[] | null;
   waveform_duration?: number | null;
@@ -58,6 +60,7 @@ const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBa
     "mix_type",
     "audio_url",
     "audio_path",
+    "visibility",
     "waveform_peaks",
     "waveform_duration",
     includeWaveformBands ? "waveform_bands" : null,
@@ -119,6 +122,8 @@ export default function ProjectsPage() {
   const [signalMessage, setSignalMessage] = useState("");
   const [signalFeedback, setSignalFeedback] = useState<string | null>(null);
   const [signalSending, setSignalSending] = useState(false);
+  const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
+  const [visibilityError, setVisibilityError] = useState<string | null>(null);
 
   const allowProjectInfoSelectRef = useRef(true);
   const waveformBandsSelectableRef = useRef(true);
@@ -216,6 +221,7 @@ export default function ProjectsPage() {
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
                 .map(async (version) => {
                   const rawUrl = typeof version.audio_url === "string" ? version.audio_url : null;
+
                   const durationRaw = version.waveform_duration;
                   const durationNum =
                     typeof durationRaw === "number"
@@ -229,6 +235,11 @@ export default function ProjectsPage() {
                       ? durationNum
                       : null;
 
+                  const vis: "public" | "private_with_secret_link" | null =
+                    version.visibility === "public" || version.visibility === "private_with_secret_link"
+                      ? version.visibility
+                      : null;
+
                   return {
                     id: version.id,
                     version_name: version.version_name ?? null,
@@ -239,6 +250,8 @@ export default function ProjectsPage() {
 
                     audio_path: typeof version.audio_path === "string" ? version.audio_path : null,
                     audio_url: rawUrl,
+
+                    visibility: vis,
 
                     waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
                     waveform_duration: safeDuration,
@@ -346,6 +359,56 @@ export default function ProjectsPage() {
     }
   }
 
+  async function handleSetVisibility(
+  projectId: string,
+  visibility: "public" | "private_with_secret_link"
+) {
+  try {
+    const res = await fetch("/api/projects/set-visibility", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: projectId, visibility }),
+    });
+
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+
+    if (!res.ok) {
+      const msg = payload?.error ?? "Impossibile aggiornare la visibilità.";
+
+      // QUI: mostra toast o setti stato errore UI
+      // esempio generico:
+      // toast.error(msg);
+
+      setVisibilityError?.(msg); // se hai uno state, altrimenti rimuovi questa riga
+      return;
+    }
+
+    setProjects((prev) =>
+      prev.map((proj) => {
+        if (proj.id !== projectId) return proj;
+
+        const nextVersions = proj.versions.map((v) => ({ ...v }));
+
+        if (visibility === "public") {
+          for (const v of nextVersions) v.visibility = "private_with_secret_link";
+
+          // public SOLO la latest
+          if (nextVersions[0]) nextVersions[0].visibility = "public";
+        } else {
+          for (const v of nextVersions) v.visibility = "private_with_secret_link";
+        }
+
+        return { ...proj, versions: nextVersions };
+      })
+    );
+  } catch (err) {
+    console.error("Set visibility error:", err);
+    const msg = err instanceof Error ? err.message : "Errore inatteso aggiornando la visibilità.";
+    setSignalFeedback(msg);
+  }
+}
+
+
   const handleOpenSignal = (projectId: string, canOpen: boolean) => {
     if (!canOpen) return;
     setSignalFeedback(null);
@@ -405,6 +468,35 @@ export default function ProjectsPage() {
 
   const isSuccessFeedback =
     signalFeedback && /successo|inviato/.test(signalFeedback.toLowerCase());
+
+  const resolveAudioUrl = useCallback(
+    async (version: ProjectVersionRow | null) => {
+      if (!version) return null;
+
+      const rawUrl = typeof version.audio_url === "string" ? version.audio_url.trim() : "";
+      if (rawUrl && rawUrl.startsWith("http")) return rawUrl;
+
+      const versionId = version.id;
+      const cached = audioPreviewByVersionId[versionId];
+      if (cached && cached.startsWith("http")) return cached;
+
+      const rawPath = typeof version.audio_path === "string" ? version.audio_path.trim() : "";
+      if (!rawPath) return null;
+
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase.storage.from("tracks").createSignedUrl(rawPath, 60 * 30);
+        if (error || !data?.signedUrl) return null;
+
+        const signed = data.signedUrl;
+        setAudioPreviewByVersionId((prev) => ({ ...prev, [versionId]: signed }));
+        return signed;
+      } catch {
+        return null;
+      }
+    },
+    [audioPreviewByVersionId]
+  );
 
   return (
     <div className="w-full max-w-6xl mx-auto pt-8 pb-28">
@@ -483,11 +575,10 @@ export default function ProjectsPage() {
             const versions = p.versions;
             const latestVersion = versions[0] ?? null;
 
-            const previewVersion =
-              versions.find((v) => (v.audio_url || v.audio_path) && (v.waveform_peaks?.length ?? 0) > 0) ??
-              versions.find((v) => v.audio_url || v.audio_path) ??
-              latestVersion;
-            const previewVersionId = previewVersion?.id ?? null;
+const previewVersion = latestVersion;
+const visTarget = latestVersion; // puoi anche eliminarlo se non serve più
+const previewVersionId = latestVersion?.id ?? null;
+
 
             const serverPeaks = previewVersion?.waveform_peaks ?? null;
             const serverDuration = previewVersion?.waveform_duration ?? null;
@@ -522,6 +613,20 @@ export default function ProjectsPage() {
             const parameterChips = [
               latestVersion?.mix_type ? MIX_TYPE_LABELS[latestVersion.mix_type] ?? latestVersion.mix_type : null,
             ].filter(Boolean) as string[];
+
+            const latestVisibility: "public" | "private_with_secret_link" =
+              latestVersion?.visibility === "public" ? "public" : "private_with_secret_link";
+
+            const isPublishable =
+              latestVersion?.overall_score != null && (!!latestVersion.audio_path || !!latestVersion.audio_url);
+
+            const visibilityOptions: Array<{
+              value: "public" | "private_with_secret_link";
+              label: string;
+            }> = [
+              { value: "public", label: "Pubblico" },
+              { value: "private_with_secret_link", label: "Link segreto" },
+            ];
 
             const latestVersionHref = latestVersion
               ? `/artist/projects/${p.id}?version_id=${latestVersion.id}`
@@ -586,6 +691,36 @@ export default function ProjectsPage() {
                             ))}
                           </div>
                         )}
+
+                        {visTarget?.id && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px] text-white/70">
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px]">Visibilita</span>
+                            <div className="inline-flex items-center gap-1">
+                              {visibilityOptions.map((opt) => {
+                                const isActive = latestVisibility === opt.value;
+                                const isDisabled = opt.value === "public" && !isPublishable;
+
+                                return (
+                                  <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => handleSetVisibility(p.id, opt.value)}
+                                    disabled={isDisabled}
+                                    title={isDisabled ? "Analizza una versione prima di pubblicare" : undefined}
+                                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold transition disabled:opacity-50 disabled:pointer-events-none ${
+                                      isActive
+                                        ? "border-[var(--accent)] bg-[var(--accent)] text-black"
+                                        : "border-white/12 bg-white/5 text-white/75 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                                    }`}
+                                    aria-pressed={isActive}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2">
@@ -630,19 +765,12 @@ export default function ProjectsPage() {
 
   const isThis = player.versionId === previewVersionId;
 
-  // se è la stessa traccia, toggle play/pause senza rigenerare url
   if (isThis) {
-    if (player.isPlaying) player.pause();
-    else player.play();
+    useTekkinPlayer.getState().toggle();
     return;
   }
 
-  // nuova traccia: qui sì, risolvo url una volta
-  const url = await getPlayableUrl(
-    previewVersionId,
-    previewVersion?.audio_url ?? null,
-    previewVersion?.audio_path ?? null
-  );
+  const url = await resolveAudioUrl(previewVersion);
   if (!url) return;
 
   player.play({
@@ -665,11 +793,7 @@ export default function ProjectsPage() {
     return;
   }
 
-  const url = await getPlayableUrl(
-    previewVersionId,
-    previewVersion?.audio_url ?? null,
-    previewVersion?.audio_path ?? null
-  );
+  const url = await resolveAudioUrl(previewVersion);
   if (!url) return;
 
   player.playAtRatio(

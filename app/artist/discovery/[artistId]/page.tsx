@@ -1,6 +1,6 @@
-import { ArtistProfileHeader } from "@/app/artist/components/ArtistProfileHeader";
-import { ReleasesHighlights } from "@/app/artist/components/ReleasesHighlights";
-import { TekkinRankSection } from "@/app/artist/components/TekkinRankSection";
+import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
+import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
+import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
 import {
   getArtistDetail,
   type ArtistDetailResponse,

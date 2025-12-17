@@ -10,7 +10,7 @@ import type {
   AnalyzerResult,
   ReferenceAi,
 } from "@/types/analyzer";
-import { AnalyzerProPanel } from "@/app/artist/components/AnalyzerProPanel";
+import { AnalyzerProPanel } from "@/components/analyzer/AnalyzerProPanel";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 
@@ -220,8 +220,7 @@ export default function AnalyzerVersionPage() {
                   if (!audioUrl) return;
 
                   if (isActive) {
-                    if (player.isPlaying) player.pause();
-                    else player.play();
+                    useTekkinPlayer.getState().toggle();
                     return;
                   }
 

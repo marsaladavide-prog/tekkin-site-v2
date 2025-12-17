@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     // 1) Recupero versione
 const { data: version, error: versionError } = await supabase
   .from("project_versions")
-  .select("id, project_id, audio_url, audio_path, version_name")
+  .select("id, project_id, audio_url, audio_path, version_name, mix_type")
   .eq("id", versionId)
   .maybeSingle();
 
@@ -41,10 +41,14 @@ const { data: version, error: versionError } = await supabase
       return NextResponse.json({ error: "Version non trovata" }, { status: 404 });
     }
 
+    if (version.mix_type !== "master" && version.mix_type !== "premaster") {
+      return NextResponse.json({ error: "mix_type non valido" }, { status: 400 });
+    }
+
     // 2) Recupero progetto per profileKey/mode
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id, genre, mix_type")
+      .select("id, genre")
       .eq("id", version.project_id)
       .maybeSingle();
 
@@ -54,7 +58,7 @@ const { data: version, error: versionError } = await supabase
     }
 
     const profileKey = project.genre || "minimal_deep_tech";
-    const mode = project.mix_type || "master";
+    const mode = version.mix_type === "master" ? "master" : "premaster";
 
 const analyzerUrl = process.env.TEKKIN_ANALYZER_URL;
 
