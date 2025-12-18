@@ -1,49 +1,55 @@
 // app/u/[handle]/page.tsx
 import { createClient } from "@/utils/supabase/server";
-import TrackRow from "@/components/tracks/TrackRow";
 import type { TrackItem } from "@/lib/tracks/types";
+import PublicArtistClient from "./PublicArtistClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function PublicArtistPage({
+export default async function UserPage({
   params,
 }: {
   params: { handle: string };
 }) {
   const supabase = await createClient();
-  const handle = params.handle;
 
-  // 1) trova artista per handle
-  // Non posso confermare i nomi colonna/tabella nel tuo DB: qui devi adattare.
-  // Esempio comune: artists.handle oppure profiles.username
-  const { data: artist } = await supabase
+  const { data: artist, error } = await supabase
     .from("artists")
-    .select("id, display_name, handle, avatar_url, genre")
-    .eq("handle", handle)
+    .select("id, artist_name, slug, ig_profile_picture, main_genre")
+    .eq("slug", params.handle)
+    .eq("is_public", true)
     .maybeSingle();
 
-  if (!artist) return <div className="p-8">Artista non trovato</div>;
+  if (error) {
+    console.error(error);
+  }
 
-  // 2) prendi tracce pubbliche Tekkin (latest version only)
-  // Consiglio: farlo via RPC/VIEW dedicata per garantire "latest per project".
-  const { data: rows } = await supabase
-    .rpc("tekkin_artist_public_tracks_v1", { p_handle: handle });
+  if (!artist) {
+    return <div>Artista non trovato</div>;
+  }
 
-  const items: TrackItem[] = (rows ?? []).map((r: any) => ({
-    versionId: r.version_id,
-    title: r.track_title ?? "Untitled",
-    artistName: artist.display_name ?? null,
-    coverUrl: r.cover_url ?? null,
-    audioUrl: r.audio_url ?? "",
-    likesCount: Number(r.likes_count ?? 0),
-    likedByMe: Boolean(r.liked_by_me ?? false),
+  // 1B) Chiamata RPC aggiornata
+  const { data: rows } = await supabase.rpc("tekkin_artist_public_tracks_v1", {
+    p_slug: params.handle,
+  });
+
+  // 3C) Mappa tracce in TrackItem[]
+  const items: TrackItem[] = (rows ?? []).map((row: any) => ({
+    versionId: row.version_id,
+    title: row.track_title ?? "Untitled",
+    artistName: row.artist_name ?? null,
+    coverUrl: row.cover_url ?? null,
+    audioUrl: row.audio_url ?? "",
+    audioPath: row.audio_path ?? null,
+    likesCount: Number(row.likes_count ?? 0),
+    likedByMe: Boolean(row.liked_by_me ?? false),
+    // ...altri campi se servono...
   }));
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8">
-        <h1 className="text-3xl font-semibold">{artist.display_name}</h1>
-        <p className="text-sm text-[var(--muted)]">@{artist.handle}</p>
+        <h1 className="text-3xl font-semibold">{artist.artist_name}</h1>
+        <p className="text-sm text-[var(--muted)]">@{artist.slug}</p>
       </div>
 
       {/* Tekkin DNA card (placeholder) */}
@@ -54,11 +60,15 @@ export default async function PublicArtistPage({
         </div>
       </div>
 
-      <div className="space-y-2">
-        {items.map((it) => (
-          <TrackRow key={it.versionId} item={it} />
-        ))}
-      </div>
+      {items.length === 0 ? (
+        <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-[var(--muted)]">
+          Nessuna traccia pubblica. Pubblica una versione master dal tuo workspace per apparire qui e in /charts.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <PublicArtistClient initialItems={items} />
+        </div>
+      )}
     </div>
   );
 }

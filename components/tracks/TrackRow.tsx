@@ -24,7 +24,7 @@ export default function TrackRow({
   showArtist?: boolean;
   showMetrics?: boolean;
   onPlay?: (item: TrackItem) => void | Promise<void>;
-  onToggleLike?: (item: TrackItem) => void;
+  onToggleLike?: (versionId: string) => void;
   rightSlot?: React.ReactNode;
 }) {
   const isCompact = variant === "compact";
@@ -86,15 +86,15 @@ export default function TrackRow({
         )}
 
         <div className="flex items-center gap-2">
-          {typeof item.likes === "number" && (
+          {typeof item.likesCount === "number" && (
             <button
               type="button"
-              onClick={() => onToggleLike?.(item)}
+              onClick={() => onToggleLike?.(item.versionId)}
               className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80 hover:bg-white/10"
               aria-label="Like"
             >
-              <span className="text-sm leading-none">{item.liked ? "♥" : "♡"}</span>
-              <span className="tabular-nums">{item.likes}</span>
+              <span className="text-sm leading-none">{item.likedByMe ? "♥" : "♡"}</span>
+              <span className="tabular-nums">{item.likesCount}</span>
             </button>
           )}
           {rightSlot}

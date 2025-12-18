@@ -20,13 +20,15 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
 
   const play = useTekkinPlayer((s) => s.play);
 
-  const [likesMap, setLikesMap] = useState<Record<string, { liked: boolean; likes: number }>>({});
+  // A) Cambia type likesMap
+  const [likesMap, setLikesMap] = useState<Record<string, { likedByMe: boolean; likesCount: number }>>({});
 
   const mergedGlobal = useMemo(() => {
     return safeGlobal.map((t: any) => {
       const vid = (t as any)?.versionId ?? (t as any)?.version_id;
       const local = vid ? likesMap[vid] : null;
-      return local ? { ...t, liked: local.liked, likes: local.likes } : t;
+      // B) mergedGlobal / mergedQuality
+      return local ? { ...t, likedByMe: local.likedByMe, likesCount: local.likesCount } : t;
     });
   }, [safeGlobal, likesMap]);
 
@@ -34,7 +36,7 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
     return safeQuality.map((t: any) => {
       const vid = (t as any)?.versionId ?? (t as any)?.version_id;
       const local = vid ? likesMap[vid] : null;
-      return local ? { ...t, liked: local.liked, likes: local.likes } : t;
+      return local ? { ...t, likedByMe: local.likedByMe, likesCount: local.likesCount } : t;
     });
   }, [safeQuality, likesMap]);
 
@@ -73,10 +75,11 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
 
     // optimistic update
     setLikesMap((prev) => {
-      const cur = prev[vid] ?? { liked: Boolean(track.liked), likes: Number(track.likes ?? 0) };
-      const nextLiked = !cur.liked;
-      const nextLikes = Math.max(0, cur.likes + (nextLiked ? 1 : -1));
-      return { ...prev, [vid]: { liked: nextLiked, likes: nextLikes } };
+      const cur = prev[vid] ?? { likedByMe: Boolean(track.likedByMe), likesCount: Number(track.likesCount ?? 0) };
+      // C) handleToggleLike
+      const nextLiked = !cur.likedByMe;
+      const nextLikes = Math.max(0, cur.likesCount + (nextLiked ? 1 : -1));
+      return { ...prev, [vid]: { likedByMe: nextLiked, likesCount: nextLikes } };
     });
 
     const res = await fetch("/api/tracks/toggle-like", {
@@ -91,7 +94,8 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
 
     setLikesMap((prev) => ({
       ...prev,
-      [vid]: { liked: Boolean((json as any)?.liked), likes: Number((json as any)?.likes_count ?? 0) },
+      // C) risposta server
+      [vid]: { likedByMe: Boolean((json as any)?.liked), likesCount: Number((json as any)?.likes_count ?? 0) },
     }));
   }, []);
 
@@ -114,8 +118,9 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
             <div className="flex flex-col gap-2">
               {globalTracks.map(({ entry, track }, idx) => {
                 const v = likesMap[track.versionId];
+                // D) Merge prima del render TrackRow
                 const merged = v
-                  ? { ...track, likes: v.likes ?? track.likes, liked: v.liked ?? track.liked }
+                  ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
                   : track;
 
                 return (
@@ -126,7 +131,8 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
                   variant="row"
                   showMetrics
                   onPlay={() => handlePlay(merged, entry)}
-                  onToggleLike={() => handleToggleLike(merged)}
+                  // E) Passa onToggleLike senza wrapper inutile
+                  onToggleLike={handleToggleLike}
                 />
               );
               })}
@@ -144,7 +150,7 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
             {qualityTracks.map(({ entry, track }, idx) => {
               const v = likesMap[track.versionId];
               const merged = v
-                ? { ...track, likes: v.likes ?? track.likes, liked: v.liked ?? track.liked }
+                ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
                 : track;
 
               return (
@@ -155,7 +161,7 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
                   variant="row"
                   showMetrics
                   onPlay={() => handlePlay(merged, entry)}
-                  onToggleLike={() => handleToggleLike(merged)}
+                  onToggleLike={handleToggleLike}
                 />
               );
             })}

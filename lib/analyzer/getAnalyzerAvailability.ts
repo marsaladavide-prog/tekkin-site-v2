@@ -1,5 +1,3 @@
-import type { ProjectVersion } from "@/types/project";
-
 export type AnalyzerReadyLevel = "none" | "quick" | "pro";
 
 export type AnalyzerAvailability = {
@@ -11,8 +9,24 @@ export type AnalyzerAvailability = {
   readyLevel: AnalyzerReadyLevel;
 };
 
+export type ProjectVersionLike = {
+  lufs?: number | null;
+  bpm?: number | null;
+  overall_score?: number | null;
+
+  analyzer_arrays?: {
+    momentary_lufs?: number[] | null;
+  } | null;
+
+  analyzer_bands_norm?: unknown | null;
+
+  analyzer_profile_key?: string | null;
+
+  reference_model_key?: string | null;
+};
+
 export function getAnalyzerAvailability(
-  version: ProjectVersion | null
+  version: ProjectVersionLike | null
 ): AnalyzerAvailability {
   if (!version) {
     return {
@@ -30,20 +44,15 @@ export function getAnalyzerAvailability(
     typeof version.bpm === "number" &&
     typeof version.overall_score === "number";
 
-  const hasArrays =
-    Array.isArray(version.analyzer_arrays?.momentary_lufs) &&
-    version.analyzer_arrays.momentary_lufs.length > 0;
+  const momentary = version.analyzer_arrays?.momentary_lufs;
+  const hasArrays = Array.isArray(momentary) && momentary.length > 0;
 
-  const hasBands =
-    typeof version.analyzer_bands_norm === "object" &&
-    version.analyzer_bands_norm !== null;
+  const hasBands = version.analyzer_bands_norm != null;
 
-  const hasProfileKey =
-    typeof version.analyzer_profile_key === "string" &&
-    version.analyzer_profile_key.length > 0;
+  const pk = version.analyzer_profile_key;
+  const hasProfileKey = typeof pk === "string" && pk.length > 0;
 
-  const hasReference =
-    hasProfileKey && Boolean(version.reference_model_key);
+  const hasReference = hasProfileKey && Boolean(version.reference_model_key);
 
   let readyLevel: AnalyzerReadyLevel = "none";
   if (hasBase) readyLevel = "quick";

@@ -4,10 +4,16 @@ import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { TrackItem } from "@/lib/tracks/types";
 
 export function playTrack(item: TrackItem) {
-  useTekkinPlayer.getState().play({
+  if (!item.audioUrl) return;
+
+  const st = useTekkinPlayer.getState();
+
+  st.open({
     versionId: item.versionId,
     audioUrl: item.audioUrl,
     title: item.title,
     subtitle: item.artistName ?? "",
   });
+
+  st.play();
 }

@@ -131,6 +131,8 @@ export default function ChartsReferenceLayout(props: {
                         className="group text-left"
                         onClick={() => {
                           if (!r.audio_url) return;
+                          if (!r.version_id) return;
+
                           open({
                             projectId: r.project_id,
                             versionId: r.version_id,
