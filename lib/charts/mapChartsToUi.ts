@@ -92,6 +92,9 @@ function buildTopArtists(
     const avatarFromRows = (globalRows.find(
       (row) => (row.artist_id ?? "").toString().trim() === key
     ) as any)?.__artist_avatar_url;
+    const slugFromRows = (globalRows.find(
+      (row) => (row.artist_id ?? "").toString().trim() === key
+    ) as any)?.artist_slug;
 
     const displayName =
       profile.artist_name?.trim() || profile.artist_name || "Tekkin Artist";
@@ -102,11 +105,12 @@ function buildTopArtists(
       null;
 
     topArtists.push({
-      id: profile.user_id,
-      name: displayName,
-      avatarUrl,
-      score: stats.bestScore,
-    });
+        id: profile.user_id,
+        name: displayName,
+        avatarUrl,
+        score: stats.bestScore,
+        slug: typeof slugFromRows === "string" && slugFromRows.trim() ? slugFromRows.trim() : null,
+      });
 
     if (topArtists.length >= 12) break;
   }

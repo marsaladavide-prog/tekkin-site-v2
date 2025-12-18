@@ -1,24 +1,58 @@
+import { redirect } from "next/navigation";
+import { createClient } from "@/utils/supabase/server";
+
 import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
 import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
 import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
-import {
-  getArtistDetail,
-  type ArtistDetailResponse,
-} from "@/lib/artist/discovery/getArtistDetail";
+import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
-import { EditArtistProfileButton } from "../components/EditArtistProfileButton";
+import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
+
+export const dynamic = "force-dynamic";
 
 type Props = {
-  params: Promise<{ artistId: string }>;
+  params: { slug: string };
 };
 
-export default async function ArtistDiscoveryPage({ params }: Props) {
-  const { artistId } = await params;
+export default async function ArtistSlugPage({ params }: Props) {
+  const slug = (params.slug ?? "").trim();
+  if (!slug) redirect("/charts");
+
+  const supabase = await createClient();
+
+  // slug -> artistId (pubblico)
+  const { data: artistRow, error: artistErr } = await supabase
+    .from("artists")
+    .select("id, slug, is_public")
+    .eq("slug", slug)
+    .eq("is_public", true)
+    .maybeSingle();
+
+  if (artistErr || !artistRow?.id) {
+    return (
+      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold text-tekkin-text">
+            Artista non trovato
+          </h1>
+          <p className="text-sm text-tekkin-muted">
+            Controlla il link o riprova più tardi.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const artistId = artistRow.id as string;
 
   const detail = await getArtistDetail(artistId);
 
-  const fetchError = detail.error ?? null;
+  // Se lo slug canonico è diverso, redirect
+  if (detail.artist_slug && detail.artist_slug !== slug) {
+    redirect(`/@${detail.artist_slug}`);
+  }
 
+  const fetchError = detail.error ?? null;
   if (fetchError) {
     return (
       <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">

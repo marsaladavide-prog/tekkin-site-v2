@@ -48,6 +48,19 @@ export function mapChartsAnyToTrackItem(x: any): TrackItem | null {
         : typeof x?.coverUrl === "string"
         ? x.coverUrl
         : null,
+    artistId:
+      typeof x?.artist_id === "string"
+        ? x.artist_id
+        : typeof x?.artistId === "string"
+        ? x.artistId
+        : null,
+
+    artistSlug:
+      typeof x?.artist_slug === "string"
+        ? x.artist_slug
+        : typeof x?.artistSlug === "string"
+        ? x.artistSlug
+        : null,
 
     mixType:
       x?.mix_type === "premaster" || x?.mix_type === "master"

@@ -58,6 +58,8 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
         title: track.title ?? "Untitled",
         subtitle: track.artistName ?? "Tekkin",
         audioUrl: track.audioUrl,
+        artistId: track.artistId ?? undefined,
+        artistSlug: track.artistSlug ?? undefined,
       });
 
       fetch("/api/tracks/played", {
@@ -69,23 +71,20 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
     [play]
   );
 
-  const handleToggleLike = useCallback(async (track: TrackItem) => {
-    const vid = track.versionId ?? (track as any)?.version_id;
-    if (!vid) return;
+  const handleToggleLike = useCallback(async (versionId: string) => {
+    if (!versionId) return;
 
-    // optimistic update
     setLikesMap((prev) => {
-      const cur = prev[vid] ?? { likedByMe: Boolean(track.likedByMe), likesCount: Number(track.likesCount ?? 0) };
-      // C) handleToggleLike
-      const nextLiked = !cur.likedByMe;
-      const nextLikes = Math.max(0, cur.likesCount + (nextLiked ? 1 : -1));
-      return { ...prev, [vid]: { likedByMe: nextLiked, likesCount: nextLikes } };
+      const current = prev[versionId] ?? { likedByMe: false, likesCount: 0 };
+      const nextLiked = !current.likedByMe;
+      const nextLikes = Math.max(0, current.likesCount + (nextLiked ? 1 : -1));
+      return { ...prev, [versionId]: { likedByMe: nextLiked, likesCount: nextLikes } };
     });
 
     const res = await fetch("/api/tracks/toggle-like", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version_id: vid }),
+      body: JSON.stringify({ version_id: versionId }),
     });
 
     const json = await res.json().catch(() => null);
@@ -94,8 +93,10 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
 
     setLikesMap((prev) => ({
       ...prev,
-      // C) risposta server
-      [vid]: { likedByMe: Boolean((json as any)?.liked), likesCount: Number((json as any)?.likes_count ?? 0) },
+      [versionId]: {
+        likedByMe: Boolean((json as any)?.liked),
+        likesCount: Number((json as any)?.likes_count ?? 0),
+      },
     }));
   }, []);
 

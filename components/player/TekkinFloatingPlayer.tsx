@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useCallback } from "react";
 import { Pause, Play, X } from "lucide-react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
@@ -35,6 +36,7 @@ export function TekkinFloatingPlayer() {
   const seekToSeconds = useTekkinPlayer((s) => s.seekToSeconds);
   const setVolume = useTekkinPlayer((s) => s.setVolume);
   const toggleMute = useTekkinPlayer((s) => s.toggleMute);
+  const artistSlug = useTekkinPlayer((s) => s.artistSlug);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -216,7 +218,17 @@ export function TekkinFloatingPlayer() {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{title || "Preview"}</div>
-              <div className="truncate text-xs text-white/60">{subtitle}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate text-xs text-white/60">{subtitle}</span>
+                {artistSlug && (
+                  <Link
+                    className="text-xs font-semibold text-white/60 hover:text-white"
+                    href={`/@${artistSlug}`}
+                  >
+                    Go to artist
+                  </Link>
+                )}
+              </div>
             </div>
 
             <button

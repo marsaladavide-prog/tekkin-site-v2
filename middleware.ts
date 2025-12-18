@@ -1,23 +1,25 @@
-// middleware.ts (ROOT)
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // match: /@handle
+  // "/@slug" -> "/u/slug"
   if (pathname.startsWith("/@")) {
-    const handle = pathname.slice(2);
-    if (handle.length > 0) {
-      const url = req.nextUrl.clone();
-      url.pathname = `/u/${handle}`;
-      return NextResponse.rewrite(url);
-    }
+    const slug = pathname.slice(2);
+    if (!slug) return NextResponse.next();
+
+    const url = req.nextUrl.clone();
+    url.pathname = `/u/${slug}`;
+    return NextResponse.rewrite(url);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/:path*"],
+  matcher: [
+    // tutte le route, esclusi asset Next e api
+    "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+  ],
 };

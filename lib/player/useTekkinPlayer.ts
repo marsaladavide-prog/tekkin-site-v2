@@ -12,6 +12,8 @@ export type PlayPayload = {
   subtitle?: string;
   audioUrl: string; // signed url, può cambiare
   duration?: number;
+  artistId?: string | null;
+  artistSlug?: string | null;
 };
 
 type TekkinPlayerState = {
@@ -25,6 +27,8 @@ type TekkinPlayerState = {
   title: string;
   subtitle: string;
   audioUrl: string | null;
+  artistId: string | null;
+  artistSlug: string | null;
 
   duration: number;
   currentTime: number;
@@ -83,6 +87,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
   title: "",
   subtitle: "",
   audioUrl: null,
+  artistId: null,
+  artistSlug: null,
 
   duration: 0,
   currentTime: 0,
@@ -170,6 +176,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
         isOpen: true,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
+        artistId: payload.artistId ?? st.artistId,
+        artistSlug: payload.artistSlug ?? st.artistSlug,
       });
 
       if (!st.isPlaying) {
@@ -186,6 +194,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",
+      artistId: payload.artistId ?? null,
+      artistSlug: payload.artistSlug ?? null,
       audioUrl: payload.audioUrl,
       duration: safePositive(payload.duration),
       currentTime: 0,
@@ -208,6 +218,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
         pendingSeekRatio: r,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
+        artistId: payload.artistId ?? st.artistId,
+        artistSlug: payload.artistSlug ?? st.artistSlug,
       });
 
       // retrigger play solo se non stai già suonando
@@ -229,6 +241,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",
+      artistId: payload.artistId ?? null,
+      artistSlug: payload.artistSlug ?? null,
       audioUrl: payload.audioUrl,
       duration: safePositive(payload.duration),
       currentTime: 0,
@@ -264,6 +278,8 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       currentTime: 0,
       pendingSeekRatio: null,
       lastLoadedVersionId: null,
+      artistId: null,
+      artistSlug: null,
     });
   },
 

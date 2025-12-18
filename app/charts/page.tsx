@@ -175,6 +175,24 @@ export default async function ChartsPageRoute() {
     registeredArtists = artistProfiles ?? [];
   }
 
+  const slugByUserId = new Map<string, string>();
+  if (ownerUserIds.length > 0) {
+    const { data: slugRows, error: slugRowsErr } = await supabase
+      .from("artists")
+      .select("user_id, slug")
+      .in("user_id", ownerUserIds);
+
+    if (slugRowsErr) {
+      console.error("[charts] artist slugs error:", slugRowsErr);
+    } else {
+      slugRows?.forEach((row) => {
+        if (row?.user_id && typeof row.slug === "string" && row.slug.trim()) {
+          slugByUserId.set(row.user_id, row.slug.trim());
+        }
+      });
+    }
+  }
+
   // 3) Arricchiamo le righe chart con artist_id/artist_name reali
   const profileByUserId = new Map<string, RegisteredArtistProfile>();
   registeredArtists.forEach((p) => {
@@ -185,10 +203,12 @@ export default async function ChartsPageRoute() {
     const uid = ownerByProjectId.get(r.project_id) ?? null;
     const prof = uid ? profileByUserId.get(uid) : null;
 
+    const slug = uid ? slugByUserId.get(uid) ?? null : null;
     return {
       ...r,
       artist_id: uid ?? r.artist_id ?? null,
       artist_name: (prof?.artist_name ?? r.artist_name ?? null) as string | null,
+      artist_slug: slug,
       cover_url: r.cover_url ?? null,
       __artist_avatar_url: (prof?.avatar_url ?? prof?.photo_url ?? null) as string | null,
       plays: playsByVersionId.get(r.version_id ?? "") ?? 0,

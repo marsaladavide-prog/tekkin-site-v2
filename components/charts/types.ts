@@ -5,6 +5,7 @@ export type ChartSnapshotEntry = {
   track_title: string | null;
   artist_name: string | null;
   artist_id?: string | null;
+  artist_slug?: string | null;
   cover_url: string | null;
   audio_url: string | null;
   mix_type: string | null;
@@ -21,6 +22,7 @@ export type TopArtistSummary = {
   ig_profile_picture?: string | null;
   artist_photo_url?: string | null;
   spotify_followers?: number | null;
+  artist_slug?: string | null;
 };
 
 export type ChartTopArtist = {
@@ -28,6 +30,7 @@ export type ChartTopArtist = {
   name: string;
   avatarUrl?: string | null;
   score?: number | null;
+  slug?: string | null;
 };
 
 export type ChartPlaylistHighlight = {

@@ -8,6 +8,8 @@ export type TrackItem = {
   title: string;
   artistName: string | null;
   coverUrl: string | null;
+  artistId?: string | null;
+  artistSlug?: string | null;
 
   // audio (in charts può non esserci sempre: se vuoi zero errori, rendilo nullable)
   audioUrl: string | null;

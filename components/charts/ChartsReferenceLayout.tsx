@@ -13,6 +13,7 @@ type ChartRow = {
   track_title: string | null;
   artist_name: string | null;
   artist_id?: string | null;
+  artist_slug?: string | null;
   cover_url: string | null;
   audio_url: string | null;
   mix_type: string | null;
@@ -49,13 +50,17 @@ export default function ChartsReferenceLayout(props: {
   const open = useTekkinPlayer((s) => s.open);
 
   const topArtists = useMemo(() => {
-    const map = new Map<string, { name: string; image?: string | null }>();
+    const map = new Map<
+      string,
+      { name: string; image?: string | null; slug?: string | null }
+    >();
     for (const r of props.globalSnapshots) {
       const id = r.artist_id ?? r.artist_name ?? "unknown";
       if (map.has(id)) continue;
       map.set(id, {
         name: safeText(r.artist_name, "Unknown Artist"),
         image: r.cover_url ?? null,
+        slug: r.artist_slug ?? null,
       });
       if (map.size >= 10) break;
     }
@@ -101,11 +106,17 @@ export default function ChartsReferenceLayout(props: {
 
                   <div className="flex gap-5 overflow-x-auto pb-2">
                     {topArtists.map((a) => (
-                      <Link
-                        key={a.id}
-                        href={a.id ? `/artist/discovery/${a.id}` : "/charts"}
-                        className="group flex w-[112px] shrink-0 flex-col items-center gap-2"
-                      >
+                    <Link
+                      key={a.id}
+                      href={
+                        a.slug
+                          ? `/@${a.slug}`
+                          : a.id
+                          ? `/artist/discovery/${a.id}`
+                          : "/charts"
+                      }
+                      className="group flex w-[112px] shrink-0 flex-col items-center gap-2"
+                    >
                         <div className="h-[92px] w-[92px] overflow-hidden rounded-full bg-white/5 ring-1 ring-white/10 transition group-hover:ring-white/20">
                           {a.image ? (
                             <img src={a.image} alt={a.name} className="h-full w-full object-cover" loading="lazy" />

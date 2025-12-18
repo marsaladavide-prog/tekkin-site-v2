@@ -1,74 +1,176 @@
-// app/u/[handle]/page.tsx
+import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import type { TrackItem } from "@/lib/tracks/types";
-import PublicArtistClient from "./PublicArtistClient";
+
+import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
+import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
+import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
+import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
+
+import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
+import type { Artist, ArtistRankView } from "@/types/tekkinRank";
 
 export const dynamic = "force-dynamic";
 
-export default async function UserPage({
-  params,
-}: {
-  params: { handle: string };
-}) {
+type Props = {
+  params: Promise<{ handle: string }>;
+};
+
+export default async function PublicArtistPage({ params }: Props) {
+  const { handle } = await params;
+  const slug = (handle ?? "").trim();
+  if (!slug) redirect("/charts");
+
   const supabase = await createClient();
 
-  const { data: artist, error } = await supabase
+  const { data: artistRow, error: artistErr } = await supabase
     .from("artists")
-    .select("id, artist_name, slug, ig_profile_picture, main_genre")
-    .eq("slug", params.handle)
+    .select("id, slug, is_public")
+    .eq("slug", slug)
     .eq("is_public", true)
     .maybeSingle();
 
-  if (error) {
-    console.error(error);
+  if (artistErr || !artistRow?.id) {
+    return (
+      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold text-tekkin-text">
+            Artista non trovato
+          </h1>
+          <p className="text-sm text-tekkin-muted">
+            Controlla il link o riprova più tardi.
+          </p>
+        </div>
+      </main>
+    );
   }
 
+  const artistId = artistRow.id as string;
+
+  const detail = await getArtistDetail(artistId);
+
+  const fetchError = detail.error ?? null;
+  if (fetchError) {
+    return (
+      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold text-tekkin-text">Errore</h1>
+          <p className="text-sm text-tekkin-muted">{fetchError}</p>
+        </div>
+      </main>
+    );
+  }
+
+  const artist = detail.artist;
   if (!artist) {
-    return <div>Artista non trovato</div>;
+    return (
+      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
+        <div className="max-w-md text-center space-y-3">
+          <h1 className="text-xl font-semibold text-tekkin-text">
+            Artista non trovato
+          </h1>
+          <p className="text-sm text-tekkin-muted">
+            Controlla il link o riprova più tardi.
+          </p>
+        </div>
+      </main>
+    );
   }
 
-  // 1B) Chiamata RPC aggiornata
-  const { data: rows } = await supabase.rpc("tekkin_artist_public_tracks_v1", {
-    p_slug: params.handle,
-  });
+  const genres =
+    Array.isArray(artist.main_genres) && artist.main_genres.length > 0
+      ? artist.main_genres.filter(Boolean)
+      : [];
 
-  // 3C) Mappa tracce in TrackItem[]
-  const items: TrackItem[] = (rows ?? []).map((row: any) => ({
-    versionId: row.version_id,
-    title: row.track_title ?? "Untitled",
-    artistName: row.artist_name ?? null,
-    coverUrl: row.cover_url ?? null,
-    audioUrl: row.audio_url ?? "",
-    audioPath: row.audio_path ?? null,
-    likesCount: Number(row.likes_count ?? 0),
-    likedByMe: Boolean(row.liked_by_me ?? false),
-    // ...altri campi se servono...
+  const mainGenreLabel = genres[0] ?? null;
+
+  const locationParts = [artist.city, artist.country].filter(Boolean);
+  const locationBase =
+    locationParts.length > 0 ? locationParts.join(" · ") : null;
+
+  const locationLabel =
+    locationBase && artist.open_to_collab
+      ? `${locationBase} · Open to collab`
+      : locationBase || (artist.open_to_collab ? "Open to collab" : null);
+
+  const instagramUrl = artist.instagram_username
+    ? `https://instagram.com/${artist.instagram_username}`
+    : null;
+
+  const rankArtist: Artist = {
+    id: artist.id,
+    artist_name: artist.artist_name ?? "Artista Tekkin",
+    artist_photo_url: artist.artist_photo_url,
+    artist_genre: mainGenreLabel,
+    artist_link_source: undefined,
+    spotify_url: artist.spotify_url ?? null,
+    beatport_url: artist.beatport_url ?? null,
+  };
+
+  const rankView: ArtistRankView | null = detail.rank
+    ? { artist: rankArtist, rank: detail.rank as any, metrics: detail.metrics }
+    : null;
+
+  const highlightReleases = (detail.releases ?? []).map((rel) => ({
+    id: rel.id,
+    title: rel.title,
+    releaseDate: rel.release_date ?? "",
+    coverUrl: rel.cover_url,
+    spotifyUrl: rel.spotify_url,
+    albumType: rel.album_type,
   }));
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold">{artist.artist_name}</h1>
-        <p className="text-sm text-[var(--muted)]">@{artist.slug}</p>
-      </div>
+    <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
+      <div className="w-full max-w-5xl mx-auto space-y-8">
+        <ArtistProfileHeader
+          artistId={artistId}
+          artistName={artist.artist_name || "Artista Tekkin"}
+          mainGenreLabel={mainGenreLabel}
+          locationLabel={locationLabel}
+          avatarUrl={artist.artist_photo_url}
+          spotifyUrl={artist.spotify_url ?? null}
+          beatportUrl={artist.beatport_url ?? null}
+          instagramUrl={instagramUrl}
+          presskitUrl={artist.presskit_link ?? null}
+        />
 
-      {/* Tekkin DNA card (placeholder) */}
-      <div className="mb-10 rounded-2xl border border-white/10 bg-white/5 p-6">
-        <div className="text-xs tracking-widest text-[var(--muted)]">TEKKIN DNA</div>
-        <div className="mt-2 text-sm text-[var(--muted)]">
-          Qui metti fingerprint e highlights (A)
+        <div className="flex justify-center mt-3">
+          <EditArtistProfileButton artistId={artist.id} />
         </div>
-      </div>
 
-      {items.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-[var(--muted)]">
-          Nessuna traccia pubblica. Pubblica una versione master dal tuo workspace per apparire qui e in /charts.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <PublicArtistClient initialItems={items} />
-        </div>
-      )}
-    </div>
+        <TekkinRankSection overrideData={rankView ?? undefined} />
+
+        <section className="mt-6">
+          <ReleasesHighlights releases={highlightReleases} />
+        </section>
+
+        {genres.length > 1 && (
+          <section className="space-y-2">
+            <h2 className="text-xs font-mono uppercase tracking-[0.16em] text-tekkin-muted">
+              Generi
+            </h2>
+            <div className="flex flex-wrap gap-2 text-[11px] font-mono">
+              {genres.map((genre) => (
+                <span
+                  key={genre}
+                  className="px-3 py-1 rounded-full border border-tekkin-border text-tekkin-muted uppercase tracking-[0.14em]"
+                >
+                  {genre.replace(/_/g, " ")}
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="space-y-3">
+          <h2 className="text-xs font-mono uppercase tracking-[0.16em] text-tekkin-muted">
+            Bio
+          </h2>
+          <p className="text-sm leading-relaxed text-tekkin-text/90 whitespace-pre-line">
+            {artist.bio_short || "Nessuna bio inserita."}
+          </p>
+        </section>
+      </div>
+    </main>
   );
 }

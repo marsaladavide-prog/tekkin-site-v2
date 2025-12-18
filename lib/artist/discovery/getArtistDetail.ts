@@ -33,6 +33,7 @@ export type ArtistDetailResponse = {
     album_type: string | null;
   }[];
   error: string | null;
+  artist_slug: string | null;
 };
 
 export async function getArtistDetail(artistId: string): Promise<ArtistDetailResponse> {
@@ -43,6 +44,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank: null,
       releases: [],
       error: "ID artista non valido",
+      artist_slug: null,
     };
   }
 
@@ -80,6 +82,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         rank: null,
         releases: [],
         error: "Errore caricando l'artista",
+        artist_slug: null,
       };
     }
 
@@ -135,11 +138,25 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         rank: null,
         releases: [],
         error: "Artista non trovato",
+        artist_slug: null,
       };
     }
 
     const profileId = profileData.id;
     const profileUserId = profileData.user_id ?? profileId;
+
+    let artistSlug: string | null = null;
+    const { data: slugRow, error: slugError } = await supabase
+      .from("artists")
+      .select("slug")
+      .or(`id.eq.${profileId},user_id.eq.${profileUserId}`)
+      .maybeSingle();
+
+    if (slugError) {
+      console.error("[getArtistDetail] artist slug error:", slugError);
+    } else if (slugRow?.slug) {
+      artistSlug = slugRow.slug;
+    }
 
     const artist = {
       id: profileData.id,
@@ -288,6 +305,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank,
       releases,
       error: null,
+      artist_slug: artistSlug,
     };
   } catch (err) {
     console.error("[getArtistDetail] unexpected error:", err);
@@ -297,6 +315,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank: null,
       releases: [],
       error: "Errore interno del server",
+      artist_slug: null,
     };
   }
 }

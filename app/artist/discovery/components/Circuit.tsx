@@ -16,6 +16,7 @@ type CircuitArtist = {
   country: string | null;
   open_to_collab: boolean;
   open_to_promo: boolean;
+  slug?: string | null;
 };
 
 export function Circuit() {
@@ -120,7 +121,13 @@ export function Circuit() {
             return (
               <Link
                 key={a.id}
-                href={`/artist/discovery/${a.id}`}
+                href={
+                  a.slug
+                    ? `/@${a.slug}`
+                    : a.id
+                    ? `/artist/discovery/${a.id}`
+                    : "/artist/discovery"
+                }
                 className="block rounded-lg border bg-background p-4 text-sm space-y-1 hover:border-primary/60 transition-colors"
               >
                 <div className="flex items-center justify-between">

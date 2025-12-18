@@ -13,6 +13,8 @@ export function playTrack(item: TrackItem) {
     audioUrl: item.audioUrl,
     title: item.title,
     subtitle: item.artistName ?? "",
+    artistId: item.artistId ?? undefined,
+    artistSlug: item.artistSlug ?? undefined,
   });
 
   st.play();
