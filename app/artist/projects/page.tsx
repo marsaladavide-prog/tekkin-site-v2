@@ -16,6 +16,9 @@ import { TEKKIN_MIX_TYPES, TekkinMixType } from "@/lib/constants/genres";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { WaveformBands } from "@/types/analyzer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
+import TrackRow from "@/components/tracks/TrackRow";
+import type { TrackItem } from "@/lib/tracks/types";
+import ProjectsClient from "./ProjectsClient";
 
 type ProjectVersionRow = {
   id: string;
@@ -578,6 +581,35 @@ export default function ProjectsPage() {
 const previewVersion = latestVersion;
 const visTarget = latestVersion; // puoi anche eliminarlo se non serve più
 const previewVersionId = latestVersion?.id ?? null;
+
+            const trackItemBase: TrackItem | null =
+  previewVersionId && previewVersion
+    ? {
+        versionId: previewVersionId,
+        title: p.title,
+        artistName: null,
+        coverUrl: p.cover_url ?? null,
+        audioUrl: "",
+        mixType: previewVersion.mix_type ?? null,
+
+        scorePublic:
+          typeof previewVersion.overall_score === "number"
+            ? previewVersion.overall_score
+            : null,
+
+        plays: null,
+
+        visibility:
+          previewVersion.visibility === "public"
+            ? "public"
+            : previewVersion.visibility === "private_with_secret_link"
+            ? "private_with_secret_link"
+            : "private",
+
+        likesCount: 0,
+        likedByMe: false,
+      }
+    : null;
 
 
             const serverPeaks = previewVersion?.waveform_peaks ?? null;

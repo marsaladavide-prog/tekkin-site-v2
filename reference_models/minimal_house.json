@@ -3,7 +3,7 @@
   "samples_count": 44,
   "files_total": 44,
   "skipped": 0,
-  "built_at": "2025-12-14T18:15:58.475340+00:00",
+  "built_at": "2025-12-17T23:38:29.475796+00:00",
   "engine": "essentia",
   "sr": 44100,
   "bands_schema": [
@@ -112,32 +112,28 @@
   },
   "features_stats": {
     "lufs": {
-      "mean": null,
-      "std": null
+      "mean": -13.50940281472643,
+      "std": 1.8683196656563132
     },
     "bpm": {
       "mean": 124.9387149810791,
       "std": 7.267336523139582
     },
     "key_confidence": {
-      "mean": 0.8608038168061863,
-      "std": 0.05986531307612992
+      "mean": 0.8608038059689782,
+      "std": 0.059865315741813564
     },
     "spectral_centroid_hz": {
-      "mean": null,
-      "std": null
+      "mean": 2626.6511363636364,
+      "std": 866.5033113827927
     },
     "spectral_rolloff_hz": {
-      "mean": null,
-      "std": null
-    },
-    "spectral_bandwidth_hz": {
-      "mean": null,
-      "std": null
+      "mean": 8763.485227272728,
+      "std": 2087.0796468015137
     },
     "spectral_flatness": {
-      "mean": null,
-      "std": null
+      "mean": 0.05691363636363636,
+      "std": 0.02119982408706058
     },
     "zero_crossing_rate": {
       "mean": 0.045447216901336365,
@@ -146,9 +142,9 @@
   },
   "features_percentiles": {
     "lufs": {
-      "p10": null,
-      "p50": null,
-      "p90": null
+      "p10": -16.749881925882644,
+      "p50": -13.030053271264254,
+      "p90": -11.523220869491249
     },
     "bpm": {
       "p10": 114.5152801513672,
@@ -157,33 +153,38 @@
     },
     "key_confidence": {
       "p10": 0.7679422557353973,
-      "p50": 0.8583526909351349,
+      "p50": 0.8583526611328125,
       "p90": 0.926922744512558
     },
     "spectral_centroid_hz": {
-      "p10": null,
-      "p50": null,
-      "p90": null
+      "p10": 1315.321,
+      "p50": 2799.33,
+      "p90": 3686.8790000000004
     },
     "spectral_rolloff_hz": {
-      "p10": null,
-      "p50": null,
-      "p90": null
-    },
-    "spectral_bandwidth_hz": {
-      "p10": null,
-      "p50": null,
-      "p90": null
+      "p10": 5720.849999999999,
+      "p50": 9108.005000000001,
+      "p90": 11110.008
     },
     "spectral_flatness": {
-      "p10": null,
-      "p50": null,
-      "p90": null
+      "p10": 0.03234,
+      "p50": 0.051699999999999996,
+      "p90": 0.09109000000000002
     },
     "zero_crossing_rate": {
       "p10": 0.019426040588514798,
       "p50": 0.04708705069941341,
       "p90": 0.07025766156976747
+    }
+  },
+  "features_dropped": {
+    "lra": {
+      "count": 0,
+      "coverage": 0.0
+    },
+    "true_peak_db": {
+      "count": 0,
+      "coverage": 0.0
     }
   },
   "tracks_jsonl": "minimal_house.tracks.jsonl"

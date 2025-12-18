@@ -142,6 +142,28 @@ export function TekkinFloatingPlayer() {
     }
   }, [volume, isMuted]);
 
+  // driver progress robusto (evita timeupdate che a volte non aggiorna)
+  useEffect(() => {
+    if (!isOpen || !audioUrl) return;
+
+    let raf = 0;
+
+    const tick = () => {
+      const a = audioRef.current;
+      if (a) {
+        const t = Number.isFinite(a.currentTime) ? a.currentTime : 0;
+        setCurrentTime(t);
+
+        const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+        if (d > 0) setDuration(d);
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [isOpen, audioUrl, setCurrentTime, setDuration]);
+
   // driver di playback: playRequestId è il "trigger", audioUrl è la sorgente
   useEffect(() => {
     const a = audioRef.current;
@@ -183,7 +205,7 @@ export function TekkinFloatingPlayer() {
     };
 
     void run();
-  }, [playRequestId, audioUrl, isOpen, setCurrentTime]);
+  }, [playRequestId, audioUrl, isOpen, setCurrentTime, setDuration, setIsPlaying]);
 
   if (!isOpen || !audioUrl) return null;
 

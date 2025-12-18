@@ -105,42 +105,47 @@ def load_audio(path: str, target_sr: int = 44100) -> Tuple[np.ndarray, np.ndarra
 
 def loudness_ebu(y_stereo: np.ndarray, sr: int) -> Dict[str, Any]:
     """
-    Loudness e True Peak calcolati su MID (mono) per stabilità.
+    Loudness stabile per reference models.
+    Usa pyloudnorm (EBU R128) sul MID.
+    True peak: non calcolato qui (None) per evitare mismatch Essentia nel container.
     """
-    if not _ESSENTIA or es is None:
+    if y_stereo is None or not isinstance(y_stereo, np.ndarray):
         return {"integrated_lufs": None, "lra": None, "true_peak_db": None}
 
-    # y_stereo: (ch,n) con ch=1 o 2
     if y_stereo.ndim != 2 or y_stereo.shape[1] < 32:
         return {"integrated_lufs": None, "lra": None, "true_peak_db": None}
 
+    # MID (mono)
     if y_stereo.shape[0] >= 2:
-        mid = np.ascontiguousarray((y_stereo[0] + y_stereo[1]) * 0.5, dtype=np.float32)
+        mid = (y_stereo[0] + y_stereo[1]) * 0.5
     else:
-        mid = np.ascontiguousarray(y_stereo[0], dtype=np.float32)
+        mid = y_stereo[0]
+
+    mid = np.ascontiguousarray(mid, dtype=np.float64)
 
     integrated_lufs = None
     lra_v = None
-    try:
-        ebu = es.LoudnessEBUR128(sampleRate=int(sr))
-        integrated, lra, momentary, short_term = ebu(mid)  # ordine corretto
-        if integrated is not None and np.isfinite(integrated):
-            integrated_lufs = float(integrated)
-        if lra is not None and np.isfinite(lra):
-            lra_v = float(lra)
-    except Exception:
-        pass
 
-    true_peak_db = None
+    # 1) pyloudnorm (consigliato e stabile)
     try:
-        tp = es.TruePeakDetector(sampleRate=int(sr))
-        tp_db = float(tp(mid))
-        if np.isfinite(tp_db):
-            true_peak_db = tp_db
-    except Exception:
-        pass
+        import pyloudnorm as pyln  # type: ignore
+        meter = pyln.Meter(int(sr))  # EBU R128
+        integrated_lufs = float(meter.integrated_loudness(mid))
+        # pyloudnorm non dà LRA direttamente in modo semplice e consistente qui
+        lra_v = None
+    except Exception as e:
+        print(f"[WARN] pyloudnorm failed: {type(e).__name__}: {e}")
 
-    return {"integrated_lufs": integrated_lufs, "lra": lra_v, "true_peak_db": true_peak_db}
+    # 2) ultimo fallback: RMS dB (non è LUFS, ma evita null)
+    if integrated_lufs is None:
+        try:
+            rms = float(np.sqrt(np.mean(mid ** 2)))
+            if rms > 0:
+                integrated_lufs = 20.0 * float(np.log10(rms))
+        except Exception:
+            pass
+
+    return {"integrated_lufs": integrated_lufs, "lra": lra_v, "true_peak_db": None}
 
 
 def mean_std(values: List[float]) -> Dict[str, float | None]:
@@ -175,17 +180,19 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
     band_series: Dict[str, List[float]] = {k: [] for k, _, _ in BAND_DEFS_V2}
     feat_series: Dict[str, List[float]] = {
         "lufs": [],
+        "lra": [],
+        "true_peak_db": [],
         "bpm": [],
         "key_confidence": [],
         "spectral_centroid_hz": [],
         "spectral_rolloff_hz": [],
-        "spectral_bandwidth_hz": [],
         "spectral_flatness": [],
         "zero_crossing_rate": [],
     }
 
     used = 0
     skipped = 0
+
 
     with open(tracks_jsonl, "w", encoding="utf-8") as f:
         for path in files:
@@ -196,19 +203,23 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
                 print(f"[SKIP] load failed: {path} | {exc}")
                 continue
 
-            loud = loudness_ebu(y_stereo=y_stereo, sr=_sr)
+            # Calcola loudness reference
+            loud = loudness_ebu(y_stereo, _sr)
 
             try:
                 extras = analyze_v4_extras(
                     y_mono=y_mono,
                     y_stereo=y_stereo,
                     sr=_sr,
-                    loudness_stats=None,
                 )
             except Exception as exc:
                 skipped += 1
                 print(f"[SKIP] analyze failed: {path} | {exc}")
                 continue
+
+            lufs = loud.get("integrated_lufs")
+            lra = loud.get("lra")
+            peak_db = loud.get("true_peak_db")
 
             spectral = extras.get("spectral") or {}
             bands_db = spectral.get("bands_db")
@@ -226,7 +237,6 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
                     band_series[k].append(float(v))
 
             # features
-            lufs = loud.get("integrated_lufs")
             if lufs is not None and np.isfinite(lufs):
                 feat_series["lufs"].append(float(lufs))
 
@@ -238,23 +248,59 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
             if kc is not None and np.isfinite(kc):
                 feat_series["key_confidence"].append(float(kc))
 
+            spectral_feat = extras.get("spectral") or {}
+            if not isinstance(spectral_feat, dict):
+                spectral_feat = {}
+
+            def _pick_num(*vals):
+                for x in vals:
+                    if x is None:
+                        continue
+                    try:
+                        xf = float(x)
+                        if np.isfinite(xf):
+                            return xf
+                    except Exception:
+                        continue
+                return None
+
+            # spectral features: prefer nested extras["spectral"], fallback top-level
             for key in [
                 "spectral_centroid_hz",
                 "spectral_rolloff_hz",
-                "spectral_bandwidth_hz",
                 "spectral_flatness",
-                "zero_crossing_rate",
             ]:
-                v = extras.get(key)
-                if v is not None and np.isfinite(v):
-                    feat_series[key].append(float(v))
+                v = _pick_num(spectral_feat.get(key), extras.get(key))
+                if v is not None:
+                    feat_series[key].append(v)
+
+            # zcr: often top-level, but keep fallback
+            zcr = _pick_num(extras.get("zero_crossing_rate"), spectral_feat.get("zero_crossing_rate"))
+            if zcr is not None:
+                feat_series["zero_crossing_rate"].append(zcr)
+
+            # loudness extras from analyzer
+            lra_v = _pick_num(lra)
+            tp_v = _pick_num(peak_db)
+            if "lra" not in feat_series:
+                feat_series["lra"] = []
+            if "true_peak_db" not in feat_series:
+                feat_series["true_peak_db"] = []
+            if lra_v is not None:
+                feat_series["lra"].append(lra_v)
+            if tp_v is not None:
+                feat_series["true_peak_db"].append(tp_v)
 
             rec = {
                 "genre": genre,
                 "path": path,
                 "sr": _sr,
                 "engine": "essentia",
-                "loudness": loud,
+                "loudness": {
+                    "integrated_lufs": lufs,
+                    "lra": lra,
+                    "true_peak_db": peak_db,
+                },
                 "bpm": extras.get("bpm"),
                 "bpm_confidence": extras.get("bpm_confidence"),
                 "key": extras.get("key"),
@@ -264,15 +310,34 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
                     "band_norm": {k: band_norm.get(k) for k, _, _ in BAND_DEFS_V2},
                 },
                 "features": {
-                    "spectral_centroid_hz": extras.get("spectral_centroid_hz"),
-                    "spectral_rolloff_hz": extras.get("spectral_rolloff_hz"),
-                    "spectral_bandwidth_hz": extras.get("spectral_bandwidth_hz"),
-                    "spectral_flatness": extras.get("spectral_flatness"),
-                    "zero_crossing_rate": extras.get("zero_crossing_rate"),
+                    "integrated_lufs": lufs,
+                    "lra": lra,
+                    "true_peak_db": peak_db,
+                    "spectral_centroid_hz": (spectral_feat.get("spectral_centroid_hz") if isinstance(spectral_feat, dict) else None)
+                    or extras.get("spectral_centroid_hz"),
+                    "spectral_rolloff_hz": (spectral_feat.get("spectral_rolloff_hz") if isinstance(spectral_feat, dict) else None)
+                    or extras.get("spectral_rolloff_hz"),
+                    "spectral_flatness": (spectral_feat.get("spectral_flatness") if isinstance(spectral_feat, dict) else None)
+                    or extras.get("spectral_flatness"),
+                    "zero_crossing_rate": zcr,
                 },
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             used += 1
+
+    # drop features that are mostly missing
+    min_coverage = 0.6  # 60% dei sample devono avere un valore
+    kept_feat: Dict[str, List[float]] = {}
+    dropped: Dict[str, Dict[str, float]] = {}
+
+    for k, vals in feat_series.items():
+        coverage = (len(vals) / used) if used > 0 else 0.0
+        if coverage >= min_coverage:
+            kept_feat[k] = vals
+        else:
+            dropped[k] = {"count": len(vals), "coverage": coverage}
+
+    feat_series = kept_feat
 
     model = {
         "profile_key": genre,
@@ -287,6 +352,7 @@ def build_genre(genre: str, in_dir: str, out_dir: str, sr: int) -> None:
         "bands_norm_percentiles": {k: percentiles(v) for k, v in band_series.items()},
         "features_stats": {k: mean_std(v) for k, v in feat_series.items()},
         "features_percentiles": {k: percentiles(v) for k, v in feat_series.items()},
+        "features_dropped": dropped,
         "tracks_jsonl": os.path.basename(tracks_jsonl),
     }
 

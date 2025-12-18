@@ -1,10 +1,10 @@
 "use client";
 
-"use client";
-
 import { ChartSnapshotEntry } from "@/components/charts/types";
-import { Play } from "lucide-react";
-import { useCallback } from "react";
+import TrackRow from "@/components/tracks/TrackRow";
+import { mapChartsAnyToTrackItem } from "@/lib/tracks/mapChartsRowToTrackItem";
+import type { TrackItem } from "@/lib/tracks/types";
+import { useCallback, useMemo, useState } from "react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 
 type ChartsSplitBoardProps = {
@@ -12,36 +12,88 @@ type ChartsSplitBoardProps = {
   qualityItems?: ChartSnapshotEntry[];
 };
 
-export default function ChartsSplitBoard({
-  globalItems,
-  qualityItems,
-}: ChartsSplitBoardProps) {
+export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSplitBoardProps) {
   const safeGlobal = Array.isArray(globalItems) ? globalItems : [];
   const safeQuality = Array.isArray(qualityItems) ? qualityItems : [];
 
-  const player = useTekkinPlayer();
+  console.log("[charts] sample item", safeGlobal?.[0]);
+
+  const play = useTekkinPlayer((s) => s.play);
+
+  const [likesMap, setLikesMap] = useState<Record<string, { liked: boolean; likes: number }>>({});
+
+  const mergedGlobal = useMemo(() => {
+    return safeGlobal.map((t: any) => {
+      const vid = (t as any)?.versionId ?? (t as any)?.version_id;
+      const local = vid ? likesMap[vid] : null;
+      return local ? { ...t, liked: local.liked, likes: local.likes } : t;
+    });
+  }, [safeGlobal, likesMap]);
+
+  const mergedQuality = useMemo(() => {
+    return safeQuality.map((t: any) => {
+      const vid = (t as any)?.versionId ?? (t as any)?.version_id;
+      const local = vid ? likesMap[vid] : null;
+      return local ? { ...t, liked: local.liked, likes: local.likes } : t;
+    });
+  }, [safeQuality, likesMap]);
+
+  const globalTracks = mergedGlobal
+    .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
+    .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track));
+
+  const qualityTracks = mergedQuality
+    .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
+    .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track));
 
   const handlePlay = useCallback(
-    (entry: ChartSnapshotEntry) => {
-      if (!entry.audio_url) return;
-      player.open({
-        projectId: entry.project_id,
-        versionId: entry.version_id,
-        title: entry.track_title ?? "Untitled",
-        subtitle: entry.artist_name ?? "Tekkin",
-        audioUrl: entry.audio_url,
+    (track: TrackItem, entry?: ChartSnapshotEntry | null) => {
+      if (!track.audioUrl || !track.versionId) return;
+
+      play({
+        projectId: entry?.project_id ?? track.versionId,
+        versionId: track.versionId,
+        title: track.title ?? "Untitled",
+        subtitle: track.artistName ?? "Tekkin",
+        audioUrl: track.audioUrl,
       });
 
-      if (entry.version_id) {
-        fetch("/api/tracks/played", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ version_id: entry.version_id }),
-        }).catch(() => null);
-      }
+      fetch("/api/tracks/played", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version_id: track.versionId }),
+      }).catch(() => null);
     },
-    [player]
+    [play]
   );
+
+  const handleToggleLike = useCallback(async (track: TrackItem) => {
+    const vid = track.versionId ?? (track as any)?.version_id;
+    if (!vid) return;
+
+    // optimistic update
+    setLikesMap((prev) => {
+      const cur = prev[vid] ?? { liked: Boolean(track.liked), likes: Number(track.likes ?? 0) };
+      const nextLiked = !cur.liked;
+      const nextLikes = Math.max(0, cur.likes + (nextLiked ? 1 : -1));
+      return { ...prev, [vid]: { liked: nextLiked, likes: nextLikes } };
+    });
+
+    const res = await fetch("/api/tracks/toggle-like", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version_id: vid }),
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok || !json) return;
+
+    setLikesMap((prev) => ({
+      ...prev,
+      [vid]: { liked: Boolean((json as any)?.liked), likes: Number((json as any)?.likes_count ?? 0) },
+    }));
+  }, []);
 
   return (
     <section className="w-full">
@@ -59,62 +111,25 @@ export default function ChartsSplitBoard({
             </span>
           </div>
           <div className="mt-4 max-h-[520px] overflow-y-auto">
-            <div className="divide-y divide-white/10">
-              {safeGlobal.map((item) => (
-                <div
-                  key={`global-${item.version_id ?? item.rank_position}`}
-                  className="flex items-center justify-between gap-3 px-2 py-3 transition hover:bg-white/5"
-                >
-                  <div className="flex items-center gap-4">
-                    <button
-                      type="button"
-                      onClick={() => handlePlay(item)}
-                      disabled={!item.audio_url}
-                      className={[
-                        "grid h-8 w-8 place-items-center rounded-full border border-white/10 transition",
-                        item.audio_url
-                          ? "bg-white/5 text-white hover:bg-white/10"
-                          : "cursor-not-allowed bg-white/5/30 text-white/30",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      aria-label={`Play ${item.track_title ?? "Untitled"}`}
-                    >
-                      <Play className="h-4 w-4" />
-                    </button>
-                    <span className="text-base font-semibold text-orange-400">
-                      {item.rank_position}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 overflow-hidden rounded-xl bg-white/5 ring-1 ring-white/10">
-                        {item.cover_url ? (
-                          <img
-                            src={item.cover_url}
-                            alt={item.track_title ?? "cover"}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.4em] text-white/50">
-                            No Art
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-white">
-                          {item.track_title ?? "Untitled"}
-                        </p>
-                        <p className="text-[11px] uppercase tracking-[0.3em] text-white/50">
-                          {item.artist_name ?? "Unknown Artist"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-sm font-semibold text-white/60">
-                    {item.score_public?.toFixed(1) ?? "--"} pts
-                  </p>
-                </div>
-              ))}
+            <div className="flex flex-col gap-2">
+              {globalTracks.map(({ entry, track }, idx) => {
+                const v = likesMap[track.versionId];
+                const merged = v
+                  ? { ...track, likes: v.likes ?? track.likes, liked: v.liked ?? track.liked }
+                  : track;
+
+                return (
+                <TrackRow
+                  key={`global-${track.versionId}-${entry.rank_position ?? idx}`}
+                  item={merged}
+                  indexLabel={idx + 1}
+                  variant="row"
+                  showMetrics
+                  onPlay={() => handlePlay(merged, entry)}
+                  onToggleLike={() => handleToggleLike(merged)}
+                />
+              );
+              })}
             </div>
           </div>
         </div>
@@ -125,28 +140,25 @@ export default function ChartsSplitBoard({
               Tekkin Quality
             </p>
           </div>
-          <div className="mt-4 flex flex-col gap-3">
-            {safeQuality.map((item) => (
-              <div
-                key={`quality-${item.version_id ?? item.rank_position}`}
-                className="flex items-center justify-between gap-3 rounded-xl bg-white/5 px-3 py-2 text-sm text-white/80 ring-1 ring-white/10"
-              >
-                <span className="text-lg font-semibold text-orange-400">
-                  {item.rank_position}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-white">
-                    {item.track_title ?? "Untitled"}
-                  </p>
-                  <p className="truncate text-xs text-white/60">
-                    {item.artist_name ?? "Unknown Artist"}
-                  </p>
-                </div>
-                <span className="text-xs text-white/60">
-                  {item.score_public?.toFixed(1) ?? "--"} pts
-                </span>
-              </div>
-            ))}
+          <div className="mt-4 flex flex-col gap-2">
+            {qualityTracks.map(({ entry, track }, idx) => {
+              const v = likesMap[track.versionId];
+              const merged = v
+                ? { ...track, likes: v.likes ?? track.likes, liked: v.liked ?? track.liked }
+                : track;
+
+              return (
+                <TrackRow
+                  key={`quality-${track.versionId}-${entry.rank_position ?? idx}`}
+                  item={merged}
+                  indexLabel={idx + 1}
+                  variant="row"
+                  showMetrics
+                  onPlay={() => handlePlay(merged, entry)}
+                  onToggleLike={() => handleToggleLike(merged)}
+                />
+              );
+            })}
           </div>
         </div>
       </div>

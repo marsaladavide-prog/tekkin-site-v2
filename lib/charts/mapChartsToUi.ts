@@ -174,12 +174,22 @@ export function mapChartsToUi(
   const globalTop100 = safeRows
     .filter((row) => row.profile_key === "global")
     .sort((a, b) => a.rank_position - b.rank_position)
-    .slice(0, 100);
+    .slice(0, 100)
+    .map((r) => ({
+      ...r,
+      likes: (r as any).likes ?? 0,
+      liked: Boolean((r as any).liked),
+    }));
 
   const qualityTop10 = safeRows
     .filter((row) => row.profile_key === "quality")
     .sort((a, b) => a.rank_position - b.rank_position)
-    .slice(0, 10);
+    .slice(0, 10)
+    .map((r) => ({
+      ...r,
+      likes: (r as any).likes ?? 0,
+      liked: Boolean((r as any).liked),
+    }));
 
   return {
     periodStart: period?.period_start ?? null,

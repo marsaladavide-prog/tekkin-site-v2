@@ -41,3 +41,4 @@ venv/
 # TypeScript build info
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+references/

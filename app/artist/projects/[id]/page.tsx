@@ -40,6 +40,7 @@ audio_path: string | null;  // path nel bucket tracks
   analyzer_ai_summary?: string | null;
   analyzer_ai_actions?: AnalyzerAiAction[] | null;
   analyzer_ai_meta?: AnalyzerAiMeta | null;
+  analyzed_at?: string | null;
 
   waveform_peaks?: number[] | null;
   waveform_duration?: number | null;
@@ -95,7 +96,13 @@ function guessContentType(file: File) {
 async function buildSignedUrlFromStoragePath(path: string) {
   const supabase = createClient();
   const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 60 * 30);
-  if (error || !data?.signedUrl) throw new Error("Signed URL non disponibile");
+
+  if (error || !data?.signedUrl) {
+    const msg = String((error as any)?.message ?? "");
+    if (msg.toLowerCase().includes("object not found")) return null;
+    throw new Error("Signed URL non disponibile");
+  }
+
   return data.signedUrl;
 }
 
@@ -137,6 +144,13 @@ export default function ProjectDetailPage() {
 
       const supabase = createClient();
 
+      const url = new URL(window.location.href);
+      const pageProjectId = url.pathname.split("/").pop() ?? null;
+      console.log("[loadProject] pageProjectId:", pageProjectId);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log("[loadProject] session user id:", sessionData?.session?.user?.id ?? null);
+
       const { data, error } = await supabase
         .from("projects")
         .select(
@@ -154,16 +168,37 @@ export default function ProjectDetailPage() {
           )
         `
         )
-        .eq("id", projectId)
-        .single();
+        .eq("id", pageProjectId)
+        .maybeSingle();
 
       if (error || !data) {
-        console.error("loadProject error:", error);
+        const errObj = error
+          ? {
+              name: (error as any).name,
+              message: (error as any).message,
+              code: (error as any).code,
+              details: (error as any).details,
+              hint: (error as any).hint,
+              status: (error as any).status,
+            }
+          : null;
+
+        console.error(
+          "[loadProject] failed pageProjectId=" +
+            String(pageProjectId) +
+            " hasError=" +
+            String(Boolean(error)) +
+            " dataIsNull=" +
+            String(data == null)
+        );
+        console.error("[loadProject] error=" + JSON.stringify(errObj));
+        console.error("[loadProject] data=" + JSON.stringify(data));
         setProject(null);
         setLoading(false);
         setErrorMsg("Project non trovato o errore nel caricamento.");
         return;
       }
+
 
       const p = data as unknown as ProjectRow;
       p.project_versions = Array.isArray(p.project_versions) ? p.project_versions : [];
@@ -626,62 +661,76 @@ const path = rawPath;
                   {versions.map((v) => {
                     const isSel = v.id === selectedVersion.id;
                     const versionLabel = v.version_name ?? "Versione";
+                    const isAnalyzed = Boolean(v.analyzer_json) || v.lufs != null;
+
                     return (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => {
-                          // cambiamo versione "selezionata" via URL (così resta shareable)
-                          const url = new URL(window.location.href);
-                          url.searchParams.set("version_id", v.id);
-                          window.history.replaceState({}, "", url.toString());
-                          // trigger preview url load
-                          void ensurePreviewUrl(v);
-                          // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
-                          setProject((prev) => (prev ? { ...prev } : prev));
-                        }}
-                        className={[
-                          "w-full text-left rounded-2xl border px-4 py-3 transition",
-                          isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-sm text-white truncate">{versionLabel}</div>
-                            <div className="mt-1 text-[11px] text-white/55">
-                              {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
+                      <div key={v.id} className="space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // cambiamo versione "selezionata" via URL (così resta shareable)
+                            const url = new URL(window.location.href);
+                            url.searchParams.set("version_id", v.id);
+                            window.history.replaceState({}, "", url.toString());
+                            // trigger preview url load
+                            void ensurePreviewUrl(v);
+                            // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
+                            setProject((prev) => (prev ? { ...prev } : prev));
+                          }}
+                          className={[
+                            "w-full text-left rounded-2xl border px-4 py-3 transition",
+                            isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
+                          ].join(" ")}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm text-white truncate">{versionLabel}</div>
+                              <div className="mt-1 text-[11px] text-white/55">
+                                {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-2 text-[11px] text-white/60">
-                              {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
-                              {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
-                            </div>
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Elimina versione ${versionLabel}`}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                setDeleteVersionError(null);
-                                setConfirmDeleteVersion(v);
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 text-[11px] text-white/60">
+                                {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
+                                {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                              </div>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Elimina versione ${versionLabel}`}
+                                onClick={(event) => {
                                   event.preventDefault();
                                   event.stopPropagation();
                                   setDeleteVersionError(null);
                                   setConfirmDeleteVersion(v);
-                                }
-                              }}
-                              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </span>
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setDeleteVersionError(null);
+                                    setConfirmDeleteVersion(v);
+                                  }
+                                }}
+                                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
+                        {isAnalyzed && (
+  <div className="flex justify-end">
+    <Link
+      href={`/artist/analyzer/${v.id}`}
+      className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold text-cyan-300 transition hover:border-cyan-400/60 hover:bg-cyan-400/20"
+    >
+      Analyzer Report
+    </Link>
+  </div>
+)}
+
+                      </div>
                     );
                   })}
                   {!versions.length && <div className="text-sm text-white/60">Nessuna versione.</div>}

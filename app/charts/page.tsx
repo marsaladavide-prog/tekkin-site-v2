@@ -21,6 +21,7 @@ type SnapshotRow = {
   mix_type: string | null;
   rank_position: number;
   score_public: number | null;
+  plays?: number;
 };
 
 type PeriodRow = {
@@ -54,12 +55,86 @@ export default async function ChartsPageRoute() {
 
   if (snapshotsErr) console.error("[charts] snapshots error:", snapshotsErr);
 
+  const versionIds =
+    rows
+      ?.map((r) => r.version_id)
+      .filter((v): v is string => Boolean(v)) ?? [];
+
+  let playsByVersionId = new Map<string, number>();
+
+  if (versionIds.length > 0) {
+    const { data: counters } = await supabase
+      .from("tekkin_track_counters")
+      .select("version_id, plays")
+      .in("version_id", versionIds);
+
+    counters?.forEach((c) => {
+      playsByVersionId.set(c.version_id, c.plays ?? 0);
+    });
+  }
+
+  // Likes (counts + liked by current user)
+  const likesCountByVersionId = new Map<string, number>();
+  const likedSet = new Set<string>();
+
+  if (versionIds.length > 0) {
+    const { data: likeCounts } = await supabase
+      .from("track_likes_counts_v1")
+      .select("version_id, likes_count")
+      .in("version_id", versionIds);
+
+    likeCounts?.forEach((r) => {
+      likesCountByVersionId.set(r.version_id, r.likes_count ?? 0);
+    });
+
+    const { data: auth } = await supabase.auth.getUser();
+    const user = auth?.user ?? null;
+
+    if (user) {
+      const { data: myLikes } = await supabase
+        .from("track_likes")
+        .select("version_id")
+        .in("version_id", versionIds)
+        .eq("user_id", user.id);
+
+      myLikes?.forEach((r) => likedSet.add(r.version_id));
+    }
+  }
+
   const all = (rows ?? []) as SnapshotRow[];
+
+  const AUDIO_BUCKET = "tracks"; // <-- METTI IL NOME GIUSTO
+
+  const allWithSignedAudio = await Promise.all(
+    all.map(async (r) => {
+      const raw = r.audio_url?.trim();
+      if (!raw) return r;
+      if (raw.startsWith("http")) return r;
+
+      const { data, error } = await supabase.storage
+        .from(AUDIO_BUCKET)
+        .createSignedUrl(raw, 60 * 60);
+
+      if (error || !data?.signedUrl) {
+        const msg = String((error as any)?.message ?? "");
+        if (msg.toLowerCase().includes("object not found")) {
+          return { ...r, audio_url: null };
+        }
+        console.error("[charts] signed url error", { error, raw });
+        return { ...r, audio_url: null };
+      }
+
+      return { ...r, audio_url: data.signedUrl };
+    })
+  );
+
+  console.log("[charts] raw audio_url sample:", all?.[0]?.audio_url);
+  console.log("[charts] signed audio_url sample:", allWithSignedAudio?.[0]?.audio_url);
 
   // 1) Risaliamo ai proprietari dei project usando project_id -> projects.user_id
   const projectIds = Array.from(
     new Set(
-      all
+      allWithSignedAudio
         .map((r) => r.project_id)
         .filter((v): v is string => typeof v === "string" && v.length > 0)
     )
@@ -106,7 +181,7 @@ export default async function ChartsPageRoute() {
     if (p?.user_id) profileByUserId.set(p.user_id, p);
   });
 
-  const enriched = all.map((r) => {
+  const enriched = allWithSignedAudio.map((r) => {
     const uid = ownerByProjectId.get(r.project_id) ?? null;
     const prof = uid ? profileByUserId.get(uid) : null;
 
@@ -116,8 +191,13 @@ export default async function ChartsPageRoute() {
       artist_name: (prof?.artist_name ?? r.artist_name ?? null) as string | null,
       cover_url: r.cover_url ?? null,
       __artist_avatar_url: (prof?.avatar_url ?? prof?.photo_url ?? null) as string | null,
+      plays: playsByVersionId.get(r.version_id ?? "") ?? 0,
+      likes: likesCountByVersionId.get(r.version_id ?? "") ?? 0,
+      liked: likedSet.has(r.version_id ?? ""),
     };
   });
+
+  console.log("[charts] enriched audio_url sample:", enriched?.[0]?.audio_url);
 
   const uiState = mapChartsToUi(enriched as any, registeredArtists, period ?? null);
 

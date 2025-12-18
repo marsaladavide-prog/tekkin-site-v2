@@ -24,6 +24,7 @@ import { AnalyzerOverviewSection } from "./AnalyzerOverviewSection";
 import { TekkinAiPlanSection } from "./TekkinAiPlanSection";
 import { AnalyzerDetailsSection } from "./AnalyzerDetailsSection";
 import { AskAnalyzerAI } from "./AskAnalyzerAI";
+import AnalyzerLoudnessTimeline from "./AnalyzerLoudnessTimeline";
 import type { AnalyzerReadinessIntent } from "./AnalyzerReadinessTag";
 import { sortByPriority } from "./analyzerActionUtils";
 import {
@@ -117,6 +118,7 @@ type VersionRow = AnalyzerMetricsFields & {
   fix_suggestions?: FixSuggestion[] | null;
   reference_ai?: ReferenceAi | null;
   analyzer_json?: AnalyzerResult | null;
+  analyzer_arrays?: Record<string, unknown> | null;
   analyzer_ai_summary?: string | null;
   analyzer_ai_actions?: AnalyzerAiAction[] | null;
   analyzer_ai_meta?: AnalyzerAiMeta | null;
@@ -465,6 +467,15 @@ export function AnalyzerProPanel({
           matchPercent={matchPercent}
           matchLabel={matchLabel}
           matchDescription={matchDescription}
+        />
+
+        <AnalyzerLoudnessTimeline
+          momentaryLufs={
+            (version?.analyzer_arrays as any)?.momentary_lufs &&
+            Array.isArray((version?.analyzer_arrays as any).momentary_lufs)
+              ? ((version?.analyzer_arrays as any).momentary_lufs as number[])
+              : null
+          }
         />
 
         <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">

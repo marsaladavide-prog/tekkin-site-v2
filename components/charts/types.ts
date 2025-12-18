@@ -10,6 +10,9 @@ export type ChartSnapshotEntry = {
   mix_type: string | null;
   rank_position: number;
   score_public: number | null;
+  plays?: number;
+  likes?: number;
+  liked?: boolean;
 };
 
 export type TopArtistSummary = {

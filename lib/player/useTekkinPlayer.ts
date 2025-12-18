@@ -6,7 +6,7 @@ import type { RefObject } from "react";
 type AudioRef = RefObject<HTMLAudioElement | null>;
 
 export type PlayPayload = {
-  projectId: string;
+  projectId?: string | null;
   versionId: string;
   title: string;
   subtitle?: string;
@@ -15,7 +15,7 @@ export type PlayPayload = {
 };
 
 type TekkinPlayerState = {
-  open: any;
+  open: (payload: PlayPayload) => void;
   isOpen: boolean;
   isPlaying: boolean;
 
@@ -73,7 +73,7 @@ function safePositive(n: unknown): number {
 }
 
 export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
-  open: false,
+  open: (payload: PlayPayload) => get().play(payload),
   isOpen: false,
   isPlaying: false,
 
@@ -182,7 +182,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
     set({
       isOpen: true,
       isPlaying: false,
-      projectId: payload.projectId,
+      projectId: payload.projectId ?? null,
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",
@@ -225,7 +225,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
     set({
       isOpen: true,
       isPlaying: false,
-      projectId: payload.projectId,
+      projectId: payload.projectId ?? null,
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",

@@ -10,3 +10,4 @@ export * from "./AnalyzerActionGroups";
 export * from "./AskAnalyzerAI";
 export * from "./TekkinAiPlanSection";
 export * from "./TekkinScorePreview";
+export { default as AnalyzerLoudnessTimeline } from "./AnalyzerLoudnessTimeline";
