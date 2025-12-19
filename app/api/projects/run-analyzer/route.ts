@@ -218,30 +218,28 @@ if (!audioUrl && audioPath) {
     };
 
     const selectFieldsBase = [
-      "id",
-      "version_name",
-      "created_at",
-      "audio_url",
-      "lufs",
-      "overall_score",
-      "feedback",
-      "model_match_percent",
-      "analyzer_bpm",
-      "analyzer_key",
-      "analyzer_spectral_centroid_hz",
-      "analyzer_spectral_rolloff_hz",
-      "analyzer_spectral_bandwidth_hz",
-      "analyzer_spectral_flatness",
-      "analyzer_zero_crossing_rate",
-      "analyzer_reference_ai",
-      "fix_suggestions",
-      "analyzer_json",
-      // Se NON hai questa colonna, rimuovila da qui
-      "analysis_pro",
-      "waveform_peaks",
-      "waveform_duration",
-      "waveform_bands",
-    ];
+  "id",
+  "version_name",
+  "created_at",
+  "audio_url",
+  "lufs",
+  "overall_score",
+  "feedback",
+  "model_match_percent",
+  "analyzer_bpm",
+  "analyzer_key",
+  "analyzer_spectral_centroid_hz",
+  "analyzer_spectral_rolloff_hz",
+  "analyzer_spectral_bandwidth_hz",
+  "analyzer_spectral_flatness",
+  "analyzer_zero_crossing_rate",
+  "analyzer_reference_ai",
+  "fix_suggestions",
+  "analyzer_json",
+  "waveform_peaks",
+  "waveform_duration",
+  "waveform_bands",
+];
 
     const getPayload = (includeKey: boolean, includeArrays: boolean) => {
       if (includeKey && includeArrays) {
@@ -306,6 +304,15 @@ if (!audioUrl && audioPath) {
 
     console.log("[run-analyzer] saved lufs ->", (updatedVersion as any)?.lufs);
 
+    // After the update on project_versions
+const { data: checkRow } = await supabase
+  .from("project_versions")
+  .select("id, arrays_blob_path")
+  .eq("id", versionId)
+  .maybeSingle();
+
+console.log("[run-analyzer] db arrays_blob_path after update ->", checkRow?.arrays_blob_path);
+
     return NextResponse.json(
       { ok: true, version: updatedVersion, analyzer_result: result },
       { status: 200 }
@@ -315,3 +322,4 @@ if (!audioUrl && audioPath) {
     return NextResponse.json({ error: "Errore inatteso Analyzer" }, { status: 500 });
   }
 }
+

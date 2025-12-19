@@ -76,21 +76,28 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
   const lufs = integratedFromStats ?? fallbackLufs ?? null;
 
   // --- Spectral scalars ---
+  // Fonte primaria: result.spectral (Analyzer v2)
+  // Fallback: top-level o AnalyzerResult legacy
   const spectralObj = getObj(resultObj?.["spectral"] ?? null);
+
   const spectralCentroid =
     getNum(spectralObj, "spectral_centroid_hz") ??
+    getNum(resultObj, "spectral_centroid_hz") ??
     (isAnalyzerResult(result) ? result.spectral_centroid_hz : null);
 
   const spectralRolloff =
     getNum(spectralObj, "spectral_rolloff_hz") ??
+    getNum(resultObj, "spectral_rolloff_hz") ??
     (isAnalyzerResult(result) ? result.spectral_rolloff_hz : null);
 
   const spectralBandwidth =
     getNum(spectralObj, "spectral_bandwidth_hz") ??
+    getNum(resultObj, "spectral_bandwidth_hz") ??
     (isAnalyzerResult(result) ? result.spectral_bandwidth_hz : null);
 
   const spectralFlatness =
     getNum(spectralObj, "spectral_flatness") ??
+    getNum(resultObj, "spectral_flatness") ??
     (isAnalyzerResult(result) ? result.spectral_flatness : null);
 
   // --- Model match ---
@@ -135,19 +142,20 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
       : null;
 
   // --- Other scalar descriptor ---
+  // Nel payload v2 è dentro spectral.zero_crossing_rate, il top-level può essere null
   const zeroCrossingRate =
+    getNum(spectralObj, "zero_crossing_rate") ??
     getNum(resultObj, "zero_crossing_rate") ??
     (isAnalyzerResult(result) ? result.zero_crossing_rate : null);
 
   // --- Bands norm (light) ---
   // Nota: vogliamo estrarlo anche quando NON è AnalyzerResult “typed”
-const analyzerBandsNorm =
-  resultObj
-    ? extractBandsNormFromAnalyzer(resultObj)
-    : isAnalyzerResult(result)
-    ? extractBandsNormFromAnalyzer(result)
-    : {};
-
+  const analyzerBandsNorm =
+    resultObj
+      ? extractBandsNormFromAnalyzer(resultObj)
+      : isAnalyzerResult(result)
+        ? extractBandsNormFromAnalyzer(result)
+        : {};
 
   const lra = loudnessStats ? getNum(loudnessStats, "lra") : null;
   const samplePeakDb = loudnessStats ? getNum(loudnessStats, "sample_peak_db") : null;
@@ -164,7 +172,9 @@ const analyzerBandsNorm =
     samplePeakDb,
     spectralCentroidHz: spectralCentroid,
     spectralRolloffHz: spectralRolloff,
+    spectralBandwidthHz: spectralBandwidth,
     spectralFlatness: spectralFlatness,
+    zeroCrossingRate,
     stereoWidth,
     bandsNorm: analyzerBandsNorm,
     modelMatchPercent: modelMatchPercent,
@@ -215,11 +225,27 @@ const analyzerBandsNorm =
       ? warningsRaw.filter((w): w is string => typeof w === "string")
       : [];
 
+  const spectralSummary: JsonObject = {
+    spectral_centroid_hz: spectralCentroid,
+    spectral_rolloff_hz: spectralRolloff,
+    spectral_flatness: spectralFlatness,
+    spectral_bandwidth_hz: spectralBandwidth,
+    zero_crossing_rate: zeroCrossingRate,
+  };
+
+  const analyzerProfileKey =
+    typeof resultObj?.profile_key === "string"
+      ? resultObj.profile_key
+      : typeof resultObj?.profileKey === "string"
+      ? resultObj.profileKey
+      : null;
+
   const analyzerJsonSummary: JsonObject = {
     bpm: bpmValue ?? null,
     key: analyzerKey,
     mode,
-    spectral: spectralObj ?? null,
+    profile_key: analyzerProfileKey,
+    spectral: spectralSummary,
     confidence: getObj(resultObj?.["confidence"] ?? null) ?? null,
     warnings,
     loudness_stats: loudnessStats
@@ -237,7 +263,6 @@ const analyzerBandsNorm =
         }
       : null,
   };
-
 
   return {
     lufs,
@@ -276,5 +301,12 @@ const analyzerBandsNorm =
     waveform_bands: waveformBands,
 
     analyzer_bands_norm: analyzerBandsNorm,
+
+    // Arrays (serve per timeline, spectrum, ecc)
+    // Se l’analyzer li ha caricati, NON li azzeriamo.
+    arrays_blob_path: typeof resultObj?.["arrays_blob_path"] === "string" ? resultObj["arrays_blob_path"] : null,
+    arrays_blob_size_bytes: typeof resultObj?.["arrays_blob_size_bytes"] === "number" ? resultObj["arrays_blob_size_bytes"] : null,
+
+    analyzer_profile_key: analyzerProfileKey,
   };
 }

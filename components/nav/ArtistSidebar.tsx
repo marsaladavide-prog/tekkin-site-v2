@@ -81,40 +81,69 @@ export default function ArtistSidebar() {
           </nav>
         </div>
 
-        <div className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-soft)] p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 overflow-hidden rounded-full bg-[var(--accent)]">
-              {artistPhoto ? (
-                <img src={artistPhoto} alt={artistName} className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.3em] text-black">
-                  {artistName.slice(0, 2).toUpperCase()}
+        <div className="space-y-4">
+          {/* Artist Profile Card - Professional Design */}
+          <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-black/40 via-black/30 to-black/50 p-5 shadow-2xl backdrop-blur-sm transition-all duration-300 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)] hover:border-cyan-400/20">
+            {/* Background glow effect */}
+            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-400/5 via-transparent to-cyan-400/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+            {/* Content */}
+            <div className="relative">
+              {/* Artist Avatar & Info */}
+              <div className="flex items-center gap-4 mb-4">
+                <div className="relative">
+                  {/* Avatar with glow */}
+                  <div className="h-12 w-12 overflow-hidden rounded-full border-2 border-cyan-400/30 shadow-lg shadow-cyan-400/20">
+                    {artistPhoto ? (
+                      <img
+                        src={artistPhoto}
+                        alt={artistName}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/20 to-cyan-300/10 text-sm font-bold uppercase tracking-[0.2em] text-cyan-300">
+                        {artistName.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  {/* Online indicator */}
+                  <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-400 border-2 border-black shadow-sm" />
                 </div>
-              )}
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-white truncate">{artistName}</h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-xs font-medium text-cyan-300 uppercase tracking-[0.1em]">
+                      {rankLabel}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/70 transition-all duration-200 hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-300"
+                  onClick={() => toggleTheme()}
+                  aria-label="Toggle theme"
+                  title={theme === "light" ? "Switch to Dark" : "Switch to Light"}
+                >
+                  <span className="text-xs font-bold">
+                    {theme === "light" ? "☀️" : "🌙"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="flex-1 h-8 rounded-lg border border-white/10 bg-white/5 text-xs font-medium text-white/70 transition-all duration-200 hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-300"
+                  onClick={() => router.push("/artist/settings/profile")}
+                >
+                  Edit Profile
+                </button>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-[var(--text)]">{artistName}</p>
-              <p className="text-xs uppercase tracking-[0.3em] text-[var(--muted)]">{rankLabel}</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              className={`flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border)] text-[var(--text-muted)] transition ${
-                theme === "light" ? "bg-[var(--accent)] text-black" : "hover:border-[var(--accent)]"
-              }`}
-              onClick={() => toggleTheme()}
-              aria-label="Toggle theme"
-            >
-              {theme === "light" ? "ƒ~?" : "ĐYOT"}
-            </button>
-            <button
-              type="button"
-              className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[var(--muted)]"
-              onClick={() => router.push("/artist/settings/profile")}
-            >
-              Profile
-            </button>
           </div>
         </div>
       </div>

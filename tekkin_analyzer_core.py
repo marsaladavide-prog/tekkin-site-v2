@@ -563,11 +563,13 @@ def analyze_track(
     w = es.Windowing(type="hann")
     centroid = es.Centroid(range=sr / 2.0)
     rolloff = es.RollOff(cutoff=0.85)
+    zcr_alg = es.ZeroCrossingRate()
     frame_size = 2048
     hop = 1024
     cents = []
     rolls = []
     flats = []
+    zcrs = []
 
     for i in range(0, max(0, len(mono) - frame_size), hop):
         frame = mono[i : i + frame_size]
@@ -575,11 +577,18 @@ def analyze_track(
         cents.append(float(centroid(sp)))
         rolls.append(float(rolloff(sp)))
         flats.append(_spectral_flatness(sp))
+        try:
+            zcrs.append(float(zcr_alg(frame)))
+        except Exception:
+            pass
 
     spectral = {
         "spectral_centroid_hz": float(np.mean(cents)) if cents else 0.0,
         "spectral_rolloff_hz": float(np.mean(rolls)) if rolls else 0.0,
         "spectral_flatness": float(np.mean(flats)) if flats else 0.0,
+        # NOTE: bandwidth in Hz is filled later using the average spectrum (more stable).
+        "spectral_bandwidth_hz": None,
+        "zero_crossing_rate": float(np.mean(zcrs)) if zcrs else 0.0,
     }
 
     # Stereo width (mid/side energy ratio)
@@ -596,6 +605,16 @@ def analyze_track(
     # B) Spettro pro (serve anche per model_match)
     freqs, spec = _band_energy_from_stft(mono, sr)
     tilt = _spectral_tilt(freqs, spec)
+
+    # Spectral bandwidth (Hz) computed from the average power spectrum.
+    # This is more stable than frame-by-frame spread and is already in Hz.
+    try:
+        wsum = float(np.sum(spec)) + 1e-12
+        c_hz = float(np.sum(freqs * spec) / wsum)
+        bw_hz = float(np.sqrt(np.sum(((freqs - c_hz) ** 2) * spec) / wsum))
+        spectral["spectral_bandwidth_hz"] = bw_hz
+    except Exception:
+        spectral["spectral_bandwidth_hz"] = None
     band_energy = _band_sums(freqs, spec)
     total_e = float(sum(band_energy.values())) + 1e-12
     band_energy_norm = {k: float(v / total_e) for k, v in band_energy.items()}
@@ -615,19 +634,16 @@ def analyze_track(
     waveform_peaks = _waveform_peaks(mono, sr, points=1200)
     waveform_bands = _waveform_bands(stereo, sr, points=900)
 
+    # Serialize numpy arrays to plain lists (JSON safe)
+    beats_list = []
+    try:
+        if beats is not None:
+            beats_list = [float(x) for x in list(beats)]
+    except Exception:
+        beats_list = []
+
     # Arrays blob: roba “pesante” per storage, non DB
-    arrays_blob = {
-        "loudness_stats": {
-            "momentary_lufs": loudness["momentary_lufs"],
-            "short_term_lufs": loudness["short_term_lufs"],
-        },
-        "analysis_pro": {
-            "rhythm": {
-                "beats": [float(x) for x in beats] if beats is not None else [],
-                "tempo_curve": [],
-            }
-        },
-    }
+    arrays_blob = None
 
     # -----------------------------
     # PRO METRICS (A, B, C, D, E)
@@ -701,6 +717,46 @@ def analyze_track(
         },
     }
 
+    # Arrays blob (JSON-safe) dopo che analysis_pro esiste
+    rhythm_obj = analysis_pro.get("rhythm") or {}
+    beats_arr = rhythm_obj.get("beats")
+    tempo_curve_arr = rhythm_obj.get("tempo_curve")
+
+    # numpy -> list safe (senza truthiness)
+    if beats_arr is None:
+        beats_list = []
+    else:
+        try:
+            beats_list = beats_arr.tolist()
+        except Exception:
+            beats_list = list(beats_arr)
+
+    if tempo_curve_arr is None:
+        tempo_curve_list = []
+    else:
+        try:
+            tempo_curve_list = tempo_curve_arr.tolist()
+        except Exception:
+            tempo_curve_list = list(tempo_curve_arr)
+
+    arrays_blob = {
+        "loudness_stats": {
+            "momentary_lufs": loudness.get("momentary_lufs") or [],
+            "short_term_lufs": loudness.get("short_term_lufs") or [],
+        },
+        "analysis_pro": {
+            "dynamics": analysis_pro.get("dynamics"),
+            "spectral": analysis_pro.get("spectral"),
+            "stereo": analysis_pro.get("stereo"),
+            "rhythm": {
+                "beats": beats_list,
+                "tempo_curve": tempo_curve_list,
+                "beat_histogram": rhythm_obj.get("beat_histogram"),
+            },
+            "timbre": analysis_pro.get("timbre"),
+        },
+    }
+
     return {
         "version_id": version_id,
         "project_id": project_id,
@@ -710,6 +766,8 @@ def analyze_track(
         "bpm": bpm,
         "key": key_str,
         "spectral": spectral,
+        # keep a top-level copy for Tekkin mapping (project_versions.analyzer_zero_crossing_rate)
+        "zero_crossing_rate": _safe_float(spectral.get("zero_crossing_rate")),
         "stereo_width": stereo_width,
         "confidence": {
             "bpm": beat_conf,

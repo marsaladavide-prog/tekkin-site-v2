@@ -74,6 +74,9 @@ class AnalyzeResponse(BaseModel):
     bpm: Optional[float] = None
     key: Optional[str] = None
 
+    # kept top-level so the Tekkin site can store it in project_versions.analyzer_zero_crossing_rate
+    zero_crossing_rate: Optional[float] = None
+
     spectral: dict[str, Any]
     stereo_width: Optional[float] = None
     loudness_stats: dict[str, Any]

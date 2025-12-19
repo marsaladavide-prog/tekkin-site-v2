@@ -3,6 +3,7 @@
 import { Play } from "lucide-react";
 import type { TrackItem } from "@/lib/tracks/types";
 import { playTrack } from "@/lib/player/playTrack";
+import Link from "next/link";
 
 type Variant = "row" | "compact";
 
@@ -72,7 +73,13 @@ export default function TrackRow({
           <div className="truncate text-sm font-semibold text-[var(--fg)]">{item.title}</div>
           {showArtist && (
             <div className="truncate text-xs text-[var(--muted)]">
-              {item.artistName ?? ""}
+              {item.artistSlug ? (
+                <Link href={`/@${item.artistSlug}`} className="hover:underline">
+                  {item.artistName ?? ""}
+                </Link>
+              ) : (
+                <span>{item.artistName ?? ""}</span>
+              )}
               {item.mixType ? ` · ${item.mixType}` : ""}
             </div>
           )}

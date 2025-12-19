@@ -10,9 +10,12 @@ export type AnalyzerAvailability = {
 };
 
 export type ProjectVersionLike = {
+  // DB fields reali
   lufs?: number | null;
-  bpm?: number | null;
   overall_score?: number | null;
+
+  analyzer_bpm?: number | null;
+  analyzer_key?: string | null;
 
   analyzer_arrays?: {
     momentary_lufs?: number[] | null;
@@ -21,7 +24,6 @@ export type ProjectVersionLike = {
   analyzer_bands_norm?: unknown | null;
 
   analyzer_profile_key?: string | null;
-
   reference_model_key?: string | null;
 };
 
@@ -39,10 +41,14 @@ export function getAnalyzerAvailability(
     };
   }
 
-  const hasBase =
-    typeof version.lufs === "number" &&
-    typeof version.bpm === "number" &&
-    typeof version.overall_score === "number";
+  const hasLufs = typeof version.lufs === "number";
+  const hasScore = typeof version.overall_score === "number";
+  const hasBpm = typeof version.analyzer_bpm === "number";
+  const hasKey =
+    typeof version.analyzer_key === "string" &&
+    version.analyzer_key.length > 0;
+
+  const hasBase = hasLufs && hasScore && hasBpm && hasKey;
 
   const momentary = version.analyzer_arrays?.momentary_lufs;
   const hasArrays = Array.isArray(momentary) && momentary.length > 0;

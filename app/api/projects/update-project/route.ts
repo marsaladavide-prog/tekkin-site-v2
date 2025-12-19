@@ -17,10 +17,11 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const projectId = String(body?.project_id ?? body?.id ?? "").trim();
     const title = typeof body?.title === "string" ? body.title.trim() : "";
+    const genre = typeof body?.genre === "string" ? body.genre.trim() : "";
 
-    if (!projectId || !title) {
+    if (!projectId || (!title && !genre)) {
       return NextResponse.json(
-        { error: "project_id e title sono richiesti" },
+        { error: "project_id e almeno title o genre sono richiesti" },
         { status: 400 }
       );
     }
@@ -47,11 +48,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const updateData: { title?: string; genre?: string } = {};
+    if (title) updateData.title = title;
+    if (genre) updateData.genre = genre;
+
     const { data: updatedProject, error: updateError } = await supabase
       .from("projects")
-      .update({ title })
+      .update(updateData)
       .eq("id", projectId)
-      .select("id, title")
+      .select("id, title, genre")
       .maybeSingle();
 
     if (updateError) {

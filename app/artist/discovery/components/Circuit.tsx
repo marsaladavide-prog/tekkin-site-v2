@@ -17,6 +17,7 @@ type CircuitArtist = {
   open_to_collab: boolean;
   open_to_promo: boolean;
   slug?: string | null;
+  artist_slug?: string | null;
 };
 
 export function Circuit() {
@@ -118,16 +119,21 @@ export function Circuit() {
               ? formatGenreLabel(primaryGenre)
               : "Genere non indicato";
 
+            const slugCandidate = a.artist_slug ?? a.slug;
+            const artistSlug =
+              typeof slugCandidate === "string" && slugCandidate.trim().length > 0
+                ? slugCandidate.trim()
+                : null;
+            const profileHref = artistSlug
+              ? `/@${artistSlug}`
+              : a.id
+              ? `/artist/discovery/${a.id}`
+              : "/artist/discovery";
+
             return (
               <Link
                 key={a.id}
-                href={
-                  a.slug
-                    ? `/@${a.slug}`
-                    : a.id
-                    ? `/artist/discovery/${a.id}`
-                    : "/artist/discovery"
-                }
+                href={profileHref}
                 className="block rounded-lg border bg-background p-4 text-sm space-y-1 hover:border-primary/60 transition-colors"
               >
                 <div className="flex items-center justify-between">

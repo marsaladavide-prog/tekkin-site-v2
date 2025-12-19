@@ -1,101 +1,134 @@
+export const dynamic = "force-dynamic";
 
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-
-import { AnalyzerProPanel } from "@/components/analyzer/AnalyzerProPanel";
+import AppShell from "@/components/ui/AppShell";
 import { createClient } from "@/utils/supabase/server";
 
-const PROJECT_FIELDS = `
-  *,
-  projects (
-    id,
-    user_id
-  )
-`;
+import TekkinAnalyzerPageClient from "@/components/analyzer/TekkinAnalyzerPageClient";
+import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersion";
+import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
+import type { AnalyzerPreviewData } from "@/lib/analyzer/previewAdapter";
+import type { AnalyzerCompareModel } from "@/lib/analyzer/v2/types";
 
-export default async function AnalyzerVersionPage({
+type Props = { params: Promise<{ versionId: string }> };
+
+export default async function Page({
   params,
+  searchParams,
 }: {
   params: Promise<{ versionId: string }>;
+  searchParams: Promise<{ [key: string]: string | undefined }>;
 }) {
-  const resolvedParams = params ? await params : undefined;
-  const versionId = resolvedParams?.versionId;
-  if (!versionId) {
-    notFound();
-  }
+  const { versionId } = await params;
+  const sp = await searchParams;
 
   const supabase = await createClient();
-  const { data: authData } = await supabase.auth.getUser();
-  const user = authData?.user ?? null;
+  const { data: auth } = await supabase.auth.getUser();
+  const user = auth?.user;
+  if (!user) redirect("/login");
 
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: versionRow, error } = await supabase
+  const { data: row, error } = await supabase
     .from("project_versions")
-    .select(PROJECT_FIELDS)
+    .select(`
+      id,
+      project_id,
+      version_name,
+      audio_url,
+      audio_path,
+      lufs,
+      overall_score,
+      analyzer_bpm,
+      analyzer_key,
+      analyzer_profile_key,
+      analyzer_json,
+      analyzer_bands_norm,
+      arrays_blob_path,
+      project:projects!inner(id,user_id,title,cover_url)
+    `)
     .eq("id", versionId)
     .maybeSingle();
 
-  if (!versionRow || error) {
-    notFound();
-  }
+  console.log("[ANALYZER PAGE] supabase error:", error);
+  console.log("[ANALYZER PAGE] supabase row:", row);
 
-  const project = versionRow.projects;
-  if (!project || project.user_id !== user.id) {
-    notFound();
-  }
+  if (error || !row) notFound();
 
-  const projectId = versionRow.project_id ?? project.id;
-  if (!projectId) {
-    notFound();
-  }
+  const project = Array.isArray(row.project) ? row.project[0] : row.project;
+  if (!project) notFound();
+  if (project.user_id !== user.id) notFound();
 
-  let parsedArrays: Record<string, unknown> | null = null;
-  const arraysBlobPath =
-    typeof versionRow.arrays_blob_path === "string" ? versionRow.arrays_blob_path : null;
+  let arraysJson: any | null = null;
 
-  if (arraysBlobPath) {
-    try {
-      const { data: arraysData, error: arraysError } = await supabase
-        .storage
-        .from("analyzer")
-        .download(arraysBlobPath);
+  if (row.arrays_blob_path) {
+    const { data: arr } = await supabase.storage
+      .from("tracks")
+      .download(row.arrays_blob_path);
 
-      if (!arraysError && arraysData) {
-        const text = await arraysData.text();
-        parsedArrays = JSON.parse(text);
+    if (arr) {
+      try {
+        arraysJson = JSON.parse(await arr.text());
+      } catch {
+        arraysJson = null;
       }
-    } catch {
-      parsedArrays = null;
     }
   }
 
-  const { projects: _projects, ...versionForPanel } = versionRow;
-  const versionWithArrays = {
-    ...versionForPanel,
-    analyzer_arrays: parsedArrays,
+  console.log(
+    "[ANALYZER PAGE] arrays download:",
+    row.arrays_blob_path,
+    arraysJson ? "OK" : "NULL",
+    arraysJson ? Object.keys(arraysJson) : null
+  );
+
+  console.log(
+    "[ANALYZER PAGE] analysis_pro keys:",
+    arraysJson?.analysis_pro ? Object.keys(arraysJson.analysis_pro) : null
+  );
+
+  const versionForPreview = {
+    ...(row as any),
+    analyzer_arrays: arraysJson ?? null,
   };
 
-  return (
-    <div className="w-full">
-      <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-white/50">Report</p>
-            <h1 className="text-3xl font-semibold text-white">Analyzer</h1>
-          </div>
-          <Link
-            href={`/artist/projects/${projectId}`}
-            className="text-sm font-semibold text-white/70 hover:text-white"
-          >
-            Torna al project
-          </Link>
-        </div>
+  const initialData = toPreviewDataFromVersion({
+    version: versionForPreview,
+    reference: null,
+  }) as AnalyzerPreviewData;
 
-        <AnalyzerProPanel version={versionWithArrays} />
-      </div>
-    </div>
+  const v2Model = mapVersionToAnalyzerCompareModel(versionForPreview) as AnalyzerCompareModel;
+
+  let resolvedAudioUrl: string | null = row.audio_url ?? null;
+
+  if (!resolvedAudioUrl && row.audio_path) {
+    const { data: signed, error: signedErr } = await supabase.storage
+      .from("tracks")
+      .createSignedUrl(row.audio_path, 60 * 60);
+
+    if (!signedErr) resolvedAudioUrl = signed?.signedUrl ?? null;
+  }
+
+  const track = {
+    versionId: row.id as string,
+    title: (row.version_name as string) ?? "Untitled",
+    artistName: null, // non disponibile qui
+    coverUrl: project.cover_url ?? null,
+    audioUrl: resolvedAudioUrl,
+    artistId: project.user_id ?? null,
+    artistSlug: null,
+  };
+
+  const ui = sp?.ui === "v2" ? "v2" : "v1";
+
+  // UI v2: usa il client unificato (niente AnalyzerV2Panel/ProPanel/CtaCard qui)
+  return (
+    <AppShell>
+      <TekkinAnalyzerPageClient
+        ui={ui}
+        versionId={versionId}
+        track={track}
+        initialData={initialData}
+        v2Model={v2Model}
+      />
+    </AppShell>
   );
 }

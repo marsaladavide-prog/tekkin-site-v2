@@ -16,7 +16,7 @@ export type PlayPayload = {
   artistSlug?: string | null;
 };
 
-type TekkinPlayerState = {
+export type TekkinPlayerState = {
   open: (payload: PlayPayload) => void;
   isOpen: boolean;
   isPlaying: boolean;
@@ -44,6 +44,8 @@ type TekkinPlayerState = {
 
   volume: number; // 0..1
   isMuted: boolean;
+
+  coverUrl?: string | null;
 
   setIsPlaying: (v: boolean) => void;
 

@@ -219,14 +219,15 @@ export function TekkinFloatingPlayer() {
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{title || "Preview"}</div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-xs text-white/60">{subtitle}</span>
-                {artistSlug && (
+                {artistSlug ? (
                   <Link
-                    className="text-xs font-semibold text-white/60 hover:text-white"
                     href={`/@${artistSlug}`}
+                    className="truncate text-xs text-white/60 hover:text-white hover:underline"
                   >
-                    Go to artist
+                    {subtitle}
                   </Link>
+                ) : (
+                  <span className="truncate text-xs text-white/60">{subtitle}</span>
                 )}
               </div>
             </div>
@@ -287,22 +288,46 @@ export function TekkinFloatingPlayer() {
               })()}
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-                className="w-24"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                {/* Barra principale minimal */}
+                <div className="relative h-1.5 w-24 rounded-full bg-white/20 overflow-hidden">
+                  <div 
+                    className="absolute left-0 top-0 h-full bg-gradient-to-r from-cyan-400 to-cyan-300 transition-all duration-200 ease-out"
+                    style={{ width: `${volume * 100}%` }}
+                  />
+                </div>
+                
+                {/* Thumb minimal circolare - centrato correttamente */}
+                <div 
+                  className="absolute -top-1.5 h-4 w-4 bg-cyan-400 rounded-full border border-white/50 shadow-lg transition-all duration-150 hover:scale-110 cursor-pointer"
+                  style={{ 
+                    left: `max(0px, min(calc(${volume * 100}% - 8px), 80px))`,
+                    boxShadow: '0 0 8px rgba(34, 211, 238, 0.6)'
+                  }}
+                />
+                
+                {/* Input invisibile per funzionalità */}
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={volume}
+                  onChange={(e) => setVolume(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-4 opacity-0 cursor-pointer"
+                />
+              </div>
+              
               <button
                 type="button"
                 onClick={toggleMute}
-                className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80 hover:bg-white/10"
+                className="flex items-center justify-center w-8 h-8 rounded-full border border-white/20 bg-white/5 text-white/80 hover:bg-white/10 hover:border-cyan-400/30 transition-all duration-200"
+                title={isMuted ? "Riattiva audio" : "Disattiva audio"}
               >
-                {isMuted ? "Muted" : "Sound"}
+                <span className="text-sm">
+                  {isMuted ? "🔇" : volume === 0 ? "🔊" : "🔊"}
+                </span>
               </button>
             </div>
 

@@ -8,6 +8,7 @@ type AvatarItem = {
   id: string;
   name: string | null;
   avatarUrl: string | null;
+  slug?: string;
   href?: string;
 };
 
@@ -83,19 +84,16 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
             </div>
           );
 
-          if (artist.href) {
-            return (
-              <Link
-                key={artist.id}
-                href={artist.href}
-                className="flex-shrink-0 rounded-2xl transition hover:brightness-110"
-              >
-                {content}
-              </Link>
-            );
-          }
-
-          return (
+          // Sostituisci il wrapper:
+          return artist.slug ? (
+            <Link
+              key={artist.id}
+              href={`/@${artist.slug}`}
+              className="block shrink-0"
+            >
+              {content}
+            </Link>
+          ) : (
             <div key={artist.id} className="flex-shrink-0">
               {content}
             </div>

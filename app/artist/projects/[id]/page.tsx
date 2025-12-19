@@ -5,10 +5,11 @@
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import { useParams, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import { TEKKIN_MIX_TYPES, type TekkinMixType, type TekkinGenreId, getTekkinGenreLabel } from "@/lib/constants/genres";
+import { uploadProjectCover, MAX_COVER_SIZE_BYTES } from "@/lib/projects/uploadCover";
 import type { AnalyzerMetricsFields, AnalyzerRunResponse, AnalyzerResult, FixSuggestion, ReferenceAi, AnalyzerAiAction, AnalyzerAiCoach, AnalyzerAiMeta } from "@/types/analyzer";
 import type { WaveformBands } from "@/types/analyzer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
@@ -134,6 +135,9 @@ export default function ProjectDetailPage() {
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<ProjectVersionRow | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
   const [deleteVersionError, setDeleteVersionError] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
 
   const loadProject = useCallback(async () => {
     if (!projectId) return;
@@ -277,6 +281,42 @@ const path = rawPath;
     const f = e.target.files?.[0] ?? null;
     setFile(f);
   };
+
+  const openCoverPicker = useCallback(() => {
+    coverInputRef.current?.click();
+  }, []);
+
+  const handleCoverInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFile = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!selectedFile || !projectId) return;
+
+      if (!selectedFile.type.startsWith("image/")) {
+        setCoverError("Seleziona un'immagine valida.");
+        return;
+      }
+
+      if (selectedFile.size > MAX_COVER_SIZE_BYTES) {
+        setCoverError("L'immagine supera il limite di 5 MB.");
+        return;
+      }
+
+      setCoverError(null);
+      setCoverUploading(true);
+
+      try {
+        const { coverUrl } = await uploadProjectCover(projectId, selectedFile);
+        setProject((prev) => (prev ? { ...prev, cover_url: coverUrl } : prev));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Errore caricamento cover.";
+        setCoverError(msg);
+      } finally {
+        setCoverUploading(false);
+      }
+    },
+    [projectId]
+  );
 
   const handleUploadVersion = async (e: FormEvent) => {
     e.preventDefault();
@@ -490,15 +530,52 @@ const path = rawPath;
       {!loading && project && (
         <>
           <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-xl font-semibold text-white truncate">{project.title}</div>
-                <div className="mt-1 text-sm text-white/60">
-                  {profileLabel} · {versions.length} versione{versions.length === 1 ? "" : "i"}
+            <div className="flex flex-wrap items-start justify-between gap-6">
+              <div className="flex flex-1 min-w-0 items-start gap-6">
+                <div className="flex flex-col items-center gap-2">
+                  <div className="relative h-36 w-36 overflow-hidden rounded-3xl border border-white/15 bg-white/5">
+                    {project.cover_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={project.cover_url} alt={`${project.title} cover`} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-[11px] text-white/60">
+                        <span>Cover</span>
+                        <span>mancante</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center gap-1 text-center">
+                    <button
+                      type="button"
+                      onClick={openCoverPicker}
+                      disabled={coverUploading}
+                      className="rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300 hover:text-white disabled:opacity-60"
+                    >
+                      {coverUploading ? "Uploading..." : project.cover_url ? "Cambia cover" : "Aggiungi cover"}
+                    </button>
+                    <p className="text-[11px] text-white/50">PNG/JPG ? max 5 MB</p>
+                  </div>
+                  <input
+                    ref={coverInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleCoverInputChange}
+                  />
+                  {coverError && <p className="text-[11px] text-red-300">{coverError}</p>}
+                </div>
+
+                <div className="flex flex-1 min-w-0 flex-col gap-2">
+                  <div>
+                    <div className="text-xl font-semibold text-white truncate">{project.title}</div>
+                    <div className="mt-1 text-sm text-white/60">
+                      {profileLabel} ? {versions.length} versione{versions.length === 1 ? "" : "i"}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 {latestVersion?.lufs != null && (
                   <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
                     {latestVersion.lufs.toFixed(1)} LUFS
@@ -512,6 +589,7 @@ const path = rawPath;
               </div>
             </div>
           </header>
+
 
           {/* Upload new version */}
           <section className="rounded-3xl border border-white/10 bg-black/55 p-5 mb-6">

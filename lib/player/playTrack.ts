@@ -14,7 +14,8 @@ export function playTrack(item: TrackItem) {
     title: item.title,
     subtitle: item.artistName ?? "",
     artistId: item.artistId ?? undefined,
-    artistSlug: item.artistSlug ?? undefined,
+    artistSlug: item.artistSlug ?? null,
+    coverUrl: item.coverUrl ?? null,
   });
 
   st.play();

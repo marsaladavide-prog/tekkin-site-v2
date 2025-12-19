@@ -1,57 +1,26 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
 
 import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
 import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
 import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
+import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
+
 import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
-import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
 
 export const dynamic = "force-dynamic";
 
 type Props = {
-  params: { slug: string };
+  params: { artistId: string };
 };
 
-export default async function ArtistSlugPage({ params }: Props) {
-  const slug = (params.slug ?? "").trim();
-  if (!slug) redirect("/charts");
-
-  const supabase = await createClient();
-
-  // slug -> artistId (pubblico)
-  const { data: artistRow, error: artistErr } = await supabase
-    .from("artists")
-    .select("id, slug, is_public")
-    .eq("slug", slug)
-    .eq("is_public", true)
-    .maybeSingle();
-
-  if (artistErr || !artistRow?.id) {
-    return (
-      <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
-        <div className="max-w-md text-center space-y-3">
-          <h1 className="text-xl font-semibold text-tekkin-text">
-            Artista non trovato
-          </h1>
-          <p className="text-sm text-tekkin-muted">
-            Controlla il link o riprova più tardi.
-          </p>
-        </div>
-      </main>
-    );
+export default async function DiscoveryArtistPage({ params }: Props) {
+  const artistId = (params.artistId ?? "").trim();
+  if (!artistId) {
+    redirect("/charts");
   }
-
-  const artistId = artistRow.id as string;
 
   const detail = await getArtistDetail(artistId);
-
-  // Se lo slug canonico è diverso, redirect
-  if (detail.artist_slug && detail.artist_slug !== slug) {
-    redirect(`/@${detail.artist_slug}`);
-  }
-
   const fetchError = detail.error ?? null;
   if (fetchError) {
     return (
@@ -127,7 +96,7 @@ export default async function ArtistSlugPage({ params }: Props) {
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
       <div className="w-full max-w-5xl mx-auto space-y-8">
         <ArtistProfileHeader
-          artistId={artistId}
+          artistId={artist.id}
           artistName={artist.artist_name || "Artista Tekkin"}
           mainGenreLabel={mainGenreLabel}
           locationLabel={locationLabel}

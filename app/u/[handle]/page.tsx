@@ -8,6 +8,7 @@ import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditA
 
 import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
+import type { TrackItem } from "@/lib/tracks/types";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,36 @@ export default async function PublicArtistPage({ params }: Props) {
     coverUrl: rel.cover_url,
     spotifyUrl: rel.spotify_url,
     albumType: rel.album_type,
+  }));
+
+  const { data: tracks } = await supabase
+    .from("project_versions")
+    .select(`
+      id,
+      project_id,
+      track_title,
+      audio_url,
+      cover_url,
+      score_public,
+      visibility,
+      projects!inner (
+        artist_id,
+        title
+      )
+    `)
+    .eq("projects.artist_id", artist.id)
+    .eq("visibility", "public")
+    .order("score_public", { ascending: false });
+
+  const items: TrackItem[] = (tracks ?? []).map((v) => ({
+    versionId: v.id,
+    title: v.track_title ?? "Untitled",
+    artistName: artist.artist_name,
+    coverUrl: v.cover_url,
+    audioUrl: v.audio_url,
+    scorePublic: v.score_public,
+    likesCount: 0,
+    likedByMe: false,
   }));
 
   return (

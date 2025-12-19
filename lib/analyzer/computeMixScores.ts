@@ -53,7 +53,9 @@ export function computeMixScores(args: {
   samplePeakDb: number | null;
   spectralCentroidHz: number | null;
   spectralRolloffHz: number | null;
+  spectralBandwidthHz?: number | null;
   spectralFlatness: number | null;
+  zeroCrossingRate?: number | null;
   stereoWidth: number | null;
   bandsNorm: BandsNorm;
   modelMatchPercent: number | null;
