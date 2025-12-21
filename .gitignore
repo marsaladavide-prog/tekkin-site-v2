@@ -42,3 +42,4 @@ venv/
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 references/
+*.rar
