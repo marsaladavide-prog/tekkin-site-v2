@@ -26,6 +26,7 @@ import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { WaveformBands } from "@/types/analyzer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 import { uploadProjectCover } from "@/lib/projects/uploadCover";
+import VisibilityToggle from "@/components/projects/VisibilityToggle";
 
 type ProjectVersionRow = {
   id: string;
@@ -864,14 +865,14 @@ export default function ProjectsPage() {
               },
             ];
 
-            const handleVisibilityChange = (value: "public" | "private_with_secret_link") => {
+            const handleVisibilityChange = async (value: "public" | "private_with_secret_link") => {
               if (value === "public" && !isPublishable) {
                 if (typeof window !== "undefined") {
                   window.alert("Analizza una versione con audio prima di pubblicare.");
                 }
                 return;
               }
-              void handleSetVisibility(p.id, value);
+              await handleSetVisibility(p.id, value);
             };
 
             return (
@@ -1046,26 +1047,10 @@ export default function ProjectsPage() {
                     </button>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/70">
-                    <span className="whitespace-nowrap text-[10px] uppercase tracking-widest text-white/50">Visibilità</span>
-                    <div className="flex rounded-full border border-white/15 bg-black/30 text-[11px] shadow-[0_6px_20px_rgba(0,0,0,0.4)]">
-                      {(["private_with_secret_link", "public"] as const).map((value) => {
-                        const isActive = latestVisibility === value;
-                        return (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => handleVisibilityChange(value)}
-                            className={`px-4 py-1.5 text-[11px] font-semibold transition ${
-                              isActive
-                                ? "bg-[var(--accent)] text-black"
-                                : "bg-transparent text-white/70 hover:text-white"
-                            }`}
-                          >
-                            {value === "public" ? "Pubblico" : "Segreto"}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <VisibilityToggle
+                      value={latestVisibility}
+                      onChange={handleVisibilityChange}
+                    />
                   </div>
                 </div>
 

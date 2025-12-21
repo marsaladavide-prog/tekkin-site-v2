@@ -84,6 +84,18 @@ export async function POST(req: NextRequest) {
 
     const version = data as unknown as ProjectVersionForAsk;
 
+    // Fetch chart positions for this version
+    const { data: chartData, error: chartError } = await supabase
+      .from("tekkin_charts_latest_snapshots_v1")
+      .select("profile_key, rank_position, score_public")
+      .eq("version_id", versionId);
+
+    if (chartError) {
+      console.error("[ask] chart fetch error:", chartError);
+    }
+
+    const chartPositions = chartData ?? [];
+
     const payloadForModel = {
       version_id: version.id,
       project_id: version.project_id,
@@ -97,6 +109,7 @@ export async function POST(req: NextRequest) {
       ai_summary: version.analyzer_ai_summary,
       ai_actions: version.analyzer_ai_actions,
       ai_meta: version.analyzer_ai_meta,
+      chart_positions: chartPositions,
     };
 
     const systemPrompt = `
@@ -107,15 +120,13 @@ Ricevi:
 - dati di analisi (LUFS, BPM, overall_score)
 - reference AI (bilanciamento, bande fuori target, coerenza di genere)
 - fix_suggestions (azioni concrete applicabili)
-- riassunto AI della versione
-- la DOMANDA dell’utente
+- riassunto AI della versione- posizioni nelle charts (profile_key, rank_position, score_public)- la DOMANDA dell’utente
 
 REGOLE:
 - Rispondi SOLO alla domanda.
 - Usa esclusivamente i dati presenti nel payload.
 - NON inventare numeri, frequenze o problemi non rilevati.
-- Puoi citare bande (sub, lowmid, mid, high, air) solo se presenti nei dati.
-- Evita teoria inutile.
+- Puoi citare bande (sub, lowmid, mid, high, air) solo se presenti nei dati.- Se la domanda riguarda charts, fornisci posizione e punteggio specifici.- Evita teoria inutile.
 - Fornisci almeno un’azione immediatamente applicabile.
 
 Output: SOLO testo, nessun JSON, nessun markup.

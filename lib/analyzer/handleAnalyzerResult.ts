@@ -240,6 +240,21 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
       ? resultObj.profileKey
       : null;
 
+  // --- transients (SMALL) ---
+  // Tenuti fuori da arrays_blob per non portare su roba pesante: salviamo solo 3 numeri.
+  const arraysBlobObj = getObj(resultObj?.["arrays_blob"] ?? null);
+  const transientsObj =
+    getObj(arraysBlobObj?.["transients"] ?? null) ??
+    getObj(resultObj?.["transients"] ?? null);
+
+  const transientsSummary: JsonObject | null = transientsObj
+    ? {
+        strength: getNum(transientsObj, "strength"),
+        density: getNum(transientsObj, "density"),
+        crest_factor_db: getNum(transientsObj, "crest_factor_db"),
+      }
+    : null;
+
   const analyzerJsonSummary: JsonObject = {
     bpm: bpmValue ?? null,
     key: analyzerKey,
@@ -255,6 +270,10 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
           sample_peak_db: getNum(loudnessStats, "sample_peak_db"),
         }
       : null,
+
+    // NEW
+    transients: transientsSummary,
+
     model_match: mm && isJsonObject(mm)
       ? {
           match_ratio: getNum(mm, "match_ratio"),
@@ -305,7 +324,8 @@ export function buildAnalyzerUpdatePayload(result: AnalyzerPayloadInput) {
     // Arrays (serve per timeline, spectrum, ecc)
     // Se l’analyzer li ha caricati, NON li azzeriamo.
     arrays_blob_path: typeof resultObj?.["arrays_blob_path"] === "string" ? resultObj["arrays_blob_path"] : null,
-    arrays_blob_size_bytes: typeof resultObj?.["arrays_blob_size_bytes"] === "number" ? resultObj["arrays_blob_size_bytes"] : null,
+arrays_blob_size_bytes:
+  typeof resultObj?.["arrays_blob_size_bytes"] === "number" ? resultObj["arrays_blob_size_bytes"] : null,
 
     analyzer_profile_key: analyzerProfileKey,
   };

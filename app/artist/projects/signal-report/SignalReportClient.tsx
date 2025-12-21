@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 type SignalReportItem = {
   request_id: string;
@@ -34,6 +35,8 @@ export default function SignalReportClient({ projectId }: SignalReportClientProp
   const [items, setItems] = useState<SignalReportItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -77,6 +80,56 @@ export default function SignalReportClient({ projectId }: SignalReportClientProp
     if (!projectId) return items;
     return items.filter((item) => item.project_id === projectId);
   }, [items, projectId]);
+
+  const handleRespond = async (requestId: string, action: "accept" | "reject") => {
+    const prevItems = items;
+
+    // optimistic: aggiorna lo stato invece di rimuovere
+    setItems((curr) => curr.map((i) => i.request_id === requestId ? { ...i, status: action === "accept" ? "accepted" : "rejected" } : i));
+
+    const tId = toast.loading(action === "accept" ? "Accetto il Signal..." : "Rifiuto il Signal...");
+
+    try {
+      setRespondingId(requestId);
+      setErrorMsg(null);
+
+      const res = await fetch("/api/discovery/respond", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId, action }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        // rollback UI
+        setItems(prevItems);
+
+        const msg = data?.error ?? "Errore gestendo il Signal.";
+        setErrorMsg(msg);
+        toast.error(msg, { id: tId });
+        return;
+      }
+
+      if (action === "accept") {
+        const name = data?.sender?.artist_name ?? "Artista";
+        toast.success(`Signal accettato. Identità sbloccata: ${name}`, { id: tId });
+      } else {
+        toast.success("Signal rifiutato", { id: tId });
+      }
+    } catch (err) {
+      console.error("Signals respond unexpected:", err);
+
+      // rollback UI
+      setItems(prevItems);
+
+      setErrorMsg("Errore inatteso gestendo il Signal.");
+      toast.error("Errore inatteso gestendo il Signal.", { id: tId });
+    } finally {
+      setRespondingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">

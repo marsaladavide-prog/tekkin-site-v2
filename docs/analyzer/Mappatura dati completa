@@ -1,0 +1,290 @@
+# Tekkin Analyzer V2 – Mappatura dati completa
+
+Questo documento descrive **la mappatura attuale reale** dell’Analyzer V2 di Tekkin.
+È pensato come **single source of truth**: da dove nasce ogni valore, in quale file passa e dove viene renderizzato.
+
+---
+
+## 0) Pipeline dati (overview)
+
+### A) Analyzer – Python
+
+**File**
+
+* `tekkin_analyzer_core.py`
+* `tekkin_analyzer_api.py`
+
+**Responsabilità**
+
+* Calcolo metriche audio (bpm, key, loudness, spectral, bands, transienti, ecc.)
+* Costruzione `arrays_blob` (loudness timeline, transients, analysis_pro)
+* Upload opzionale su storage se `upload_arrays_blob=true`
+
+**Output**
+
+* JSON leggero (scalari)
+* `arrays_blob_path`
+* `arrays_blob_size_bytes`
+
+---
+
+### B) API Next – run analyzer
+
+**File**
+
+* `app/api/projects/run-analyzer/route.ts`
+
+**Responsabilità**
+
+1. Genera signed URL audio
+2. Chiama analyzer Python
+3. Costruisce payload DB (scalari)
+4. PATCH di `arrays.json` aggiungendo:
+
+   * `spectrum_db`
+   * `sound_field`
+   * `levels`
+
+---
+
+### C) Mapper DB (light)
+
+**File**
+
+* `lib/analyzer/handleAnalyzerResult.ts`
+
+**Responsabilità**
+
+* Normalizza output analyzer
+* Scrive su `project_versions`
+* Salva:
+
+  * `analyzer_json`
+  * `arrays_blob_path`
+  * `arrays_blob_size_bytes`
+  * `analyzer_bands_norm`
+  * `overall_score`
+
+---
+
+### D) Mapper UI V2
+
+**File**
+
+* `lib/analyzer/mapVersionToAnalyzerCompareModel.ts`
+
+**Responsabilità**
+
+* Prende:
+
+  * riga `project_versions`
+  * `analyzer_arrays` (arrays.json scaricato)
+  * `referenceModel`
+* Produce `AnalyzerCompareModel` (unico modello per UI V2)
+
+---
+
+### E) UI
+
+**File**
+
+* `AnalyzerV2Panel.tsx`
+* `AnalyzerV2ProPanel.tsx`
+* `types.ts`
+
+---
+
+## 1) Hero / Header
+
+### Project title
+
+* **UI**: `model.projectTitle`
+* **Source**: `version.project.title`
+
+### Version name
+
+* **UI**: `model.versionName`
+* **Source**: `version.version_name`
+
+### Mix type
+
+* **UI**: `MASTER`
+* **Source**: fisso lato mapper
+
+### BPM
+
+* **UI**: `model.bpm`
+* **Source (ordine)**:
+
+  1. `version.analyzer_bpm`
+  2. `analyzer_json.bpm`
+
+### Key
+
+* **UI**: `model.key`
+* **Source**:
+
+  1. `version.analyzer_key`
+  2. `analyzer_json.key`
+
+### LUFS (integrated)
+
+* **UI**: `model.loudness.integrated_lufs`
+* **Source**:
+
+  1. `version.lufs`
+  2. `analyzer_json.loudness_stats.integrated_lufs`
+
+### Tekkin Score
+
+* **UI**: `model.overallScore`
+* **Source**: `version.overall_score`
+
+---
+
+## 2) Tonal Balance
+
+### Bands Norm – Traccia
+
+* **UI**: `model.bandsNorm`
+* **Source (ordine)**:
+
+  1. `version.analyzer_bands_norm`
+  2. `analyzer_json.band_energy_norm`
+  3. `analyzer_json.spectral.band_norm`
+
+### Bands Percentiles – Reference
+
+* **UI**: `model.referenceBandsPercentiles`
+* **Source**: `referenceModel.bands_norm_percentiles`
+
+### Bands Norm – Reference
+
+* **UI**: `model.referenceBandsNorm`
+* **Source**:
+
+  * `referenceModel.bands_norm`
+
+---
+
+## 3) Grafici (arrays.json)
+
+Tutti i grafici V2 derivano **solo** da `arrays.json`.
+
+### Spectrum (frequency balance)
+
+* **UI**: `model.spectrumTrack`
+* **Source**:
+
+  * `arrays.spectrum_db.hz`
+  * `arrays.spectrum_db.track_db`
+
+### Spectrum – Reference
+
+* **UI**: `model.spectrumRef`
+* **Source**:
+
+  * `referenceModel.spectrum_db.hz`
+  * `referenceModel.spectrum_db.ref_db`
+
+## Sound Field (Stereo plot)
+
+### Track sound field
+- **UI**: `model.soundField`
+- **Source**: `arrays.json.sound_field`
+- **Formato**:
+  ```json
+  {
+    "angle_deg": [...],
+    "radius": [...]
+  }
+
+
+### Levels (L/R)
+
+* **UI**: `model.levels`
+* **Source**:
+
+  * `arrays.levels.channels`
+  * `arrays.levels.rms_db`
+  * `arrays.levels.peak_db`
+
+### Loudness timeline
+
+* **UI**:
+
+  * `model.momentaryLufs`
+  * `model.shortTermLufs`
+* **Source**:
+
+  * `arrays.loudness_stats.momentary_lufs`
+  * `arrays.loudness_stats.short_term_lufs`
+
+---
+
+## 4) Quick Facts
+
+### Spectral
+
+* **UI**: `model.spectral.*`
+* **Source**: `analyzer_json.spectral.*`
+
+  * centroid
+  * rolloff
+  * bandwidth
+  * flatness
+  * zero crossing rate
+
+### LRA
+
+* **UI**: `model.loudness.lra`
+* **Source**: `analyzer_json.loudness_stats.lra`
+
+---
+
+## 5) Transients
+
+### Transients model
+
+* **UI**: `model.transients`
+* **Source (ordine)**:
+
+  1. `arrays.transients`
+  2. `analyzer_json.transients`
+
+### Regola fallback (fondamentale)
+
+Se:
+
+* `strength === 0`
+* `density === 0`
+* `crestFactorDb > 0`
+
+allora:
+
+* `strength → null`
+* `density → null`
+
+Motivo: indica **calcolo fallito**, non valore reale.
+
+---
+
+## 6) Flags UI (LIVE / DATA / REF)
+
+Questi **non sono campi dati reali**.
+
+* **REF**: esiste `referenceModel`
+* **DATA / LIVE**: dipende da presenza array (`spectrumTrack`, `soundField`, `levels`)
+
+⚠️ Nota: se vengono usati fallback MOCK, il badge può risultare fuorviante.
+
+---
+
+## TL;DR (da tenere in cima al codice)
+
+* **Scalari DB** → `handleAnalyzerResult.ts`
+* **Grafici** → `arrays.json` via `arrays_blob_path`
+* **UI V2** → `mapVersionToAnalyzerCompareModel.ts`
+* **Reference** → `referenceModel`
+
+Questo è lo stato attuale coerente dell’Analyzer V2.

@@ -9,8 +9,25 @@ import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersio
 import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
 import type { AnalyzerPreviewData } from "@/lib/analyzer/previewAdapter";
 import type { AnalyzerCompareModel } from "@/lib/analyzer/v2/types";
+import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
+function extractReferenceBandsNorm(reference: any) {
+  const stats = reference?.bands_norm_stats;
+  if (!stats || typeof stats !== "object") return null;
 
-type Props = { params: Promise<{ versionId: string }> };
+  const keys = ["sub", "low", "lowmid", "mid", "presence", "high", "air"] as const;
+  const out: Record<string, number> = {};
+  let has = false;
+
+  for (const k of keys) {
+    const mean = (stats as any)?.[k]?.mean;
+    if (typeof mean === "number" && Number.isFinite(mean)) {
+      out[k] = mean;
+      has = true;
+    }
+  }
+
+  return has ? out : null;
+}
 
 export default async function Page({
   params,
@@ -20,16 +37,38 @@ export default async function Page({
   searchParams: Promise<{ [key: string]: string | undefined }>;
 }) {
   const { versionId } = await params;
+
+  const t0 = Date.now();
   const sp = await searchParams;
+  const uiParam = sp?.ui ?? null;
+
+  console.log("[ANALYZER PAGE] start", {
+    versionId,
+    uiParam,
+    at: new Date().toISOString(),
+  });
 
   const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
+
+  // AUTH
+  const tAuth = Date.now();
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  console.log("[ANALYZER PAGE] auth done", {
+    ms: Date.now() - tAuth,
+    ok: !!auth?.user && !authErr,
+    err: authErr?.message ?? null,
+    userId: auth?.user?.id ?? null,
+  });
+
   const user = auth?.user;
   if (!user) redirect("/login");
 
+  // DB
+  const tDb = Date.now();
   const { data: row, error } = await supabase
     .from("project_versions")
-    .select(`
+    .select(
+      `
       id,
       project_id,
       version_name,
@@ -40,86 +79,187 @@ export default async function Page({
       analyzer_bpm,
       analyzer_key,
       analyzer_profile_key,
+      reference_model_key,
       analyzer_json,
       analyzer_bands_norm,
       arrays_blob_path,
       project:projects!inner(id,user_id,title,cover_url)
-    `)
+    `
+    )
     .eq("id", versionId)
     .maybeSingle();
 
-  console.log("[ANALYZER PAGE] supabase error:", error);
-  console.log("[ANALYZER PAGE] supabase row:", row);
+  console.log("[ANALYZER PAGE] db done", {
+    ms: Date.now() - tDb,
+    totalMs: Date.now() - t0,
+    error: error?.message ?? null,
+    hasRow: !!row,
+    hasProject: !!(row as any)?.project,
+    arraysPath: (row as any)?.arrays_blob_path ?? null,
+    audioUrl: (row as any)?.audio_url ?? null,
+    audioPath: (row as any)?.audio_path ?? null,
+  });
 
   if (error || !row) notFound();
 
   const project = Array.isArray(row.project) ? row.project[0] : row.project;
   if (!project) notFound();
-  if (project.user_id !== user.id) notFound();
 
+  // OWNER CHECK
+  const isOwner = project.user_id === user.id;
+  console.log("[ANALYZER PAGE] ownership", {
+    ok: isOwner,
+    projectUserId: project.user_id ?? null,
+    authUserId: user.id ?? null,
+  });
+  if (!isOwner) notFound();
+
+  // ARRAYS DOWNLOAD + PARSE
   let arraysJson: any | null = null;
 
   if (row.arrays_blob_path) {
-    const { data: arr } = await supabase.storage
+    const tArr = Date.now();
+    const { data: arr, error: arrErr } = await supabase.storage
       .from("tracks")
       .download(row.arrays_blob_path);
 
-    if (arr) {
+    const downloadMs = Date.now() - tArr;
+
+    let bytes: number | null = null;
+    let parseMs: number | null = null;
+
+    if (arr && !arrErr) {
       try {
-        arraysJson = JSON.parse(await arr.text());
+        bytes = typeof arr.size === "number" ? arr.size : null;
+
+        const tParse = Date.now();
+        const txt = await arr.text();
+        arraysJson = JSON.parse(txt);
+        parseMs = Date.now() - tParse;
       } catch {
         arraysJson = null;
       }
     }
+
+    console.log("[ANALYZER PAGE] arrays", {
+      downloadMs,
+      ok: !!arr && !arrErr,
+      err: arrErr?.message ?? null,
+      path: row.arrays_blob_path,
+      bytes,
+      parseMs,
+      keys: arraysJson ? Object.keys(arraysJson) : null,
+    });
+  } else {
+    console.log("[ANALYZER PAGE] arrays", {
+      skipped: true,
+      reason: "no arrays_blob_path",
+    });
   }
 
-  console.log(
-    "[ANALYZER PAGE] arrays download:",
-    row.arrays_blob_path,
-    arraysJson ? "OK" : "NULL",
-    arraysJson ? Object.keys(arraysJson) : null
-  );
+  const effectiveReferenceKey =
+    (row as any)?.reference_model_key ?? (row as any)?.analyzer_profile_key ?? null;
 
-  console.log(
-    "[ANALYZER PAGE] analysis_pro keys:",
-    arraysJson?.analysis_pro ? Object.keys(arraysJson.analysis_pro) : null
-  );
+  const reference = effectiveReferenceKey
+    ? await loadReferenceModel(String(effectiveReferenceKey))
+    : null;
+
+  const referenceModel = reference;
+
+  const referenceBandsNorm = extractReferenceBandsNorm(reference);
 
   const versionForPreview = {
     ...(row as any),
     analyzer_arrays: arraysJson ?? null,
+    reference_model_key: effectiveReferenceKey,
+    reference_bands_norm: referenceBandsNorm,
   };
 
+  // MAPPERS
+  const tMap = Date.now();
   const initialData = toPreviewDataFromVersion({
     version: versionForPreview,
-    reference: null,
+    reference,
   }) as AnalyzerPreviewData;
 
-  const v2Model = mapVersionToAnalyzerCompareModel(versionForPreview) as AnalyzerCompareModel;
+  const v2Model = mapVersionToAnalyzerCompareModel(
+    versionForPreview,
+    referenceModel
+  ) as AnalyzerCompareModel;
 
+  console.log("[v2] transients model:", v2Model?.transients);
+
+  const aj = (versionForPreview as any).analyzer_json;
+  const parsed = typeof aj === "string" ? (() => { try { return JSON.parse(aj); } catch { return null; } })() : aj;
+
+  const hasTransientsObj = !!arraysJson?.transients && typeof arraysJson.transients === "object";
+  console.log("[page] arrays has transients obj:", hasTransientsObj);
+  console.log("[page] arrays transients:", arraysJson?.transients ?? null);
+  console.log("[page] arrays keys:", arraysJson ? Object.keys(arraysJson) : null);
+  console.log("[page] model.transients:", (v2Model as any)?.transients);
+
+  if (!arraysJson) {
+    console.log(
+      "[page] arrays missing => v2 charts (spectrum/soundfield/levels/transients) will be null"
+    );
+  }
+
+  console.log("[ANALYZER PAGE] map done", {
+    ms: Date.now() - tMap,
+    totalMs: Date.now() - t0,
+    hasInitial: !!initialData,
+    hasV2Model: !!v2Model,
+    v2Keys: v2Model ? Object.keys(v2Model as any) : null,
+  });
+
+  // AUDIO URL RESOLUTION
   let resolvedAudioUrl: string | null = row.audio_url ?? null;
 
   if (!resolvedAudioUrl && row.audio_path) {
+    const tSigned = Date.now();
     const { data: signed, error: signedErr } = await supabase.storage
       .from("tracks")
       .createSignedUrl(row.audio_path, 60 * 60);
 
+    console.log("[ANALYZER PAGE] signed url", {
+      ms: Date.now() - tSigned,
+      ok: !signedErr && !!signed?.signedUrl,
+      err: signedErr?.message ?? null,
+      hadAudioUrl: !!row.audio_url,
+      audioPath: row.audio_path ?? null,
+    });
+
     if (!signedErr) resolvedAudioUrl = signed?.signedUrl ?? null;
+  } else {
+    console.log("[ANALYZER PAGE] signed url", {
+      skipped: true,
+      reason: resolvedAudioUrl ? "already had audio_url" : "no audio_path",
+    });
   }
 
   const track = {
     versionId: row.id as string,
     title: (row.version_name as string) ?? "Untitled",
-    artistName: null, // non disponibile qui
+    artistName: null,
     coverUrl: project.cover_url ?? null,
     audioUrl: resolvedAudioUrl,
-    artistId: project.user_id ?? null,
+    artistId: row.project_id as string,
     artistSlug: null,
+    profileKey: (row.analyzer_profile_key as string) ?? null,
   };
 
-  const ui = sp?.ui === "v2" ? "v2" : "v1";
+  // UI resolve
+  const ui = uiParam === "v1" ? "v1" : "v2";
+  const sharePath = `/artist/analyzer/${versionId}?ui=${ui}`;
 
-  // UI v2: usa il client unificato (niente AnalyzerV2Panel/ProPanel/CtaCard qui)
+  console.log("[ANALYZER PAGE] end", {
+    ui,
+    sharePath,
+    totalMs: Date.now() - t0,
+    hasAudio: !!resolvedAudioUrl,
+    coverOk: !!project.cover_url,
+  });
+
   return (
     <AppShell>
       <TekkinAnalyzerPageClient
@@ -128,6 +268,7 @@ export default async function Page({
         track={track}
         initialData={initialData}
         v2Model={v2Model}
+        sharePath={sharePath}
       />
     </AppShell>
   );

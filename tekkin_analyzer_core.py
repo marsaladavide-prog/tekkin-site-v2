@@ -19,17 +19,16 @@ else:
 
 REFERENCE_MODELS_DIR = Path(__file__).resolve().parent / "reference_models"
 
+
 def _load_reference_model(profile_key: str) -> Optional[dict[str, Any]]:
     if not profile_key:
         return None
-
     key = str(profile_key).strip()
     if not key:
         return None
 
     filename = key if key.endswith(".json") else f"{key}.json"
     model_path = REFERENCE_MODELS_DIR / filename
-
     if not model_path.exists():
         return None
 
@@ -40,9 +39,20 @@ def _load_reference_model(profile_key: str) -> Optional[dict[str, Any]]:
     except Exception:
         return None
 
+
 def _require_essentia() -> None:
     if es is None:
         raise RuntimeError(f"Essentia non disponibile: {_ESSENTIA_IMPORT_ERROR}")
+
+
+def _safe_float(x: Any) -> Optional[float]:
+    try:
+        v = float(x)
+    except Exception:
+        return None
+    if not math.isfinite(v):
+        return None
+    return v
 
 
 def _db(x: float, floor: float = 1e-12) -> float:
@@ -51,11 +61,13 @@ def _db(x: float, floor: float = 1e-12) -> float:
         return float("-inf")
     return 20.0 * math.log10(max(floor, x))
 
+
 def _rms(x: np.ndarray) -> float:
     x = np.asarray(x, dtype=np.float32)
     if x.size == 0:
         return 0.0
     return float(np.sqrt(np.mean(x * x) + 1e-12))
+
 
 def _crest_db(x: np.ndarray) -> float | None:
     x = np.asarray(x, dtype=np.float32)
@@ -67,6 +79,86 @@ def _crest_db(x: np.ndarray) -> float | None:
         return None
     return _db(peak / rms)
 
+
+def _estimate_onset_count(odf: np.ndarray) -> int:
+    if odf.size < 3:
+        return 0
+
+    # basic local maxima detection with a small threshold to avoid noise
+    center = odf[1:-1]
+    neighborhood = (center > odf[:-2]) & (center > odf[2:])
+    threshold = float(np.mean(odf)) + float(np.std(odf))
+    if not math.isfinite(threshold) or threshold <= 0:
+        threshold = 0.0
+
+    density_mask = neighborhood & (center > threshold)
+    return int(np.count_nonzero(density_mask))
+
+
+def compute_transients(mono: np.ndarray, sr: int) -> dict[str, float]:
+    """
+    Transients "fast" (solo Essentia):
+    - strength: media della onset detection function (più alto = più attacchi)
+    - density: numero di onsets / secondo
+    - crest_factor_db: picco vs RMS (proxy di punch/comp)
+    """
+    _require_essentia()
+
+    x = np.asarray(mono, dtype=np.float32).reshape(-1)
+    dur = float(x.size / float(sr)) if x.size else 0.0
+    if x.size < int(sr * 0.5) or dur <= 0.0:
+        return {"strength": 0.0, "density": 0.0, "crest_factor_db": float(_crest_db(x) or 0.0)}
+
+    frame_size = 1024
+    hop = 512
+
+    w = es.Windowing(type="hann")
+    fft = es.FFT()
+    c2p = es.CartesianToPolar()
+
+    od = es.OnsetDetection(method="complex")  # richiede mag + phase
+    onsets_alg = es.Onsets(sampleRate=sr, hopSize=hop)
+
+    odf = []
+    for frame in es.FrameGenerator(x, frameSize=frame_size, hopSize=hop, startFromZero=True):
+        frame_w = w(frame)
+        spec_c = fft(frame_w)              # complesso
+        mag, phase = c2p(spec_c)           # 2 output
+        odf.append(float(od(mag, phase)))  # 2 input -> FIX
+
+    if not odf:
+        return {"strength": 0.0, "density": 0.0, "crest_factor_db": float(_crest_db(x) or 0.0)}
+
+    odf_arr = np.asarray(odf, dtype=np.float32)
+    if odf_arr.size:
+        odf_arr = np.nan_to_num(odf_arr, nan=0.0, posinf=0.0, neginf=0.0)
+
+    try:
+        onset_times = onsets_alg(odf_arr)
+        onset_count = int(len(onset_times) if onset_times is not None else 0)
+    except Exception:
+        onset_count = _estimate_onset_count(odf_arr)
+
+    strength = float(np.mean(odf_arr))
+    density = float(onset_count / max(dur, 1e-6))
+    crest = float(_crest_db(x) or 0.0)
+
+    # Safety: evita NaN/Inf che possono diventare null o rompere JSON
+    if not math.isfinite(strength):
+        strength = 0.0
+    if not math.isfinite(density):
+        density = 0.0
+    if not math.isfinite(crest):
+        crest = 0.0
+
+    # Arrotondamenti stabili per UI
+    return {
+        "strength": float(round(strength, 3)),
+        "density": float(round(density, 3)),
+        "crest_factor_db": float(round(crest, 2)),
+    }
+
+
 def _band_energy_from_stft(
     x: np.ndarray,
     sr: int,
@@ -77,24 +169,27 @@ def _band_energy_from_stft(
     if x.ndim != 1:
         x = x.reshape(-1)
     if x.size < n_fft:
-        pad = np.zeros(n_fft - x.size, dtype=np.float32)
-        x = np.concatenate([x, pad])
+        x = np.pad(x, (0, n_fft - x.size))
     window = np.hanning(n_fft).astype(np.float32)
+
     frames = 1 + (x.size - n_fft) // hop
     if frames <= 0:
         frames = 1
+
     spec_acc = None
     for i in range(frames):
         start = i * hop
-        frame = x[start:start + n_fft]
+        frame = x[start : start + n_fft]
         if frame.size < n_fft:
             frame = np.pad(frame, (0, n_fft - frame.size))
         fft = np.fft.rfft(frame * window)
         mag2 = (np.abs(fft) ** 2).astype(np.float64)
         spec_acc = mag2 if spec_acc is None else (spec_acc + mag2)
+
     spec = spec_acc / float(frames)
     freqs = np.fft.rfftfreq(n_fft, d=1.0 / float(sr))
     return freqs.astype(np.float64), spec.astype(np.float64)
+
 
 def _spectral_tilt(freqs: np.ndarray, spec: np.ndarray, fmin: float = 40.0, fmax: float = 16000.0) -> float | None:
     freqs = np.asarray(freqs, dtype=np.float64)
@@ -104,14 +199,13 @@ def _spectral_tilt(freqs: np.ndarray, spec: np.ndarray, fmin: float = 40.0, fmax
         return None
     x = np.log10(freqs[m])
     y = np.log10(spec[m])
-    # simple least squares slope
     x0 = x - np.mean(x)
     y0 = y - np.mean(y)
     denom = float(np.sum(x0 * x0))
     if denom <= 0:
         return None
-    slope = float(np.sum(x0 * y0) / denom)
-    return slope
+    return float(np.sum(x0 * y0) / denom)
+
 
 def _spectral_flatness(mag: np.ndarray, eps: float = 1e-12) -> float:
     x = np.asarray(mag, dtype=np.float32)
@@ -126,6 +220,7 @@ def _spectral_flatness(mag: np.ndarray, eps: float = 1e-12) -> float:
     am = float(np.mean(x))
     return gm / am if am > 0 else 0.0
 
+
 def _bands_hz() -> list[tuple[str, float, float]]:
     return [
         ("sub", 30.0, 60.0),
@@ -137,6 +232,7 @@ def _bands_hz() -> list[tuple[str, float, float]]:
         ("air", 10000.0, 16000.0),
     ]
 
+
 def _band_sums(freqs: np.ndarray, spec: np.ndarray) -> dict[str, float]:
     out: dict[str, float] = {}
     for name, f0, f1 in _bands_hz():
@@ -144,100 +240,11 @@ def _band_sums(freqs: np.ndarray, spec: np.ndarray) -> dict[str, float]:
         out[name] = float(np.sum(spec[m])) if np.any(m) else 0.0
     return out
 
-def _stereo_metrics_from_stft(left: np.ndarray, right: np.ndarray, sr: int) -> dict[str, Any]:
-    left = np.asarray(left, dtype=np.float32).reshape(-1)
-    right = np.asarray(right, dtype=np.float32).reshape(-1)
-    n = min(left.size, right.size)
-    if n <= 0:
-        return {"lr_correlation": None, "lr_balance_db": None, "width_by_band": None, "correlation_by_band": None}
-    l = left[:n]
-    r = right[:n]
 
-    # wideband correlation and balance
-    lc = l - float(np.mean(l))
-    rc = r - float(np.mean(r))
-    denom = float(np.sqrt(np.sum(lc * lc) * np.sum(rc * rc)) + 1e-12)
-    corr = float(np.sum(lc * rc) / denom) if denom > 0 else None
+def _as_stereo_n2(stereo: np.ndarray) -> np.ndarray:
+    s = _ensure_stereo(stereo)  # (2,n)
+    return np.ascontiguousarray(s.T, dtype=np.float32)  # (n,2)
 
-    l_rms = _rms(l)
-    r_rms = _rms(r)
-    balance_db = None
-    if l_rms > 0 and r_rms > 0:
-        balance_db = float(20.0 * math.log10((l_rms + 1e-12) / (r_rms + 1e-12)))
-
-    # per band width proxy from mid/side energy
-    mid = (l + r) * 0.5
-    side = (l - r) * 0.5
-    freqs, mid_spec = _band_energy_from_stft(mid, sr)
-    _, side_spec = _band_energy_from_stft(side, sr)
-
-    width_by_band = {}
-    for name, f0, f1 in _bands_hz():
-        m = (freqs >= f0) & (freqs < f1)
-        mid_e = float(np.sum(mid_spec[m])) if np.any(m) else 0.0
-        side_e = float(np.sum(side_spec[m])) if np.any(m) else 0.0
-        denom2 = mid_e + side_e + 1e-12
-        width_by_band[name] = float(side_e / denom2)
-
-    # per band correlation (rough)
-    freqs, lspec = _band_energy_from_stft(l, sr)
-    _, rspec = _band_energy_from_stft(r, sr)
-    corr_by_band = {}
-    for name, f0, f1 in _bands_hz():
-        m = (freqs >= f0) & (freqs < f1)
-        a = lspec[m]
-        b = rspec[m]
-        if a.size < 4:
-            corr_by_band[name] = None
-            continue
-        a0 = a - np.mean(a)
-        b0 = b - np.mean(b)
-        d = float(np.sqrt(np.sum(a0 * a0) * np.sum(b0 * b0)) + 1e-12)
-        corr_by_band[name] = float(np.sum(a0 * b0) / d) if d > 0 else None
-
-    return {
-        "lr_correlation": corr,
-        "lr_balance_db": balance_db,
-        "width_by_band": width_by_band,
-        "correlation_by_band": corr_by_band,
-    }
-
-def _mfcc_stats(mono: np.ndarray, sr: int, n_mfcc: int = 13) -> dict[str, Any] | None:
-    # Use Essentia MFCC if available, else skip.
-    if not hasattr(es, "MFCC") or not hasattr(es, "Spectrum") or not hasattr(es, "Windowing"):
-        return None
-    mono = np.asarray(mono, dtype=np.float32).reshape(-1)
-    if mono.size < sr:  # <1s
-        return None
-
-    frame_size = 2048
-    hop = 1024
-    w = es.Windowing(type="hann")
-    spectrum = es.Spectrum()
-    mfcc = es.MFCC(numberCoefficients=int(n_mfcc))
-
-    coeffs = []
-    for frame in es.FrameGenerator(mono, frameSize=frame_size, hopSize=hop, startFromZero=True):
-        spec = spectrum(w(frame))
-        _, c = mfcc(spec)
-        coeffs.append(np.array(c, dtype=np.float32))
-    if not coeffs:
-        return None
-    M = np.stack(coeffs, axis=0)  # frames x n_mfcc
-    mean = np.mean(M, axis=0).astype(np.float32).tolist()
-    std = np.std(M, axis=0).astype(np.float32).tolist()
-    p10 = np.quantile(M, 0.10, axis=0).astype(np.float32).tolist()
-    p90 = np.quantile(M, 0.90, axis=0).astype(np.float32).tolist()
-    return {"n_mfcc": int(n_mfcc), "mean": mean, "std": std, "p10": p10, "p90": p90}
-
-def _safe_float(x: Any) -> Optional[float]:
-    try:
-        v = float(x)
-    except Exception:
-        return None
-    if not math.isfinite(v):
-        return None
-    return v
 
 def _fallback_integrated_from_momentary(m: list[float] | np.ndarray) -> Optional[float]:
     arr = np.asarray(m, dtype=np.float32)
@@ -246,6 +253,7 @@ def _fallback_integrated_from_momentary(m: list[float] | np.ndarray) -> Optional
         return None
     return float(np.mean(arr))
 
+
 def _fallback_lra_from_momentary(m: list[float] | np.ndarray) -> Optional[float]:
     arr = np.asarray(m, dtype=np.float32)
     arr = arr[np.isfinite(arr)]
@@ -253,6 +261,7 @@ def _fallback_lra_from_momentary(m: list[float] | np.ndarray) -> Optional[float]
         return None
     val = float(np.percentile(arr, 95) - np.percentile(arr, 10))
     return val if np.isfinite(val) else None
+
 
 def _stats(x: np.ndarray) -> dict[str, Any]:
     a = np.asarray(x, dtype=np.float32)
@@ -266,6 +275,101 @@ def _stats(x: np.ndarray) -> dict[str, Any]:
         "p50": float(np.percentile(a, 50)),
         "p95": float(np.percentile(a, 95)),
     }
+
+
+def _loudness_stats(stereo: np.ndarray, sr: int) -> dict[str, Any]:
+    _require_essentia()
+
+    mono = np.ascontiguousarray(_to_mono(stereo), dtype=np.float32)
+    stereo_n2 = _as_stereo_n2(stereo)
+
+    loud = es.LoudnessEBUR128(sampleRate=sr)
+    warnings: list[str] = []
+
+    def _call_loud(x: np.ndarray):
+        try:
+            return loud(x)
+        except Exception as exc:
+            warnings.append(f"loudness call failed: {exc}")
+            return None
+
+    out = _call_loud(stereo_n2)
+    if out is None:
+        out = _call_loud(mono)
+
+    integrated_lufs = None
+    lra = None
+    sample_peak_db = None
+    if isinstance(out, (list, tuple)) and len(out) >= 1:
+        integrated_lufs = _safe_float(out[0])
+        if len(out) > 1:
+            lra = _safe_float(out[1])
+        if len(out) > 2 and isinstance(out[2], (int, float)):
+            sample_peak_db = _safe_float(out[2])
+
+    momentary = []
+    short_term = []
+
+    try:
+        if isinstance(out, (tuple, list)) and len(out) >= 4:
+            if hasattr(out[2], "__len__"):
+                momentary = list(out[2])
+            if hasattr(out[3], "__len__"):
+                short_term = list(out[3])
+    except Exception:
+        pass
+
+    if not momentary or not short_term:
+        # fallback RMS dB su finestre (trend)
+        win_m = int(sr * 0.400)
+        hop_m = int(sr * 0.100)
+        win_s = int(sr * 3.000)
+        hop_s = int(sr * 1.000)
+
+        def _rms_db_series(x: np.ndarray, win: int, hop: int) -> list[float]:
+            x = np.asarray(x, dtype=np.float32)
+            if x.size < win:
+                return []
+            outv: list[float] = []
+            for start in range(0, x.size - win + 1, hop):
+                seg = x[start : start + win]
+                outv.append(float(_db(_rms(seg))))
+            return outv
+
+        momentary = _rms_db_series(mono, win_m, hop_m)
+        short_term = _rms_db_series(mono, win_s, hop_s)
+
+    integrated_safe = _safe_float(integrated_lufs)
+    lra_safe = _safe_float(lra)
+    if integrated_safe is None:
+        integrated_safe = _fallback_integrated_from_momentary(momentary)
+    if lra_safe is None:
+        lra_safe = _fallback_lra_from_momentary(momentary)
+
+    return {
+        "integrated_lufs": integrated_safe,
+        "lra": lra_safe,
+        "sample_peak_db": _safe_float(sample_peak_db),
+        "momentary_lufs": [float(v) for v in np.asarray(momentary, dtype=np.float32)],
+        "short_term_lufs": [float(v) for v in np.asarray(short_term, dtype=np.float32)],
+        "momentary_stats": _stats(momentary),
+        "short_term_stats": _stats(short_term),
+        "warnings": warnings,
+    }
+
+
+def _safe_key_extract(mono: np.ndarray) -> dict[str, Any]:
+    _require_essentia()
+    out: dict[str, Any] = {"key": None, "scale": None, "strength": None, "warnings": []}
+    try:
+        key_ex = es.KeyExtractor()
+        k, s, st = key_ex(mono)
+        out["key"], out["scale"], out["strength"] = k, s, float(st)
+        return out
+    except Exception as e:
+        out["warnings"].append(f"keyextractor failed: {e}")
+    return out
+
 
 def _get_model_target(model: dict[str, Any], key: str) -> Optional[float]:
     targets = model.get("targets")
@@ -299,6 +403,7 @@ def _get_model_target(model: dict[str, Any], key: str) -> Optional[float]:
                     return t
     return None
 
+
 def _get_band_ref_p50(model: dict[str, Any]) -> dict[str, float]:
     out: dict[str, float] = {}
     bnp = model.get("bands_norm_percentiles")
@@ -310,6 +415,7 @@ def _get_band_ref_p50(model: dict[str, Any]) -> dict[str, float]:
                     out[bk] = v
     if out:
         return out
+
     bns = model.get("bands_norm_stats")
     if isinstance(bns, dict):
         for bk, obj in bns.items():
@@ -318,6 +424,7 @@ def _get_band_ref_p50(model: dict[str, Any]) -> dict[str, float]:
                 if v is not None:
                     out[bk] = v
     return out
+
 
 def _compute_model_match(metrics: dict[str, Any], model: dict[str, Any]) -> Optional[dict[str, Any]]:
     if not model:
@@ -345,11 +452,7 @@ def _compute_model_match(metrics: dict[str, Any], model: dict[str, Any]) -> Opti
     mean_err = float(np.mean(abs_err))
     match = max(0.0, min(1.0, 1.0 / (1.0 + mean_err)))
 
-    return {
-        "match_ratio": match,
-        "mean_abs_error": mean_err,
-        "deltas": {k: float(d) for k, d in picks},
-    }
+    return {"match_ratio": match, "mean_abs_error": mean_err, "deltas": {k: float(d) for k, d in picks}}
 
 
 def _waveform_peaks(mono: np.ndarray, sr: int, points: int = 1200) -> list[float]:
@@ -363,7 +466,6 @@ def _waveform_peaks(mono: np.ndarray, sr: int, points: int = 1200) -> list[float
         if chunk.size == 0:
             continue
         peaks.append(float(np.max(np.abs(chunk))))
-    # normalizza
     m = max(peaks) if peaks else 0.0
     if m > 0:
         peaks = [p / m for p in peaks]
@@ -371,16 +473,13 @@ def _waveform_peaks(mono: np.ndarray, sr: int, points: int = 1200) -> list[float
 
 
 def _waveform_bands(stereo: np.ndarray, sr: int, points: int = 900) -> dict[str, Any]:
-    # Bande semplici via filtri Essentia (stabile per UI)
     _require_essentia()
     mono = _to_mono(stereo)
-
     if mono.size == 0:
         return {"sub": [], "mid": [], "high": [], "duration": 0.0}
 
     duration = float(len(mono) / float(sr))
 
-    # filtri
     sub_f = es.LowPass(cutoffFrequency=150.0, sampleRate=sr)
     mid_bp = es.BandPass(bandwidth=1800.0, cutoffFrequency=900.0, sampleRate=sr)
     high_f = es.HighPass(cutoffFrequency=4000.0, sampleRate=sr)
@@ -397,127 +496,6 @@ def _waveform_bands(stereo: np.ndarray, sr: int, points: int = 900) -> dict[str,
     }
 
 
-def _as_stereo_n2(stereo: np.ndarray) -> np.ndarray:
-    s = _ensure_stereo(stereo)  # (2,n)
-    return np.ascontiguousarray(s.T, dtype=np.float32)  # (n,2)
-
-def _loudness_stats(stereo: np.ndarray, sr: int) -> dict[str, Any]:
-    _require_essentia()
-
-    mono = np.ascontiguousarray(_to_mono(stereo), dtype=np.float32)
-    stereo_n2 = _as_stereo_n2(stereo)
-
-    loud = es.LoudnessEBUR128(sampleRate=sr)
-
-    warnings: list[str] = []
-
-    def _call_loud(x: np.ndarray):
-        try:
-            return loud(x)
-        except Exception as exc:
-            warnings.append(f"loudness call failed: {exc}")
-            return None
-
-    out = _call_loud(stereo_n2)
-    if out is None:
-        out = _call_loud(mono)
-
-    integrated_lufs = None
-    lra = None
-    sample_peak_db = None
-    if isinstance(out, (list, tuple)) and len(out) >= 1:
-        integrated_lufs = _safe_float(out[0])
-        if len(out) > 1:
-            lra = _safe_float(out[1])
-        if len(out) > 2 and isinstance(out[2], (int, float)):
-            sample_peak_db = _safe_float(out[2])
-
-    # momentary / short-term
-    # molte build di Essentia NON espongono LoudnessEBUR128Momentary / LoudnessEBUR128ShortTerm.
-    # se LoudnessEBUR128 ci restituisce già gli array, li usiamo. Altrimenti facciamo fallback con finestre.
-    momentary = []
-    short_term = []
-
-    try:
-        # Se l'algoritmo ci ha già dato gli array (dipende dalla build), li estraiamo qui.
-        if isinstance(out, (tuple, list)) and len(out) >= 4:
-            if hasattr(out[2], "__len__"):
-                momentary = list(out[2])
-            if hasattr(out[3], "__len__"):
-                short_term = list(out[3])
-    except Exception:
-        pass
-
-    if not momentary or not short_term:
-        # Fallback: stima proxy RMS dB su finestre (NON è LUFS EBU reale).
-        # Non posso confermare che equivalga a LUFS, ma è utile per trend e dinamica.
-        win_m = int(sr * 0.400)  # 400ms
-        hop_m = int(sr * 0.100)  # 100ms
-        win_s = int(sr * 3.000)  # 3s
-        hop_s = int(sr * 1.000)  # 1s
-
-        def _rms_db_series(x: np.ndarray, win: int, hop: int) -> list[float]:
-            x = np.asarray(x, dtype=np.float32)
-            if x.size < win:
-                return []
-            outv: list[float] = []
-            for start in range(0, x.size - win + 1, hop):
-                seg = x[start:start + win]
-                outv.append(float(_db(_rms(seg))))
-            return outv
-
-        momentary = _rms_db_series(mono, win_m, hop_m)
-        short_term = _rms_db_series(mono, win_s, hop_s)
-
-    integrated_safe = _safe_float(integrated_lufs)
-    lra_safe = _safe_float(lra)
-    if integrated_safe is None:
-        integrated_safe = _fallback_integrated_from_momentary(momentary)
-    if lra_safe is None:
-        lra_safe = _fallback_lra_from_momentary(momentary)
-
-    return {
-        "integrated_lufs": integrated_safe,
-        "lra": lra_safe,
-        "sample_peak_db": _safe_float(sample_peak_db),
-        "momentary_lufs": [float(v) for v in np.asarray(momentary, dtype=np.float32)],
-        "short_term_lufs": [float(v) for v in np.asarray(short_term, dtype=np.float32)],
-        "momentary_stats": _stats(momentary),
-        "short_term_stats": _stats(short_term),
-        "warnings": warnings,
-    }
-
-
-def _safe_key_extract(mono: np.ndarray) -> dict[str, Any]:
-    out: dict[str, Any] = {"key": None, "scale": None, "strength": None, "warnings": []}
-
-    try:
-        key_ex = es.KeyExtractor()
-        # prova a configurare solo parametri che esistono nella build corrente
-        param_names = None
-        for attr in ("paramNames", "parameterNames", "parameterNames"):
-            if hasattr(key_ex, attr):
-                try:
-                    param_names = set(getattr(key_ex, attr)())
-                    break
-                except Exception:
-                    param_names = None
-
-        cfg = {}
-        if param_names and "pcpSize" in param_names:
-            cfg["pcpSize"] = 36
-        # numHarmonics non è sempre supportato: non forzarlo
-        if cfg and hasattr(key_ex, "configure"):
-            key_ex.configure(**cfg)
-
-        k, s, st = key_ex(mono)
-        out["key"], out["scale"], out["strength"] = k, s, float(st)
-        return out
-    except Exception as e:
-        out["warnings"].append(f"keyextractor failed: {e}")
-
-    return out
-
 def analyze_track(
     *,
     project_id: str,
@@ -533,12 +511,19 @@ def analyze_track(
     mono = _to_mono(stereo)
     duration_seconds = float(len(mono) / float(sr)) if mono.size else 0.0
 
+    warnings: list[str] = []
+
+    # Transients (FAST)
+    try:
+        transients = compute_transients(mono, sr)
+    except Exception as exc:
+        warnings.append(f"transients_failed:{type(exc).__name__}")
+        transients = {"strength": 0.0, "density": 0.0, "crest_factor_db": float(_crest_db(mono) or 0.0)}
+
     # BPM
     rhythm = es.RhythmExtractor2013(method="multifeature")
-
     rhythm_out = rhythm(mono)
 
-    # Essentia può restituire 3 o 5 valori a seconda della versione
     if isinstance(rhythm_out, (list, tuple)):
         bpm = _safe_float(rhythm_out[0])
         beats = rhythm_out[1] if len(rhythm_out) > 1 else []
@@ -548,9 +533,7 @@ def analyze_track(
         beats = []
         beat_conf = None
 
-    warnings: list[str] = []
-
-    # Key (robusto alle differenze di versione)
+    # Key
     key_r = _safe_key_extract(mono)
     key = key_r["key"]
     scale = key_r["scale"]
@@ -558,22 +541,20 @@ def analyze_track(
     warnings.extend(key_r["warnings"])
     key_str = f"{key} {scale}".strip() if key or scale else None
 
-    # Spectral summary (semplice ma utile per grafici)
-    spec = es.Spectrum()
+    # Spectral summary
+    spec_alg = es.Spectrum()
     w = es.Windowing(type="hann")
     centroid = es.Centroid(range=sr / 2.0)
     rolloff = es.RollOff(cutoff=0.85)
     zcr_alg = es.ZeroCrossingRate()
+
     frame_size = 2048
     hop = 1024
-    cents = []
-    rolls = []
-    flats = []
-    zcrs = []
+    cents, rolls, flats, zcrs = [], [], [], []
 
     for i in range(0, max(0, len(mono) - frame_size), hop):
         frame = mono[i : i + frame_size]
-        sp = spec(w(frame))
+        sp = spec_alg(w(frame))
         cents.append(float(centroid(sp)))
         rolls.append(float(rolloff(sp)))
         flats.append(_spectral_flatness(sp))
@@ -586,12 +567,11 @@ def analyze_track(
         "spectral_centroid_hz": float(np.mean(cents)) if cents else 0.0,
         "spectral_rolloff_hz": float(np.mean(rolls)) if rolls else 0.0,
         "spectral_flatness": float(np.mean(flats)) if flats else 0.0,
-        # NOTE: bandwidth in Hz is filled later using the average spectrum (more stable).
         "spectral_bandwidth_hz": None,
         "zero_crossing_rate": float(np.mean(zcrs)) if zcrs else 0.0,
     }
 
-    # Stereo width (mid/side energy ratio)
+    # Stereo width (mid/side)
     left, right = stereo[0], stereo[1]
     mid = (left + right) * 0.5
     side = (left - right) * 0.5
@@ -602,12 +582,10 @@ def analyze_track(
     loudness = _loudness_stats(stereo, sr)
     warnings.extend(loudness.get("warnings", []))
 
-    # B) Spettro pro (serve anche per model_match)
+    # Average spectrum for model + bands
     freqs, spec = _band_energy_from_stft(mono, sr)
     tilt = _spectral_tilt(freqs, spec)
 
-    # Spectral bandwidth (Hz) computed from the average power spectrum.
-    # This is more stable than frame-by-frame spread and is already in Hz.
     try:
         wsum = float(np.sum(spec)) + 1e-12
         c_hz = float(np.sum(freqs * spec) / wsum)
@@ -615,11 +593,11 @@ def analyze_track(
         spectral["spectral_bandwidth_hz"] = bw_hz
     except Exception:
         spectral["spectral_bandwidth_hz"] = None
+
     band_energy = _band_sums(freqs, spec)
     total_e = float(sum(band_energy.values())) + 1e-12
     band_energy_norm = {k: float(v / total_e) for k, v in band_energy.items()}
 
-    # Payload base metric map per model match
     metric_map = {
         "bpm": bpm,
         "integrated_lufs": _safe_float(loudness.get("integrated_lufs")),
@@ -634,21 +612,7 @@ def analyze_track(
     waveform_peaks = _waveform_peaks(mono, sr, points=1200)
     waveform_bands = _waveform_bands(stereo, sr, points=900)
 
-    # Serialize numpy arrays to plain lists (JSON safe)
-    beats_list = []
-    try:
-        if beats is not None:
-            beats_list = [float(x) for x in list(beats)]
-    except Exception:
-        beats_list = []
-
-    # Arrays blob: roba “pesante” per storage, non DB
-    arrays_blob = None
-
-    # -----------------------------
-    # PRO METRICS (A, B, C, D, E)
-    # -----------------------------
-    # A) Loudness & dinamica
+    # analysis_pro (resta, ma non aggiungo roba lenta)
     crest_db = _crest_db(mono)
     dyn_proxy_db = None
     try:
@@ -661,41 +625,6 @@ def analyze_track(
     except Exception:
         dyn_proxy_db = None
 
-    # B) Spettro pro (tilt + energy per banda) già calcolato sopra
-
-    # C) Stereo pro
-    y_stereo = stereo  # stereo è già (2, N) quando esiste
-    stereo_pro = (
-        _stereo_metrics_from_stft(y_stereo[0], y_stereo[1], sr)
-        if getattr(y_stereo, "shape", (0,))[0] >= 2
-        else {
-            "lr_correlation": None,
-            "lr_balance_db": None,
-            "width_by_band": None,
-            "correlation_by_band": None,
-        }
-    )
-
-    # D) Ritmica pro (beat histogram semplice)
-    beat_hist = None
-    try:
-        beats_arr = np.asarray(beats, dtype=np.float32)
-        if beats_arr.size >= 8:
-            ibi = np.diff(beats_arr)
-            ibi = ibi[(ibi > 0.15) & (ibi < 2.0)]
-            if ibi.size >= 8:
-                bins = np.linspace(0.15, 1.0, 18)  # 17 bins
-                hist, edges = np.histogram(ibi, bins=bins)
-                beat_hist = {
-                    "bins_seconds": edges.astype(np.float32).tolist(),
-                    "counts": hist.astype(int).tolist(),
-                }
-    except Exception:
-        beat_hist = None
-
-    # E) Timbre / MFCC
-    mfcc_stats = _mfcc_stats(mono, sr, n_mfcc=13)
-
     analysis_pro = {
         "dynamics": {
             "crest_db": crest_db,
@@ -707,54 +636,18 @@ def analyze_track(
             "band_energy": band_energy,
             "band_energy_norm": band_energy_norm,
         },
-        "stereo": stereo_pro,
-        "rhythm": {
-            "beats": beats,
-            "beat_histogram": beat_hist,
-        },
-        "timbre": {
-            "mfcc_stats": mfcc_stats,
-        },
+        # lascio gli altri campi come prima: se ti servono li re-introduciamo, ma qui stiamo puliti e veloci
     }
 
-    # Arrays blob (JSON-safe) dopo che analysis_pro esiste
-    rhythm_obj = analysis_pro.get("rhythm") or {}
-    beats_arr = rhythm_obj.get("beats")
-    tempo_curve_arr = rhythm_obj.get("tempo_curve")
-
-    # numpy -> list safe (senza truthiness)
-    if beats_arr is None:
-        beats_list = []
-    else:
-        try:
-            beats_list = beats_arr.tolist()
-        except Exception:
-            beats_list = list(beats_arr)
-
-    if tempo_curve_arr is None:
-        tempo_curve_list = []
-    else:
-        try:
-            tempo_curve_list = tempo_curve_arr.tolist()
-        except Exception:
-            tempo_curve_list = list(tempo_curve_arr)
-
+    # arrays_blob per storage (quello che la UI v2 legge)
     arrays_blob = {
         "loudness_stats": {
             "momentary_lufs": loudness.get("momentary_lufs") or [],
             "short_term_lufs": loudness.get("short_term_lufs") or [],
         },
-        "analysis_pro": {
-            "dynamics": analysis_pro.get("dynamics"),
-            "spectral": analysis_pro.get("spectral"),
-            "stereo": analysis_pro.get("stereo"),
-            "rhythm": {
-                "beats": beats_list,
-                "tempo_curve": tempo_curve_list,
-                "beat_histogram": rhythm_obj.get("beat_histogram"),
-            },
-            "timbre": analysis_pro.get("timbre"),
-        },
+        "transients": transients,
+        "analysis_pro": analysis_pro,
+        # NOTE: spectrum_db / sound_field / levels li aggiungi altrove nella pipeline, se già li stai calcolando
     }
 
     return {
@@ -766,13 +659,9 @@ def analyze_track(
         "bpm": bpm,
         "key": key_str,
         "spectral": spectral,
-        # keep a top-level copy for Tekkin mapping (project_versions.analyzer_zero_crossing_rate)
         "zero_crossing_rate": _safe_float(spectral.get("zero_crossing_rate")),
         "stereo_width": stereo_width,
-        "confidence": {
-            "bpm": beat_conf,
-            "key": key_strength,
-        },
+        "confidence": {"bpm": beat_conf, "key": key_strength},
         "warnings": warnings,
         "essentia_features": {
             "rhythm": {"bpm": bpm, "confidence": beat_conf},
@@ -788,42 +677,33 @@ def analyze_track(
         "band_energy_norm": band_energy_norm,
     }
 
+
 def _ensure_stereo(audio: np.ndarray) -> np.ndarray:
-    """
-    Ritorna audio in forma (2, N) float32.
-    Accetta (N,), (N,1), (N,2), (C,N), (N,C).
-    """
     x = np.asarray(audio)
     if x.size == 0:
         return np.zeros((2, 0), dtype=np.float32)
 
-    # 1D -> mono
     if x.ndim == 1:
         mono = x.astype(np.float32, copy=False)
         return np.vstack([mono, mono])
 
-    # 2D
     if x.ndim == 2:
         a, b = x.shape
         if a >= b and b in (1, 2):
-            x = x.astype(np.float32, copy=False).T  # -> (C, N)
+            x = x.astype(np.float32, copy=False).T
         else:
-            x = x.astype(np.float32, copy=False)    # presume già (C, N)
+            x = x.astype(np.float32, copy=False)
 
         if x.shape[0] == 1:
             return np.vstack([x[0], x[0]])
         if x.shape[0] >= 2:
             return x[:2]
 
-    # fallback: mono
     mono = np.asarray(x, dtype=np.float32).reshape(-1)
     return np.vstack([mono, mono])
 
+
 def _to_mono(stereo: np.ndarray) -> np.ndarray:
-    """
-    Converte (2, N) o (C, N) in mono (N,) float32.
-    Se arriva già (N,), lo ritorna.
-    """
     x = np.asarray(stereo)
     if x.size == 0:
         return np.zeros((0,), dtype=np.float32)

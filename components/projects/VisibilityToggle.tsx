@@ -86,8 +86,6 @@ export default function VisibilityToggle(props: {
           );
         })}
       </div>
-
-      <span className="text-[10px] text-white/50">{label}</span>
     </div>
   );
 }

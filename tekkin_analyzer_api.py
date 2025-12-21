@@ -1,16 +1,4 @@
-"""
-Tekkin Analyzer API (minimal)
-
-Goals:
-- Expose a single /analyze endpoint for Tekkin Site v2.
-- Compute only "stable, front-end useful" metrics:
-  - Essentia: BPM, key, loudness (EBU R128), basic spectral descriptors, stereo width.
-  - Waveform peaks + spectrum-aware bands (sub/mid/high envelopes).
-  - Model match vs genre reference model (reference_models/<profile_key>.json).
-
-No Librosa. No legacy analyze_master_web. Keep it fast and predictable.
-"""
-
+# tekkin_analyzer_api.py
 from __future__ import annotations
 
 import hashlib
@@ -28,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from tekkin_analyzer_core import analyze_track
 
-# Silence noisy deps (numba can be extremely verbose if its logger is set to DEBUG elsewhere)
 logging.getLogger("numba").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.INFO)
 
@@ -36,30 +23,20 @@ ANALYZER_SECRET = os.environ.get("TEKKIN_ANALYZER_SECRET")
 if not ANALYZER_SECRET:
     raise RuntimeError("TEKKIN_ANALYZER_SECRET non impostata nell'ambiente")
 
-
 app = FastAPI(title="Tekkin Analyzer (minimal)")
 
 
 class AnalyzeRequest(BaseModel):
-    # identity
     project_id: str = Field(..., min_length=1)
     version_id: str = Field(..., min_length=1)
 
-    # reference profile key, e.g. "minimal_deep_tech"
     profile_key: str = Field(..., min_length=1)
-
-    # "master" | "premaster" (client decides)
     mode: str = Field("master")
 
-    # audio
     audio_url: str = Field(..., min_length=10)
     audio_sha256: Optional[str] = None
 
-    # optional: upload arrays blob (momentary/short-term LUFS + beats/tempo curve) to supabase storage
-    # if you don't need it, keep it false and you'll avoid extra failure points.
     upload_arrays_blob: bool = False
-
-    # optional: supabase storage upload (only used if upload_arrays_blob=true)
     storage_bucket: str = "tracks"
     storage_base_path: str = "analyzer"
 
@@ -74,7 +51,6 @@ class AnalyzeResponse(BaseModel):
     bpm: Optional[float] = None
     key: Optional[str] = None
 
-    # kept top-level so the Tekkin site can store it in project_versions.analyzer_zero_crossing_rate
     zero_crossing_rate: Optional[float] = None
 
     spectral: dict[str, Any]
@@ -103,11 +79,8 @@ def _download_to_tmp(url: str) -> str:
         with httpx.stream("GET", url, timeout=90.0, follow_redirects=True) as r:
             r.raise_for_status()
             suffix = ".bin"
-            # best-effort extension
             ct = (r.headers.get("content-type") or "").lower()
-            if "audio/wav" in ct:
-                suffix = ".wav"
-            elif "audio/x-wav" in ct:
+            if "audio/wav" in ct or "audio/x-wav" in ct:
                 suffix = ".wav"
             elif "audio/aiff" in ct:
                 suffix = ".aiff"
@@ -138,17 +111,12 @@ def _sha256_file(path: str) -> str:
 
 
 def _read_audio(path: str) -> tuple[np.ndarray, int]:
-    """
-    Returns (stereo_float32, sr)
-    stereo shape: (2, n) or (1, n)
-    """
     try:
         audio, sr = sf.read(path, dtype="float32", always_2d=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"cannot read audio: {exc}") from exc
 
-    # soundfile returns (n, ch)
-    audio = audio.T
+    audio = audio.T  # (ch, n)
     if audio.shape[0] >= 2:
         stereo = audio[:2]
     else:
@@ -170,17 +138,12 @@ def _upload_json_to_supabase_storage(
     object_path: str,
     payload: dict[str, Any],
 ) -> tuple[Optional[str], Optional[int]]:
-    """
-    Upload using Supabase Storage REST API.
-
-    NOTE:
-    - Use POST with "x-upsert: true" to overwrite.
-    - If Supabase returns 400, it's usually an auth/headers/path issue.
-    """
     base_url = os.environ.get("SUPABASE_URL")
-    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
-
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not base_url or not service_key:
+        logging.getLogger("tekkin-analyzer-min").warning(
+            "[storage] upload skipped: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY"
+        )
         return None, None
 
     url = f"{base_url.rstrip('/')}/storage/v1/object/{bucket}/{object_path.lstrip('/')}"
@@ -197,7 +160,6 @@ def _upload_json_to_supabase_storage(
         r.raise_for_status()
         return object_path, len(data)
     except Exception as exc:
-        # keep analyzer green - do not fail the whole run because of storage upload
         logging.getLogger("tekkin-analyzer-min").warning("[storage] upload failed: %s", exc)
         return None, None
 
@@ -216,7 +178,6 @@ def analyze(req: AnalyzeRequest, request: Request) -> AnalyzeResponse:
 
         stereo, sr = _read_audio(tmp_path)
 
-        # 1) core analysis (essentia + model + waveform)
         try:
             result = analyze_track(
                 project_id=req.project_id,
@@ -232,27 +193,16 @@ def analyze(req: AnalyzeRequest, request: Request) -> AnalyzeResponse:
 
         log = logging.getLogger("tekkin-analyzer-min")
         log.setLevel(logging.INFO)
-        log.info("ANALYZE result keys: %s", list(result.keys()))
-        try:
-            lufs = (result.get("loudness_stats") or {}).get("integrated_lufs")
-            log.info("LUFS integrated: %s", lufs)
-        except Exception as exc:
-            log.warning("LUFS log failed: %s", exc)
+        log.info("RESULT BRIEF | bpm=%s lufs=%s key=%s width=%s",
+                 result.get("bpm"),
+                 (result.get("loudness_stats") or {}).get("integrated_lufs"),
+                 result.get("key"),
+                 result.get("stereo_width"))
 
-        try:
-            log.info(
-                "RESULT BRIEF | bpm=%s lufs=%s key=%s width=%s",
-                result.get("bpm"),
-                (result.get("loudness_stats") or {}).get("integrated_lufs"),
-                result.get("key"),
-                result.get("stereo_width"),
-            )
-        except Exception as exc:
-            log.warning("Result brief log failed: %s", exc)
-
-        # 2) optional arrays blob
         arrays_blob_path = None
         arrays_blob_size = None
+        warnings = list(result.get("warnings") or [])
+
         if req.upload_arrays_blob:
             arrays_blob = result.get("arrays_blob")
             if arrays_blob:
@@ -262,8 +212,11 @@ def analyze(req: AnalyzeRequest, request: Request) -> AnalyzeResponse:
                     object_path=obj_path,
                     payload=arrays_blob,
                 )
+                if not arrays_blob_path:
+                    warnings.append("arrays_blob_upload_failed")
+            else:
+                warnings.append("arrays_blob_missing")
 
-        # Response shape that matches what your Next routes expect.
         return AnalyzeResponse(
             version_id=req.version_id,
             project_id=req.project_id,
@@ -275,9 +228,10 @@ def analyze(req: AnalyzeRequest, request: Request) -> AnalyzeResponse:
             spectral=result.get("spectral") or {},
             stereo_width=result.get("stereo_width"),
             loudness_stats=result.get("loudness_stats") or {},
-            warnings=result.get("warnings") or [],
+            warnings=warnings,
             confidence=result.get("confidence") or {},
             essentia_features=result.get("essentia_features") or {},
+            analysis_pro=result.get("analysis_pro"),
             model_match=result.get("model_match"),
             band_energy_norm=result.get("band_energy_norm") or {},
             waveform_peaks=[float(v) for v in (result.get("waveform_peaks") or [])],

@@ -1,5 +1,7 @@
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 import type { AnalyzerResult } from "@/types/analyzer";
 import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult";
 
@@ -120,19 +122,37 @@ if (!audioUrl && audioPath) {
 
     console.log("[run-analyzer] Chiamo analyzer:", analyzerUrl);
 
-    const analyzerRes = await fetch(analyzerUrl, {
+    const res = await fetch(process.env.TEKKIN_ANALYZER_URL!, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "content-type": "application/json",
         "x-analyzer-secret": process.env.TEKKIN_ANALYZER_SECRET ?? "",
       },
       body: JSON.stringify(payload),
     });
 
-    const raw = await analyzerRes.text();
-    console.log("[run-analyzer] status ->", analyzerRes.status);
+    const raw = await res.text();
+    console.log("[run-analyzer] status ->", res.status);
     console.log("[run-analyzer] raw size ->", raw.length);
     console.log("[run-analyzer] raw head ->", raw.slice(0, 600));
+
+    // DEV: dump completo risposta analyzer su file (così hai sempre l'output raw intero)
+    try {
+      if (process.env.NODE_ENV !== "production") {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+
+        const outDir = path.join(process.cwd(), ".tekkin-debug");
+        await fs.mkdir(outDir, { recursive: true });
+
+        const outPath = path.join(outDir, `analyze_${payload.version_id || 'unknown'}.json`);
+        await fs.writeFile(outPath, raw, "utf-8");
+
+        console.log("[run-analyzer] raw saved ->", outPath);
+      }
+    } catch (e) {
+      console.log("[run-analyzer] raw save failed ->", e);
+    }
 
     let data: any = null;
     try {
@@ -142,6 +162,41 @@ if (!audioUrl && audioPath) {
       return NextResponse.json({ error: "Analyzer returned non-JSON" }, { status: 502 });
     }
 
+
+    // Deep logging of key analyzer fields and arrays blob contents (arrays_blob is the source)
+    console.log("[run-analyzer] DEEP LOG: raw arrays.spectrum_db ->", data?.arrays_blob?.spectrum_db ?? null);
+    console.log("[run-analyzer] DEEP LOG: raw arrays.sound_field ->", data?.arrays_blob?.sound_field ?? null);
+    console.log("[run-analyzer] DEEP LOG: raw arrays.levels ->", data?.arrays_blob?.levels ?? null);
+    console.log("[run-analyzer] DEEP LOG: raw arrays.transients ->", data?.arrays_blob?.transients ?? null);
+
+    // More compact/usable logs: lengths where applicable
+    try {
+      console.log(
+        "[run-analyzer] DEEP LOG: arrays.spectrum_db len ->",
+        Array.isArray(data?.arrays_blob?.spectrum_db?.hz) ? data.arrays_blob.spectrum_db.hz.length : null
+      );
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      console.log(
+        "[run-analyzer] DEEP LOG: arrays.levels channels ->",
+        Array.isArray(data?.arrays_blob?.levels?.channels) ? data.arrays_blob.levels.channels.length : null
+      );
+    } catch (e) {
+      /* ignore */
+    }
+    console.log("[run-analyzer] DEEP LOG: arrays_blob_path ->", data?.arrays_blob_path ?? null);
+    console.log("[run-analyzer] DEEP LOG: arrays_blob_size_bytes ->", data?.arrays_blob_size_bytes ?? null);
+    // Optionally log the full arrays blob if available and not too large
+    if (data?.arrays_blob && typeof data.arrays_blob === "object") {
+      try {
+        console.log("[run-analyzer] DEEP LOG: arrays_blob (truncated) ->", JSON.stringify(data.arrays_blob, null, 2).slice(0, 2000));
+      } catch (e) {
+        console.log("[run-analyzer] arrays_blob stringify failed", e);
+      }
+    }
+    // Existing brief log
     const warnings = [
       ...(Array.isArray(data?.warnings) ? data.warnings : []),
       ...(Array.isArray(data?.loudness_stats?.warnings) ? data.loudness_stats.warnings : []),
@@ -178,8 +233,8 @@ if (!audioUrl && audioPath) {
       )
     );
 
-    if (!analyzerRes.ok) {
-      console.error("[run-analyzer] Analyzer error:", analyzerRes.status);
+    if (!res.ok) {
+      console.error("[run-analyzer] Analyzer error:", res.status);
       return NextResponse.json(
         { error: "Errore dall'Analyzer", detail: raw || null },
         { status: 502 }
@@ -188,8 +243,57 @@ if (!audioUrl && audioPath) {
 
     const result = data as AnalyzerResult;
 
+
     // 4) Mapping centralizzato
     const updatePayload = buildAnalyzerUpdatePayload(result);
+
+    // PATCH arrays.json: aggiungo spectrum_db / sound_field / levels (proxy intelligenti)
+    let patchedArraysBytes: number | null = null;
+
+    try {
+      const arraysPath =
+        (result as any)?.arrays_blob_path ??
+        (updatePayload as any)?.arrays_blob_path ??
+        null;
+
+      if (typeof arraysPath === "string" && arraysPath.length > 0) {
+        const arraysPatched = buildArraysBlobPatched(data);
+
+        console.log("[run-analyzer] DEEP LOG: patched arrays keys ->", Object.keys(arraysPatched ?? {}));
+        console.log("[run-analyzer] DEEP LOG: patched transients ->", arraysPatched?.transients ?? null);
+        console.log(
+          "[run-analyzer] DEEP LOG: patched has transients obj ->",
+          !!arraysPatched?.transients && typeof arraysPatched.transients === "object"
+        );
+
+        const up = await uploadJsonWithServiceRole("tracks", arraysPath, arraysPatched);
+
+        if (up.error) {
+          console.log("[run-analyzer] PATCH arrays upload FAILED ->", {
+            path: arraysPath,
+            err: up.error.message ?? String(up.error),
+          });
+        } else {
+          patchedArraysBytes = up.bytes;
+
+          console.log("[run-analyzer] PATCH arrays upload OK ->", {
+            path: arraysPath,
+            bytes: up.bytes,
+            keys: Object.keys(arraysPatched),
+            has_spectrum_db: !!arraysPatched.spectrum_db,
+            has_sound_field: !!arraysPatched.sound_field,
+            has_levels: !!arraysPatched.levels,
+          });
+
+          // aggiorno il payload DB così size resta coerente
+          (updatePayload as any).arrays_blob_size_bytes = patchedArraysBytes;
+        }
+      } else {
+        console.log("[run-analyzer] PATCH arrays skipped -> arrays_blob_path missing");
+      }
+    } catch (e: any) {
+      console.log("[run-analyzer] PATCH arrays exception ->", e?.message ?? e);
+    }
 
     // fallback se analyzer_key non esiste nel DB
     const payloadWithoutKey = (() => {
@@ -317,9 +421,130 @@ console.log("[run-analyzer] db arrays_blob_path after update ->", checkRow?.arra
       { ok: true, version: updatedVersion, analyzer_result: result },
       { status: 200 }
     );
+
   } catch (err) {
     console.error("Unexpected run-analyzer error:", err);
     return NextResponse.json({ error: "Errore inatteso Analyzer" }, { status: 500 });
   }
+}
+
+
+// --- HELPERS ---
+
+let _admin: ReturnType<typeof createSupabaseAdmin> | null = null;
+
+function getAdmin() {
+  if (_admin) return _admin;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  _admin = createSupabaseAdmin(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  return _admin;
+}
+
+async function uploadJsonWithServiceRole(bucket: string, path: string, json: any) {
+  const admin = getAdmin();
+  const body = JSON.stringify(json);
+
+  const { error } = await admin.storage
+    .from(bucket)
+    .upload(path, body, {
+      contentType: "application/json",
+      upsert: true,
+    });
+
+  return { error, bytes: Buffer.byteLength(body, "utf8") };
+}
+
+function safeNum(v: any): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function buildArraysBlobPatched(result: any) {
+  const base =
+    result?.arrays_blob && typeof result.arrays_blob === "object" ? (result.arrays_blob as any) : {};
+
+  // loudness: preferisci quello dentro arrays_blob (contiene momentary/short term arrays)
+  const loudness_stats =
+    base?.loudness_stats && typeof base.loudness_stats === "object"
+      ? base.loudness_stats
+      : result?.loudness_stats && typeof result.loudness_stats === "object"
+        ? result.loudness_stats
+        : {};
+
+  const analysis_pro =
+    base?.analysis_pro && typeof base.analysis_pro === "object"
+      ? base.analysis_pro
+      : result?.analysis_pro && typeof result.analysis_pro === "object"
+        ? result.analysis_pro
+        : {};
+
+  // PRESERVA transients se già calcolati dal Python; ma assicurati che non sia mai null
+  const transientsRaw =
+    (base?.transients && typeof base.transients === "object" ? base.transients : null) ??
+    (result?.transients && typeof result.transients === "object" ? result.transients : null) ??
+    null;
+
+  const transients =
+    transientsRaw && typeof transientsRaw === "object"
+      ? transientsRaw
+      : { strength: 0, density: 0, crest_factor_db: 0 };
+
+  // Se non esiste, placeholder NON-null per test UI
+  const spectrum_db =
+    base?.spectrum_db && typeof base.spectrum_db === "object"
+      ? base.spectrum_db
+      : result?.spectrum_db && typeof result.spectrum_db === "object"
+        ? result.spectrum_db
+        : {
+            hz: [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000],
+            track_db: [-45, -35, -28, -24, -26, -29, -33, -38, -44, -52],
+          };
+
+  const sound_field =
+    base?.sound_field && typeof base.sound_field === "object"
+      ? base.sound_field
+      : result?.sound_field && typeof result.sound_field === "object"
+        ? result.sound_field
+        : {
+            angle_deg: [0, 60, 120, 180, 240, 300, 360],
+            radius: [0.35, 0.55, 0.42, 0.35, 0.48, 0.52, 0.35],
+          };
+
+  const levels =
+    base?.levels && typeof base.levels === "object"
+      ? base.levels
+      : result?.levels && typeof result.levels === "object"
+        ? result.levels
+        : {
+            channels: ["L", "R"],
+            rms_db: [
+              safeNum(loudness_stats?.integrated_lufs) ?? -24,
+              safeNum(loudness_stats?.integrated_lufs) ?? -24,
+            ],
+            peak_db: [
+              safeNum(loudness_stats?.sample_peak_db) ?? -12,
+              safeNum(loudness_stats?.sample_peak_db) ?? -12,
+            ],
+          };
+
+  // IMPORTANTISSIMO: mergea preservando qualunque altro campo già presente in arrays_blob
+  return {
+    ...base,
+    loudness_stats,
+    analysis_pro,
+    transients,
+    spectrum_db,
+    sound_field,
+    levels,
+  };
 }
 
