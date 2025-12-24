@@ -2,10 +2,25 @@
 
 import React, { useMemo } from "react";
 import type { AnalyzerCompareModel, Bands } from "@/lib/analyzer/v2/types";
+import { LoudnessMeterCard } from "./cards/LoudnessMeterCard";
+import { RhythmCard } from "./cards/RhythmCard";
+import {
+  Card,
+  Pill,
+  SourcePills,
+  StatusChip,
+  type StatusTone,
+} from "./utils/ui";
+import { BAND_ORDER, bandsToPct, clamp01, formatDb, safeNum, sumBands } from "./utils/number";
+import {
+  getLiveStateForX,
+  getRefStateForLoudness,
+  getRefStateForSpectrum,
+  getRefStateForTonal,
+  type RefState,
+} from "./utils/refState";
 
 type SpectrumPoint = { hz: number; mag: number };
-
-const BAND_ORDER: Array<keyof Bands> = ["sub", "low", "lowmid", "mid", "presence", "high", "air"];
 
 const BAND_LABELS: Record<"it" | "en", Record<keyof Bands, string>> = {
   it: {
@@ -85,29 +100,6 @@ const TONAL_COPY = {
   },
 } as const;
 
-function safeNum(v: unknown): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-
-function clamp01(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  if (n < 0) return 0;
-  if (n > 1) return 1;
-  return n;
-}
-
-function sumBands(b?: Bands | null) {
-  return BAND_ORDER.reduce((acc, k) => acc + safeNum(b?.[k]), 0);
-}
-
-function bandsToPct(b?: Bands | null) {
-  const total = sumBands(b);
-  const denom = total > 0 ? total : 1;
-  const out: Record<string, number> = {};
-  for (const k of BAND_ORDER) out[k] = (safeNum(b?.[k]) / denom) * 100;
-  return out as Record<keyof Bands, number>;
-}
-
 function fmt1(n: number | null | undefined) {
   if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
   return (Math.round(n * 10) / 10).toFixed(1);
@@ -116,13 +108,6 @@ function fmt1(n: number | null | undefined) {
 function fmt0(n: number | null | undefined) {
   if (typeof n !== "number" || !Number.isFinite(n)) return "n/a";
   return String(Math.round(n));
-}
-
-type StatusTone = "ok" | "low" | "high" | "muted";
-
-function formatDb(value: number | null | undefined, decimals = 1) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
-  return `${value.toFixed(decimals)} dB`;
 }
 
 function classifyPeak(
@@ -163,50 +148,6 @@ function labelFromDeltaAbs(deltaPct: number) {
   if (d <= 3) return { label: "OK", tone: "ok" as const };
   if (d <= 7) return { label: "BASSO", tone: "mid" as const };
   return { label: "ALTO", tone: "high" as const };
-}
-
-function Pill({
-  tone,
-  children,
-}: {
-  tone: "ok" | "mid" | "high" | "muted";
-  children: React.ReactNode;
-}) {
-  const cls =
-    tone === "ok"
-      ? "border-emerald-400/25 bg-white/5 text-white/80 ring-white/10 hover:bg-white/10"
-      : tone === "mid"
-      ? "border-white/15 bg-white/8 text-white/75"
-      : tone === "high"
-      ? "border-amber-400/25 bg-amber-400/15 text-amber-200"
-      : "border-white/10 bg-white/5 text-white/60";
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>
-      {children}
-    </span>
-  );
-}
-
-function StatusChip({
-  tone,
-  children,
-}: {
-  tone: "ok" | "low" | "high" | "muted";
-  children: React.ReactNode;
-}) {
-  const cls =
-    tone === "ok"
-      ? "border-emerald-400/30 bg-emerald-400/15 text-emerald-100"
-      : tone === "low"
-      ? "border-sky-400/30 bg-sky-400/15 text-sky-100"
-      : tone === "high"
-      ? "border-amber-400/35 bg-amber-400/20 text-amber-100"
-      : "border-white/10 bg-white/5 text-white/60";
-  return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold tracking-wide ${cls}`}>
-      {children}
-    </span>
-  );
 }
 
 type MetricChip = {
@@ -274,31 +215,6 @@ function MetricRow({
   );
 }
 
-function Card({
-  title,
-  subtitle,
-  right,
-  children,
-}: {
-  title: string;
-  subtitle?: string | null;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/4 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-base font-semibold text-white">{title}</div>
-          {subtitle ? <div className="mt-0.5 text-xs text-white/55">{subtitle}</div> : null}
-        </div>
-        {right ? <div className="shrink-0">{right}</div> : null}
-      </div>
-      <div className="mt-4">{children}</div>
-    </div>
-  );
-}
-
 
 function hashSeed(s: string) {
   let h = 2166136261;
@@ -309,11 +225,12 @@ function hashSeed(s: string) {
   return h >>> 0;
 }
 
-function pick<T>(arr: T[], seed: number, i: number) {
-  if (!arr.length) return arr[0];
+function pick<T>(arr: T[], seed: number, i: number): T | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
   const idx = (seed + i * 2654435761) % arr.length;
-  return arr[idx];
+  return arr[idx] ?? null;
 }
+
 
 // ---------- MOCK builders (fallback) ----------
 function makeMockSpectrum(seed = 1) {
@@ -436,12 +353,14 @@ function HorizontalTonalBalance({
   referenceName,
   referencePercentiles,
   lang = "it",
+  refState,
 }: {
   trackBands?: Bands | null;
   referenceBands?: Bands | null;
   referenceName?: string | null;
   referencePercentiles?: BandsPercentiles | null;
   lang?: "it" | "en";
+  refState: RefState;
 }) {
   const trackPct = useMemo(() => bandsToPct(trackBands), [trackBands]);
 
@@ -453,48 +372,77 @@ function HorizontalTonalBalance({
 
   function bandRange(key: keyof Bands) {
     const p = referencePercentiles?.[key];
-    const low = p?.p25 ?? p?.p10 ?? null;
-    const high = p?.p75 ?? p?.p90 ?? null;
+    const rawLow = p?.p25 ?? p?.p10 ?? null;
+    const rawHigh = p?.p75 ?? p?.p90 ?? null;
+
     const label =
       p?.p25 != null && p?.p75 != null ? "25-75" : p?.p10 != null && p?.p90 != null ? "10-90" : "n/a";
-    return { low, high, label };
+
+    // Detect scale:
+    // - if reference looks like 0..1 -> it's bands_norm domain
+    // - if reference looks like 0..100 -> it's percent domain
+    const refLooksNorm =
+      typeof rawLow === "number" &&
+      typeof rawHigh === "number" &&
+      rawLow >= 0 &&
+      rawHigh <= 1.2;
+
+    return { low: rawLow, high: rawHigh, label, refLooksNorm };
   }
 
-  function bandStatus(key: keyof Bands, tVal: number | null) {
-    if (!hasPerc || tVal == null) return { status: "unknown" as const, refOk: false, range: bandRange(key) };
+  function bandStatus(
+    key: keyof Bands,
+    tNorm: number | null,
+    tPct: number | null
+  ) {
+    if (!hasPerc) return { status: "unknown" as const, refOk: false, range: bandRange(key) };
 
     const range = bandRange(key);
     if (range.low == null || range.high == null) return { status: "unknown" as const, refOk: false, range };
 
-    if (tVal < range.low) return { status: "low" as const, refOk: true, range };
-    if (tVal > range.high) return { status: "high" as const, refOk: true, range };
+    // Use the same domain as reference
+    const tVal = range.refLooksNorm ? tNorm : tPct;
+    if (tVal == null) return { status: "unknown" as const, refOk: true, range };
+
+    const low = range.refLooksNorm ? range.low : range.low; // already in correct domain
+    const high = range.refLooksNorm ? range.high : range.high;
+
+    if (tVal < low) return { status: "low" as const, refOk: true, range };
+    if (tVal > high) return { status: "high" as const, refOk: true, range };
     return { status: "ok" as const, refOk: true, range };
   }
 
-  const bandData = BAND_ORDER.map((key) => {
-    const tNorm = (trackBands as any)?.[key] ?? null;
-    const status = bandStatus(key, typeof tNorm === "number" ? tNorm : null);
-    const label = BAND_LABELS[lang]?.[key] ?? BAND_LABELS.it[key];
-    const chip =
-      status.status === "ok" ? "OK" : status.status === "low" ? "LOW" : status.status === "high" ? "HIGH" : "n/a";
-    const hint =
-      status.status === "ok"
-        ? copy.hint.ok
-        : status.status === "low"
-        ? copy.hint.low(label)
-        : status.status === "high"
-        ? copy.hint.high(label)
-        : copy.status.unknown;
+const bandData = BAND_ORDER.map((key) => {
+  const tNorm = (trackBands as any)?.[key] ?? null;
+  const tPctVal = hasTrack ? (trackPct as any)?.[key] : null;
 
-    return {
-      key,
-      label,
-      tPct: hasTrack ? trackPct[key] : null,
-      status,
-      chip,
-      hint,
-    };
-  });
+  const status = bandStatus(
+    key,
+    typeof tNorm === "number" ? tNorm : null,
+    typeof tPctVal === "number" ? tPctVal : null
+  );
+  const label = BAND_LABELS[lang]?.[key] ?? BAND_LABELS.it[key];
+  const chip =
+    status.status === "ok" ? "OK" : status.status === "low" ? "LOW" : status.status === "high" ? "HIGH" : "n/a";
+  const hint =
+    status.status === "ok"
+      ? copy.hint.ok
+      : status.status === "low"
+      ? copy.hint.low(label)
+      : status.status === "high"
+      ? copy.hint.high(label)
+      : copy.status.unknown;
+
+  return {
+    key,
+    label,
+    tPct: typeof tPctVal === "number" ? tPctVal : null,
+    status,
+    chip,
+    hint,
+  };
+});
+
 
   const known = bandData.filter((b) => b.status.status !== "unknown").length;
   const okCount = bandData.filter((b) => b.status.status === "ok").length;
@@ -510,8 +458,8 @@ function HorizontalTonalBalance({
           : copy.subtitleNoRef
       }
       right={
-        <div className="flex items-center gap-2">
-          <Pill tone={hasRef ? "ok" : "muted"}>{hasRef ? copy.refOn : copy.refOff}</Pill>
+        <div className="flex items-center gap-3">
+          <SourcePills state={refState} />
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
@@ -609,14 +557,24 @@ function HorizontalTonalBalance({
   );
 }
 
-function SoundFieldCard({ points, isLive }: { points: { angleDeg: number; radius: number }[] | null | undefined; isLive: boolean }) {
+function SoundFieldCard({
+  points,
+  referencePoints,
+  correlation,
+  refState,
+}: {
+  points: { angleDeg: number; radius: number }[] | null | undefined;
+  referencePoints?: { angleDeg: number; radius: number }[] | null;
+  correlation?: number | null;
+  refState: RefState;
+}) {
   const size = 220;
   const cx = size / 2;
   const cy = size / 2;
   const rMax = 92;
 
-  const path = useMemo(() => {
-    const pts = Array.isArray(points) ? points : [];
+  const buildPath = (ptsIn: { angleDeg: number; radius: number }[] | null | undefined) => {
+    const pts = Array.isArray(ptsIn) ? ptsIn : [];
     if (pts.length < 2) return "";
     const toXY = (p: { angleDeg: number; radius: number }) => {
       const a = (p.angleDeg * Math.PI) / 180;
@@ -630,9 +588,10 @@ function SoundFieldCard({ points, isLive }: { points: { angleDeg: number; radius
       d += ` L ${q.x.toFixed(2)} ${q.y.toFixed(2)}`;
     }
     return d;
-  }, [points]);
+  };
 
-  const has = Array.isArray(points) && points.length > 0;
+  const trackPath = useMemo(() => buildPath(points), [points]);
+  const refPath = useMemo(() => buildPath(referencePoints), [referencePoints]);
 
   const meanRadius = useMemo(() => {
     const pts = Array.isArray(points) ? points : [];
@@ -645,29 +604,46 @@ function SoundFieldCard({ points, isLive }: { points: { angleDeg: number; radius
     typeof meanRadius !== "number"
       ? "n/a"
       : meanRadius < 0.25
-        ? "stretto"
-        : meanRadius < 0.38
-          ? "moderato"
-          : "wide";
+      ? "stretto"
+      : meanRadius < 0.38
+      ? "moderato"
+      : "wide";
+
+  const corrTone: StatusTone =
+    typeof correlation !== "number"
+      ? "muted"
+      : correlation >= 0.7
+      ? "ok"
+      : correlation >= 0.3
+      ? "mid"
+      : correlation >= 0
+      ? "low"
+      : "high";
+
+  const corrLabel =
+    typeof correlation !== "number"
+      ? "n/a"
+      : correlation >= 0.7
+      ? "mono-safe"
+      : correlation >= 0.3
+      ? "ok"
+      : correlation >= 0
+      ? "attenzione"
+      : "rischio fase";
 
   return (
     <Card
       title="Sound field"
-      subtitle="Distribuzione stereo della traccia (descrittivo, non comparativo)"
-      right={
-        <div className="flex items-center gap-2">
-          <Pill tone={has ? "ok" : "muted"}>{has ? "LIVE" : "MOCK"}</Pill>
-          <Pill tone="muted">NO REF</Pill>
-        </div>
-      }
+      subtitle="Distribuzione stereo (track vs reference)"
+      right={<SourcePills state={refState} />}
     >
       <div className="rounded-xl border border-white/10 bg-black/20 p-4">
         <div className="flex items-center justify-center">
           <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
             <defs>
               <radialGradient id="sfGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(52,211,153,0.25)" />
-                <stop offset="70%" stopColor="rgba(52,211,153,0.08)" />
+                <stop offset="0%" stopColor="rgba(52,211,153,0.20)" />
+                <stop offset="70%" stopColor="rgba(52,211,153,0.06)" />
                 <stop offset="100%" stopColor="rgba(0,0,0,0)" />
               </radialGradient>
             </defs>
@@ -679,8 +655,36 @@ function SoundFieldCard({ points, isLive }: { points: { angleDeg: number; radius
             <line x1={cx - rMax} y1={cy} x2={cx + rMax} y2={cy} stroke="rgba(255,255,255,0.10)" />
             <line x1={cx} y1={cy - rMax} x2={cx} y2={cy + rMax} stroke="rgba(255,255,255,0.10)" />
 
-            {path ? (
-              <path d={path} fill="none" stroke="rgba(52,211,153,0.9)" strokeWidth={2.2} />
+            {/* scale labels */}
+            <text x={cx + 6} y={cy - rMax * 0.33} fill="rgba(255,255,255,0.40)" fontSize="10">
+              0.33
+            </text>
+            <text x={cx + 6} y={cy - rMax * 0.66} fill="rgba(255,255,255,0.40)" fontSize="10">
+              0.66
+            </text>
+            <text x={cx + 6} y={cy - rMax} fill="rgba(255,255,255,0.40)" fontSize="10">
+              1.00
+            </text>
+            <text x={cx} y={cy + 4} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
+              mono
+            </text>
+            <text x={cx} y={cy - rMax - 6} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
+              wide
+            </text>
+
+            {/* reference first (so track is on top) */}
+            {refPath ? (
+              <path
+                d={refPath}
+                fill="none"
+                stroke="rgba(59,130,246,0.75)"
+                strokeWidth={2.0}
+                strokeDasharray="5 5"
+              />
+            ) : null}
+
+            {trackPath ? (
+              <path d={trackPath} fill="none" stroke="rgba(52,211,153,0.9)" strokeWidth={2.2} />
             ) : (
               <text x={cx} y={cy} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
                 no data
@@ -696,43 +700,64 @@ function SoundFieldCard({ points, isLive }: { points: { angleDeg: number; radius
               {typeof meanRadius === "number" ? meanRadius.toFixed(2) : "n/a"}{" "}
               <span className="text-sm font-semibold text-white/60">{widthLabel}</span>
             </div>
+            <div className="mt-1 text-[11px] text-white/45">Scala 0.00 mono, 1.00 wide</div>
           </div>
+
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs text-white/55">Correlation</div>
-            <div className="mt-1 text-lg font-semibold text-white">n/a</div>
-            <div className="mt-1 text-[11px] text-white/45">In arrivo: metrica reale</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-white/55">Correlation</div>
+              <StatusChip tone={corrTone}>{corrLabel}</StatusChip>
+            </div>
+            <div className="mt-1 text-lg font-semibold text-white">
+              {typeof correlation === "number" ? correlation.toFixed(2) : "n/a"}
+            </div>
+            <div className="mt-1 text-[11px] text-white/45">1.00 mono-safe, &lt;0 rischio fase</div>
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-emerald-200">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> Traccia
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/25 bg-white/5 px-2 py-0.5 text-blue-200">
+            <span className="inline-block h-2 w-2 rounded-full bg-blue-400" /> Reference
+          </span>
         </div>
       </div>
     </Card>
   );
 }
 
+
 function SpectrumCompareCard({
   track,
   reference,
   referenceName,
+  refState,
 }: {
   track?: SpectrumPoint[] | null;
   reference?: SpectrumPoint[] | null;
   referenceName?: string | null;
+  refState: RefState;
 }) {
-  // Responsive width
-  const W = 0; // will be set by ref
   const H = 180;
-  // Nessun padding laterale: curva da 0 a width
   const pad = { l: 0, r: 0, t: 16, b: 26 };
-  const svgRef = React.useRef<SVGSVGElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const [svgWidth, setSvgWidth] = React.useState(820);
   React.useEffect(() => {
-    if (svgRef.current) {
-      setSvgWidth(svgRef.current.clientWidth || 820);
-    }
-    const handleResize = () => {
-      if (svgRef.current) setSvgWidth(svgRef.current.clientWidth || 820);
+    const updateWidth = () => {
+      if (containerRef.current) {
+        setSvgWidth(containerRef.current.clientWidth || 820);
+      }
     };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    updateWidth();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => updateWidth());
+      if (containerRef.current) observer.observe(containerRef.current);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
   const data = useMemo(() => {
@@ -843,10 +868,7 @@ function SpectrumCompareCard({
   const rPath = useMemo(() => pathFrom("r"), [data]);
 
   return (
-    <Card
-      title="Spettro (confronto)"
-      right={<Pill tone={hasRef ? "ok" : "muted"}>{hasRef ? "REF" : "NO REF"}</Pill>}
-    >
+    <Card title="Spettro (confronto)" right={<SourcePills state={refState} />}>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-emerald-200">
@@ -871,8 +893,8 @@ function SpectrumCompareCard({
         )}
       </div>
 
-      <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 relative w-full">
-        <svg ref={svgRef} width="100%" height={H} viewBox={`0 0 ${svgWidth} ${H}`}>
+      <div ref={containerRef} className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 relative w-full">
+        <svg width="100%" height={H} viewBox={`0 0 ${svgWidth} ${H}`}>
           <defs>
             <linearGradient id="specTrack" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="rgba(236,72,153,0.65)" />
@@ -933,12 +955,12 @@ function SpectrumCompareCard({
 
 function LevelsMetersCard({
   levels,
-  isLive,
   referenceStereoPercentiles,
+  refState,
 }: {
   levels?: { label: "L" | "C" | "R" | "Ls" | "Rs" | "LFE"; rmsDb: number; peakDb: number }[] | null;
-  isLive: boolean;
   referenceStereoPercentiles?: AnalyzerCompareModel["referenceStereoPercentiles"] | null;
+  refState: RefState;
 }) {
   const items = Array.isArray(levels) ? levels : [];
 
@@ -1000,8 +1022,8 @@ function LevelsMetersCard({
       title="Levels"
       subtitle="Livello medio (RMS) e picco massimo (Peak) per canale"
       right={
-        <div className="flex items-center gap-2">
-          <Pill tone={isLive ? "ok" : "muted"}>{isLive ? "LIVE" : "MOCK"}</Pill>
+        <div className="flex items-center gap-3">
+          <SourcePills state={refState} />
           {badge}
         </div>
       }
@@ -1191,14 +1213,15 @@ function QuickFacts({ model }: { model: AnalyzerCompareModel }) {
       ? "Tame peaks with gentle compression or automation."
       : "Keep an eye on transitions with subtle automation or parallel compression.";
 
-  const quickFacts: Array<{
-    key: string;
-    label: string;
-    value: React.ReactNode;
-    meaning: string;
-    action: string;
-    chip?: MetricChip;
-    note?: string;
+const quickFacts: Array<{
+  key: string;
+  label: string;
+  value: React.ReactNode;
+  meaning: string;
+  action: string;
+  chip?: MetricChip;
+  note?: string;
+  graph?: MetricGraph;
   }> = [
     {
       key: "centroid",
@@ -1262,8 +1285,8 @@ function QuickFacts({ model }: { model: AnalyzerCompareModel }) {
   return (
     <Card title="Quick facts" subtitle="Spectral e loudness (dal tuo analyzer_json)">
       <div className="grid grid-cols-2 gap-3">
-        {quickFacts.map((metric) => (
-          <MetricRow key={metric.key} {...metric} />
+        {quickFacts.map(({ key: metricKey, ...rest }) => (
+          <MetricRow key={metricKey} {...rest} />
         ))}
       </div>
     </Card>
@@ -1323,6 +1346,16 @@ function TransientsCard({
       ? "Doma i picchi con clipper/limiter e controlla le percussioni più incisive."
       : "Monitora il rapporto picco/RMS con transient shaper o limiter se serve.";
 
+  const logAttack =
+    typeof (transients as any).logAttackTime === "number"
+      ? (transients as any).logAttackTime
+      : typeof (transients as any).log_attack_time === "number"
+      ? (transients as any).log_attack_time
+      : null;
+
+  const attackSeconds =
+    typeof logAttack === "number" && Number.isFinite(logAttack) ? Math.pow(10, logAttack) : null;
+
   return (
     <Card title="Transients" subtitle="Impatto e densità">
       <div className="space-y-3 text-white/70">
@@ -1356,6 +1389,13 @@ function TransientsCard({
             note="Heuristic classification."
           />
         )}
+        <MetricRow
+          label="Log attack time"
+          value={attackSeconds != null ? `${attackSeconds.toFixed(3)} s` : "n/a"}
+          chip={{ label: "INFO", tone: "muted" }}
+          meaning="Tempo di attacco stimato"
+          action="Usa transient shaper/compressor per regolare l'attacco, ascoltando il risultato."
+        />
         <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
           <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Grafico transients</div>
           {[
@@ -1412,6 +1452,7 @@ function TransientsCard({
 }
 
 function HumanAdvice({ model }: { model: AnalyzerCompareModel }) {
+    
   const seed = useMemo(() => hashSeed(`${model.projectTitle}|${model.versionName}|${model.referenceName ?? ""}`), [model]);
   const c = useMemo(() => deriveChecks(model), [model]);
 
@@ -1453,12 +1494,26 @@ function HumanAdvice({ model }: { model: AnalyzerCompareModel }) {
       "Per traduzione club: mono compatibilità prima, width dopo.",
     ];
 
-    out.push(pick(base, seed, 0));
-    if (c.loudnessHot || c.overCompressed || (typeof lufs === "number" && lufs > -9.5)) out.push(pick(loud, seed, 1));
-    if (c.whistleRisk || (typeof centroid === "number" && typeof zcr === "number" && centroid > 3800 && zcr > 0.07))
-      out.push(pick(harsh, seed, 2));
-    if (c.noiseRisk) out.push(pick(noise, seed, 3));
-    if (c.tooNarrow) out.push(pick(stereo, seed, 4));
+const first = pick(base, seed, 0);
+if (first) out.push(first);
+
+
+    if (c.loudnessHot || c.overCompressed || (typeof lufs === "number" && lufs > -9.5)) {
+      const t = pick(loud, seed, 1);
+      if (t) out.push(t);
+    }
+    if (c.whistleRisk || (typeof centroid === "number" && typeof zcr === "number" && centroid > 3800 && zcr > 0.07)) {
+      const t = pick(harsh, seed, 2);
+      if (t) out.push(t);
+    }
+    if (c.noiseRisk) {
+      const t = pick(noise, seed, 3);
+      if (t) out.push(t);
+    }
+    if (c.tooNarrow) {
+      const t = pick(stereo, seed, 4);
+      if (t) out.push(t);
+    }
 
     return out.slice(0, 4);
   }, [model, seed, c]);
@@ -1555,12 +1610,55 @@ export default function AnalyzerV2ProPanel({
 }) {
   const stableSeed = useMemo(() => hashSeed(`${model.projectTitle}|${model.versionName}`) % 30, [model.projectTitle, model.versionName]);
 
-  const live = useMemo(() => ({
-    spectrumTrack: Array.isArray(model.spectrumTrack) && model.spectrumTrack.length > 0,
-    spectrumRef: Array.isArray(model.spectrumRef) && model.spectrumRef.length > 0,
-    soundField: Array.isArray(model.soundField) && model.soundField.length > 0,
-    levels: Array.isArray(model.levels) && model.levels.length > 0,
-  }), [model.spectrumTrack, model.spectrumRef, model.soundField, model.levels]);
+  const live = useMemo(
+    () => ({
+      spectrumTrack: Array.isArray(model.spectrumTrack) && model.spectrumTrack.length > 0,
+      spectrumRef: Array.isArray(model.spectrumRef) && model.spectrumRef.length > 0,
+      soundField: Array.isArray(model.soundField) && model.soundField.length > 0,
+      levels: Array.isArray(model.levels) && model.levels.length > 0,
+    }),
+    [model.spectrumTrack, model.spectrumRef, model.soundField, model.levels]
+  );
+
+  const rhythmLive = useMemo(() => {
+    const data = model.rhythm ?? null;
+    return (
+      typeof data?.danceability === "number" ||
+      (Array.isArray(data?.beat_times) && data?.beat_times.length > 0) ||
+      (data?.descriptors && Object.keys(data.descriptors).length > 0)
+    );
+  }, [model.rhythm]);
+
+  const tonalRefState = useMemo(() => getRefStateForTonal(model), [model]);
+  const spectrumRefState = useMemo(() => getRefStateForSpectrum(model, { mockEnabled: true }), [model]);
+  const loudnessRefState = useMemo(() => getRefStateForLoudness(model), [model]);
+  const soundFieldRefState = useMemo(
+    () =>
+      getLiveStateForX(model, {
+        hasLive: live.soundField,
+        mockEnabled: true,
+        reason: live.soundField ? "Sound field live" : "Sound field placeholder",
+      }),
+    [model, live.soundField]
+  );
+  const levelsRefState = useMemo(
+    () =>
+      getLiveStateForX(model, {
+        hasLive: live.levels,
+        mockEnabled: true,
+        reason: live.levels ? "Level meters live" : "Level meters placeholder",
+      }),
+    [model, live.levels]
+  );
+  const rhythmRefState = useMemo(
+    () =>
+      getLiveStateForX(model, {
+        hasLive: rhythmLive,
+        mockEnabled: true,
+        reason: rhythmLive ? "Rhythm data live" : "No rhythm data",
+      }),
+    [model, rhythmLive]
+  );
 
   const merged: AnalyzerCompareModel = useMemo(() => {
     const spectrumTrack = model.spectrumTrack && model.spectrumTrack.length ? model.spectrumTrack : makeMockSpectrum(stableSeed);
@@ -1608,6 +1706,17 @@ export default function AnalyzerV2ProPanel({
 
         <AnalyzerHero model={merged} onPlay={onPlay} onShare={onShare} />
 
+        <div className="mt-4">
+          <LoudnessMeterCard
+            loudness={merged.loudness ?? null}
+            referenceName={merged.referenceName}
+            referenceTarget={merged.referenceFeaturesPercentiles?.lufs ?? null}
+            momentary={merged.momentaryLufs ?? null}
+            shortTerm={merged.shortTermLufs ?? null}
+            refState={loudnessRefState}
+          />
+        </div>
+
         <div className="mt-6 grid grid-cols-1 gap-4">
           <HorizontalTonalBalance
             trackBands={merged.bandsNorm as any}
@@ -1615,32 +1724,52 @@ export default function AnalyzerV2ProPanel({
             referenceName={merged.referenceName}
             referencePercentiles={(merged as any).referenceBandsPercentiles ?? null}
             lang={(merged as any).lang === "en" ? "en" : "it"}
+            refState={tonalRefState}
           />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <SoundFieldCard points={merged.soundField as any} isLive={live.soundField} />
+<SoundFieldCard
+  points={merged.soundField as any}
+  referencePoints={
+    ((merged as any).referenceSoundField ??
+      (merged as any).soundFieldRef ??
+      (merged as any).reference_sound_field ??
+      null) as any
+  }
+  correlation={
+    ((merged as any).correlation ??
+      (merged as any).stereoSummary?.correlation ??
+      (merged as any).stereo_summary?.correlation ??
+      null) as any
+  }
+  refState={soundFieldRefState}
+/>
+
             <div className="lg:col-span-2">
               <SpectrumCompareCard
                 track={merged.spectrumTrack as any}
                 reference={merged.spectrumRef as any}
                 referenceName={merged.referenceName}
+                refState={spectrumRefState}
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">
-              <LevelsMetersCard
-                levels={merged.levels as any}
-                isLive={live.levels}
-                referenceStereoPercentiles={merged.referenceStereoPercentiles as any}
-              />
+            <LevelsMetersCard
+              levels={merged.levels as any}
+              referenceStereoPercentiles={merged.referenceStereoPercentiles as any}
+              refState={levelsRefState}
+            />
             </div>
             <div className="space-y-4">
               <QuickFacts model={merged} />
               <TransientsCard transients={(merged as any).transients ?? null} />
             </div>
           </div>
+
+          <RhythmCard bpm={merged.bpm} keyName={merged.key} rhythm={merged.rhythm ?? null} refState={rhythmRefState} />
 
           <HealthChecks model={merged} />
           <HumanAdvice model={merged} />
