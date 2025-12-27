@@ -11,11 +11,13 @@ import type { Artist, ArtistRankView } from "@/types/tekkinRank";
 export const dynamic = "force-dynamic";
 
 type Props = {
-  params: { artistId: string };
+ // Next.js 15 App Router types: params è un Promise
+  params: Promise<{ artistId: string }>;
 };
 
-export default async function DiscoveryArtistPage({ params }: Props) {
-  const artistId = (params.artistId ?? "").trim();
+export default async function Page({ params }: Props) {
+  const { artistId: rawArtistId } = await params;
+  const artistId = (rawArtistId ?? "").trim(); 
   if (!artistId) {
     redirect("/charts");
   }

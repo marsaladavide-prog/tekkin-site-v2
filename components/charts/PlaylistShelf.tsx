@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { ChartPlaylistCard } from "@/components/charts/types";
 
 type PlaylistShelfProps = {
@@ -23,9 +24,15 @@ export default function PlaylistShelf({ playlists }: PlaylistShelfProps) {
         <div className="flex gap-6">
           {safePlaylists.slice(0, 5).map((p) => (
             <div key={p.id} className="min-w-[280px]">
-              <div className="aspect-[16/10] overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10">
+              <div className="relative aspect-[16/10] overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10">
                 {p.imageUrl ? (
-                  <img src={p.imageUrl} alt={p.title} className="h-full w-full object-cover" />
+                  <Image
+                    src={p.imageUrl}
+                    alt={p.title}
+                    fill
+                    sizes="(max-width: 640px) 80vw, 280px"
+                    className="object-cover"
+                  />
                 ) : null}
               </div>
               <p className="mt-3 text-base font-semibold text-white">{p.title}</p>

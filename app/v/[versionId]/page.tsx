@@ -6,6 +6,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
 import { signTrackUrl } from "@/lib/storage/signTrackUrl";
 import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersion";
 import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
+import { mapVersionToAnalyzerV2Model } from "@/lib/analyzer/mapVersionToAnalyzerV2Model";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ const VERSION_FIELDS = `
   analyzer_key,
   analyzer_profile_key,
   reference_model_key,
+  waveform_peaks,
+  waveform_bands,
+  waveform_duration,
+  created_at,
   analyzer_json,
   analyzer_bands_norm,
   arrays_blob_path,
@@ -97,17 +102,30 @@ export default async function PublicVersionPage({ params }: { params: Promise<{ 
     },
     reference,
   });
+  
+
+ const v2Model = mapVersionToAnalyzerV2Model({
+   version: { ...(row as any), analyzer_arrays: parsedArrays },
+   project: project ? { title: project.title ?? null } : undefined,
+   arrays: parsedArrays,
+  });
 
   return (
     <AppShell maxWidth="default">
       <TekkinAnalyzerPageClient
+      versionId={versionId}
         initialData={initial}
+        v2Model={v2Model}
         track={{
           versionId,
           title,
           artistName: "Tekkin",
           coverUrl: project?.cover_url ?? null,
           audioUrl: signedAudioUrl,
+          waveformPeaks: (row as any)?.waveform_peaks ?? null,
+          waveformBands: (row as any)?.waveform_bands ?? null,
+          waveformDuration: (row as any)?.waveform_duration ?? null,
+          createdAt: (row as any)?.created_at ?? null,
         }}
         sharePath={`/v/${versionId}`}
       />

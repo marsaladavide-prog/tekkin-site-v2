@@ -6,6 +6,7 @@ import {
   mapChartsToUi,
   RegisteredArtistProfile,
 } from "@/lib/charts/mapChartsToUi";
+import { getTrackUrlCached } from "@/lib/storage/getTrackUrlCached";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,7 @@ export default async function ChartsPageRoute() {
       ?.map((r) => r.version_id)
       .filter((v): v is string => Boolean(v)) ?? [];
 
-  let playsByVersionId = new Map<string, number>();
+  const playsByVersionId = new Map<string, number>();
 
   if (versionIds.length > 0) {
     const { data: counters } = await supabase
@@ -105,36 +106,31 @@ export default async function ChartsPageRoute() {
 
   const AUDIO_BUCKET = "tracks"; // <-- METTI IL NOME GIUSTO
 
-  const allWithSignedAudio = await Promise.all(
+  // Se il bucket "tracks" e' PUBLIC puoi usare mode:"public" e finisce la storia.
+  // Se NON e' public, resta signed ma almeno con cache (molto meno spreco).
+  const CHARTS_URL_MODE: "public" | "signed" = "signed";
+
+  const allWithAudio = await Promise.all(
     all.map(async (r) => {
-      const raw = r.audio_url?.trim();
+      let raw = r.audio_url?.trim();
       if (!raw) return r;
       if (raw.startsWith("http")) return r;
+      if (raw.startsWith("tracks/")) raw = raw.slice("tracks/".length);
 
-      const { data, error } = await supabase.storage
-        .from(AUDIO_BUCKET)
-        .createSignedUrl(raw, 60 * 60);
+      const url = await getTrackUrlCached(supabase, AUDIO_BUCKET, raw, {
+        mode: CHARTS_URL_MODE,
+        expiresInSeconds: 60 * 60,
+        revalidateSeconds: 60 * 20,
+      });
 
-      if (error || !data?.signedUrl) {
-        const msg = String((error as any)?.message ?? "");
-        if (msg.toLowerCase().includes("object not found")) {
-          return { ...r, audio_url: null };
-        }
-        console.error("[charts] signed url error", { error, raw });
-        return { ...r, audio_url: null };
-      }
-
-      return { ...r, audio_url: data.signedUrl };
+      return { ...r, audio_url: url ?? r.audio_url };
     })
   );
-
-  console.log("[charts] raw audio_url sample:", all?.[0]?.audio_url);
-  console.log("[charts] signed audio_url sample:", allWithSignedAudio?.[0]?.audio_url);
 
   // 1) Risaliamo ai proprietari dei project usando project_id -> projects.user_id
   const projectIds = Array.from(
     new Set(
-      allWithSignedAudio
+      allWithAudio
         .map((r) => r.project_id)
         .filter((v): v is string => typeof v === "string" && v.length > 0)
     )
@@ -199,7 +195,7 @@ export default async function ChartsPageRoute() {
     if (p?.user_id) profileByUserId.set(p.user_id, p);
   });
 
-  const enriched = allWithSignedAudio.map((r) => {
+  const enriched = allWithAudio.map((r) => {
     const uid = ownerByProjectId.get(r.project_id) ?? null;
     const prof = uid ? profileByUserId.get(uid) : null;
 

@@ -42,14 +42,14 @@ export function ArtistProfileHeader({
   };
 
   return (
-    <header className="text-center mb-8">
+    <header className="text-center mb-5">
       {/* pill Tekkin Artist Profile */}
       <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full border border-tekkin-border bg-tekkin-panel/80 text-[11px] font-mono uppercase text-tekkin-muted mb-4 backdrop-blur-sm">
         <span className="w-2 h-2 rounded-full bg-emerald-400" />
         Tekkin Artist Profile
       </div>
 
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-3">
         {/* avatar */}
         <div className="relative group">
           <div className="relative w-24 h-24 rounded-full overflow-hidden border border-tekkin-border bg-black transition-transform duration-300 group-hover:scale-110 shadow-lg">

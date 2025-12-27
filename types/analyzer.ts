@@ -83,6 +83,14 @@ export type AnalyzerConfidence = {
   mix_health?: number | null;
 };
 
+export type AnalysisProRhythm = Record<string, unknown>;
+export type AnalysisProTonal = Record<string, unknown>;
+export type AnalysisProLoudness = Record<string, unknown>;
+export type AnalysisProSpectral = Record<string, unknown>;
+export type AnalysisProStereo = Record<string, unknown>;
+export type AnalysisProConfidence = AnalyzerConfidence;
+
+
 export type AnalyzerWarningSeverity =
   | 'info'
   | 'warning'
@@ -266,14 +274,7 @@ export type StructureMetrics = {
   sections: StructureSection[];
 };
 
-export interface AnalyzerConfidence {
-  bpm: number;
-  key: number;
-  lufs: number;
-  spectral: number;
-  stereo: number;
-  mix_health: number;
-}
+
 
 export interface AnalysisProInsights {
   rhythm: AnalysisProRhythm;

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+
+import ArtistSettingsHeader from "@/components/settings/ArtistSettingsHeader";
 import { TEKKIN_GENRES, TekkinGenreId } from "@/lib/constants/genres";
 
 type ProfileData = {
-  id: string;
   artist_name: string | null;
   main_genres: string[] | null;
   city: string | null;
@@ -17,10 +17,9 @@ type ProfileData = {
   spotify_url?: string | null;
   instagram_url?: string | null;
   soundcloud_url?: string | null;
-  beatport_url?: string | null;
-  beatstats_url?: string | null;
-  apple_music_url?: string | null;
 };
+
+type ScanLog = string;
 
 function safeString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;
@@ -31,15 +30,13 @@ function safeBool(value: unknown, fallback: boolean): boolean {
 }
 
 export default function ArtistProfileSettingsPage() {
-  const router = useRouter();
-
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [scanLogs, setScanLogs] = useState<string[] | null>(null);
+  const [scanLogs, setScanLogs] = useState<ScanLog[] | null>(null);
 
   const [artistName, setArtistName] = useState("");
   const [mainGenre, setMainGenre] = useState<TekkinGenreId | "">("");
@@ -49,41 +46,30 @@ export default function ArtistProfileSettingsPage() {
   const [openToCollab, setOpenToCollab] = useState(true);
   const [openToPromo, setOpenToPromo] = useState(true);
 
-  const [photoUrl, setPhotoUrl] = useState("");
-
   const [spotifyUrl, setSpotifyUrl] = useState("");
   const [instagramUrl, setInstagramUrl] = useState("");
   const [soundcloudUrl, setSoundcloudUrl] = useState("");
-  const [beatportUrl, setBeatportUrl] = useState("");
-  const [beatstatsUrl, setBeatstatsUrl] = useState("");
-  const [appleMusicUrl, setAppleMusicUrl] = useState("");
 
   useEffect(() => {
-    let isActive = true;
+    let active = true;
 
-    async function loadProfile() {
+    const load = async () => {
       try {
         setErrorMsg(null);
-        setSuccessMsg(null);
         setLoading(true);
 
-        const res = await fetch("/api/profile/me");
-        const raw = await res.json().catch(() => null) as any;
+        const res = await fetch("/api/profile/me", { cache: "no-store", credentials: "include" });
+        const payload = await res.json().catch(() => null);
 
-        if (!res.ok || !raw) {
-          if (isActive) {
-            const message = raw?.error ?? "Errore caricando il profilo.";
-            setErrorMsg(message);
-            setLoading(false);
-          }
-          return;
+        if (!res.ok || !payload) {
+          const message = payload?.error ?? "Errore caricando il profilo.";
+          throw new Error(message);
         }
 
-        if (!isActive) return;
+        if (!active) return;
 
-        const data = raw as ProfileData;
+        const data = payload as ProfileData;
         setProfile(data);
-
         setArtistName(safeString(data.artist_name));
         const firstGenre =
           Array.isArray(data.main_genres) && data.main_genres.length > 0
@@ -96,39 +82,33 @@ export default function ArtistProfileSettingsPage() {
         setOpenToCollab(safeBool(data.open_to_collab, true));
         setOpenToPromo(safeBool(data.open_to_promo, true));
 
-        setPhotoUrl(safeString(data.photo_url));
-
         setSpotifyUrl(safeString(data.spotify_url));
         setInstagramUrl(safeString(data.instagram_url));
         setSoundcloudUrl(safeString(data.soundcloud_url));
-        setBeatportUrl(safeString(data.beatport_url));
-        setBeatstatsUrl(safeString(data.beatstats_url));
-        setAppleMusicUrl(safeString(data.apple_music_url));
-
-        setLoading(false);
       } catch (err) {
-        console.error("Profile GET unexpected:", err);
-        if (isActive) {
-          setErrorMsg("Errore inatteso caricando il profilo.");
-          setLoading(false);
+        console.error("Profile settings load", err);
+        if (active) {
+          setErrorMsg((err as Error)?.message ?? "Errore inatteso caricando il profilo.");
         }
+      } finally {
+        if (active) setLoading(false);
       }
-    }
+    };
 
-    loadProfile();
+    void load();
 
     return () => {
-      isActive = false;
+      active = false;
     };
   }, []);
 
-  const handleSave = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      setErrorMsg(null);
-      setSuccessMsg(null);
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
 
+    try {
       const payload = {
         artist_name: artistName.trim() || null,
         main_genres: mainGenre ? [mainGenre] : null,
@@ -137,13 +117,9 @@ export default function ArtistProfileSettingsPage() {
         bio_short: bioShort.trim() || null,
         open_to_collab: openToCollab,
         open_to_promo: openToPromo,
-        photo_url: photoUrl.trim() || null,
         spotify_url: spotifyUrl.trim() || null,
         instagram_url: instagramUrl.trim() || null,
         soundcloud_url: soundcloudUrl.trim() || null,
-        beatport_url: beatportUrl.trim() || null,
-        beatstats_url: beatstatsUrl.trim() || null,
-        apple_music_url: appleMusicUrl.trim() || null,
       };
 
       const res = await fetch("/api/profile/me", {
@@ -152,20 +128,17 @@ export default function ArtistProfileSettingsPage() {
         body: JSON.stringify(payload),
       });
 
-      const raw = await res.json().catch(() => null) as any;
-
-      if (!res.ok || !raw) {
-        console.error("Profile PUT error:", raw);
-        setErrorMsg(raw?.error ?? "Errore salvando il profilo.");
-        return;
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        const msg = data?.error ?? "Errore salvando il profilo.";
+        throw new Error(msg);
       }
 
-      const data = raw as ProfileData;
-      setProfile(data);
       setSuccessMsg("Profilo aggiornato.");
+      setProfile((curr) => ({ ...curr, ...payload }));
     } catch (err) {
-      console.error("Profile PUT unexpected:", err);
-      setErrorMsg("Errore inatteso salvando il profilo.");
+      console.error("Profile save", err);
+      setErrorMsg((err as Error)?.message ?? "Errore salvando il profilo.");
     } finally {
       setSaving(false);
     }
@@ -190,296 +163,230 @@ export default function ArtistProfileSettingsPage() {
       });
 
       const data = await res.json().catch(() => null);
-
       if (!res.ok || !data) {
-        setErrorMsg(data?.error ?? "Errore durante la scansione Spotify.");
-        return;
+        throw new Error(data?.error ?? "Errore durante la scansione Spotify.");
       }
 
       setScanLogs(Array.isArray(data.logs) ? data.logs : []);
-      setSuccessMsg("Scan Spotify completato. Profilo e metriche aggiornati.");
+      setSuccessMsg("Scan Spotify completato. Profilo aggiornato.");
     } catch (err) {
-      console.error("Scan Spotify unexpected", err);
-      setErrorMsg("Errore inatteso durante la scansione Spotify.");
+      console.error("Scan Spotify", err);
+      setErrorMsg((err as Error)?.message ?? "Errore inatteso durante la scansione.");
     } finally {
       setScanning(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
-        <div className="w-full max-w-3xl mx-auto text-sm text-muted-foreground">
-          Caricamento profilo artista...
-        </div>
-      </div>
-    );
-  }
+  const loadingState = (
+    <div className="rounded-3xl border border-white/10 bg-black/40 p-6 text-sm text-white/60">
+      Caricamento impostazioni profilo...
+    </div>
+  );
 
   return (
-    <div className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
-      <div className="w-full max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-tekkin-foreground">
-              Artist profile
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Nome, genere, citta e link ufficiali per Tekkin Discovery e Rank.
-            </p>
-          </div>
+    <section className="space-y-6">
+      <ArtistSettingsHeader
+        title="Profilo Artista"
+        description="Dati Tekkin, bio e link ufficiali per Discovery, Signals e ranking."
+      />
 
-          <button
-            type="button"
-            onClick={() => router.push("/artist/discovery")}
-            className="text-xs text-muted-foreground hover:underline"
-          >
-            Torna a Discovery
-          </button>
-        </div>
-
-        {errorMsg && (
-          <p className="text-xs text-red-500 bg-red-950/40 border border-red-900 px-3 py-2 rounded-md">
-            {errorMsg}
-          </p>
-        )}
-        {successMsg && (
-          <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900 px-3 py-2 rounded-md">
-            {successMsg}
-          </p>
-        )}
-
+      {loading ? (
+        loadingState
+      ) : (
         <form
           onSubmit={handleSave}
-          className="space-y-8 text-xs text-tekkin-foreground"
+          className="space-y-6 rounded-3xl border border-white/10 bg-black/40 p-6 shadow-xl backdrop-blur"
         >
-          {/* Basic info */}
-          <section className="space-y-3">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Basic info
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Artist name
-                </label>
-                <input
-                  type="text"
-                  value={artistName}
-                  onChange={(e) => setArtistName(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="Il tuo nome artista"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Main Tekkin genre
-                </label>
-                <select
-                  value={mainGenre}
-                  onChange={(e) =>
-                    setMainGenre(e.target.value as TekkinGenreId | "")
-                  }
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                >
-                  <option value="">Seleziona un genere</option>
-                  {TEKKIN_GENRES.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">Citta</label>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="Es. Milano"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Paese o area
-                </label>
-                <input
-                  type="text"
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="Es. Italia, Norvegia"
-                />
-              </div>
-            </div>
-
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <label className="block text-[11px] font-medium">
-                Short bio
-              </label>
-              <textarea
-                value={bioShort}
-                onChange={(e) => setBioShort(e.target.value)}
-                className="w-full rounded-md border border-border bg-background px-2 py-2 text-xs min-h-[80px]"
-                placeholder="Due righe che raccontano chi sei come artista."
+              <p className="text-[10px] uppercase tracking-[0.4em] text-white/40">Avatar</p>
+              <p className="text-sm text-white/60">
+                Aggiorniamo automaticamente dal tuo profilo Supabase quando usi lo scan Spotify.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled
+              className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-white/60 disabled:opacity-60"
+            >
+              Cambia foto (coming soon)
+            </button>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">Artist name</span>
+              <input
+                type="text"
+                value={artistName}
+                onChange={(event) => setArtistName(event.target.value)}
+                placeholder="Il tuo moniker Tekkin"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
               />
+            </label>
+
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">
+                Main Tekkin genre
+              </span>
+              <select
+                value={mainGenre}
+                onChange={(event) =>
+                  setMainGenre(event.target.value as TekkinGenreId | "")
+                }
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+              >
+                <option value="">Seleziona il genere</option>
+                {TEKKIN_GENRES.map((genre) => (
+                  <option key={genre.id} value={genre.id}>
+                    {genre.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">City</span>
+              <input
+                type="text"
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+                placeholder="Es. Milano"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">Country</span>
+              <input
+                type="text"
+                value={country}
+                onChange={(event) => setCountry(event.target.value)}
+                placeholder="Es. Italia"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+              />
+            </label>
+          </div>
+
+          <label className="space-y-2 text-sm text-white/60">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">Bio breve</span>
+            <textarea
+              value={bioShort}
+              onChange={(event) => setBioShort(event.target.value)}
+              placeholder="Due righe che raccontano il tuo sound Tekkin."
+              rows={4}
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+            />
+          </label>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">
+                Open to collab
+              </span>
+              <input
+                type="checkbox"
+                checked={openToCollab}
+                onChange={(event) => setOpenToCollab(event.target.checked)}
+                className="h-5 w-5 rounded border-white/20 bg-white/5"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/50 px-4 py-3 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">
+                Open to promo
+              </span>
+              <input
+                type="checkbox"
+                checked={openToPromo}
+                onChange={(event) => setOpenToPromo(event.target.checked)}
+                className="h-5 w-5 rounded border-white/20 bg-white/5"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">Spotify URL</span>
+              <input
+                type="url"
+                value={spotifyUrl}
+                onChange={(event) => setSpotifyUrl(event.target.value)}
+                placeholder="https://open.spotify.com/artist/..."
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+              />
+            </label>
+
+            <label className="space-y-2 text-sm text-white/60">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">
+                Instagram URL
+              </span>
+              <input
+                type="url"
+                value={instagramUrl}
+                onChange={(event) => setInstagramUrl(event.target.value)}
+                placeholder="https://instagram.com/tuonome"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+              />
+            </label>
+          </div>
+
+          <label className="space-y-2 text-sm text-white/60">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.3em]">
+              SoundCloud URL
+            </span>
+            <input
+              type="url"
+              value={soundcloudUrl}
+              onChange={(event) => setSoundcloudUrl(event.target.value)}
+              placeholder="https://soundcloud.com/tuonome"
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none transition focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+            />
+          </label>
+
+          {errorMsg && (
+            <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+              {errorMsg}
             </div>
-          </section>
-
-          {/* Availability */}
-          <section className="space-y-3">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Availability
-            </h2>
-            <div className="flex flex-col gap-2">
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={openToCollab}
-                  onChange={(e) => setOpenToCollab(e.target.checked)}
-                  className="h-3 w-3 rounded border-border bg-background"
-                />
-                <span>Aperto a collab nella Tekkin Discovery</span>
-              </label>
-              <label className="inline-flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={openToPromo}
-                  onChange={(e) => setOpenToPromo(e.target.checked)}
-                  className="h-3 w-3 rounded border-border bg-background"
-                />
-                <span>Aperto a promo da altri artisti</span>
-              </label>
+          )}
+          {successMsg && (
+            <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
+              {successMsg}
             </div>
-          </section>
+          )}
 
-          {/* Links and profiles */}
-          <section className="space-y-3">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Links and profiles
-            </h2>
-
-            <p className="text-[11px] text-muted-foreground">
-              Aggiungi i tuoi profili ufficiali. Spotify e Beatport serviranno
-              per Tekkin Rank e per mostrare le tue top tracks.
-            </p>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Spotify artist URL
-                </label>
-                <input
-                  type="url"
-                  value={spotifyUrl}
-                  onChange={(e) => setSpotifyUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://open.spotify.com/artist/..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Beatport artist URL
-                </label>
-                <input
-                  type="url"
-                  value={beatportUrl}
-                  onChange={(e) => setBeatportUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://www.beatport.com/artist/..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  SoundCloud URL
-                </label>
-                <input
-                  type="url"
-                  value={soundcloudUrl}
-                  onChange={(e) => setSoundcloudUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://soundcloud.com/..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Instagram URL
-                </label>
-                <input
-                  type="url"
-                  value={instagramUrl}
-                  onChange={(e) => setInstagramUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://instagram.com/..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Beatstats URL
-                </label>
-                <input
-                  type="url"
-                  value={beatstatsUrl}
-                  onChange={(e) => setBeatstatsUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://beatstats.net/..."
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-medium">
-                  Apple Music URL
-                </label>
-                <input
-                  type="url"
-                  value={appleMusicUrl}
-                  onChange={(e) => setAppleMusicUrl(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-                  placeholder="https://music.apple.com/artist/..."
-                />
-              </div>
+          <div className="flex flex-col gap-3 pt-2 md:flex-row md:items-center md:justify-between">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleScanFromSpotify}
+                disabled={scanning}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-white/80 transition hover:border-cyan-400 hover:text-cyan-400 disabled:opacity-60"
+              >
+                {scanning ? "Scanning Spotify..." : "Scan da Spotify"}
+              </button>
+              <span className="text-[11px] text-white/50">Aggiorna foto e rank</span>
             </div>
-          </section>
-
-          <div className="flex gap-3 pt-2">
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              className="rounded-full border border-transparent bg-gradient-to-r from-cyan-400 to-emerald-400 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.3em] text-black transition hover:opacity-90 disabled:opacity-60"
             >
               {saving ? "Salvataggio..." : "Salva profilo"}
-            </button>
-
-            <button
-              type="button"
-              disabled={scanning}
-              onClick={handleScanFromSpotify}
-              className="inline-flex items-center justify-center rounded-md border border-primary/60 px-3 py-2 text-[11px] font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
-            >
-              {scanning ? "Scanning Spotify..." : "Scan da Spotify"}
             </button>
           </div>
 
           {scanLogs && scanLogs.length > 0 && (
-            <div className="mt-3 rounded-md border border-border/60 bg-background/40 px-3 py-2 text-[11px] text-muted-foreground space-y-1">
-              {scanLogs.map((line, idx) => (
-                <p key={idx}>{line}</p>
+            <div className="space-y-1 rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-[11px] text-white/60">
+              {scanLogs.map((line, index) => (
+                <p key={index}>{line}</p>
               ))}
             </div>
           )}
         </form>
-      </div>
-    </div>
+      )}
+    </section>
   );
 }

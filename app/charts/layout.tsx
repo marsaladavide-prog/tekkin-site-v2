@@ -5,7 +5,7 @@ import ArtistSidebar from "@/components/nav/ArtistSidebar";
 
 export default function ChartsLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
+    <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
       <ArtistSidebar />
 
       <main className="relative flex-1 overflow-y-auto">

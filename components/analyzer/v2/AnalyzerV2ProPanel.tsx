@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import type { AnalyzerCompareModel, Bands } from "@/lib/analyzer/v2/types";
 import { LoudnessMeterCard } from "./cards/LoudnessMeterCard";
+
 import { RhythmCard } from "./cards/RhythmCard";
+import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
+import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import {
   Card,
   Pill,
@@ -66,8 +69,8 @@ const TONAL_COPY = {
     },
     footerRef: "Giudizio basato sui percentili del reference model. Dettagli disponibili nel pannello.",
     footerNoRef: "Percentili reference non disponibili: mostra solo valori traccia.",
-    trackPercentile: "Quota",
-    targetWindow: "Ref",
+    trackPercentile: "Energia nella banda",
+    targetWindow: "Range tipico (reference)",
     refOn: "REF ON",
     refOff: "NO REF",
   },
@@ -93,8 +96,8 @@ const TONAL_COPY = {
     },
     footerRef: "Judgment based on reference percentiles. Details available in the panel.",
     footerNoRef: "Reference percentiles missing: showing track values only.",
-    trackPercentile: "Share",
-    targetWindow: "Ref",
+    trackPercentile: "Band energy",
+    targetWindow: "Typical range (reference)",
     refOn: "REF ON",
     refOff: "NO REF",
   },
@@ -301,10 +304,31 @@ function AnalyzerHero({
   model,
   onPlay,
   onShare,
+  reanalyze,
+  waveform,
+  lastAnalyzedAt,
 }: {
   model: AnalyzerCompareModel;
   onPlay?: () => void;
   onShare?: () => void;
+  reanalyze?: {
+    isLoading: boolean;
+    canRun: boolean;
+    onRun: () => void;
+    status?: "idle" | "running" | "success" | "error";
+    message?: string | null;
+  };
+  waveform?: {
+    peaks?: number[] | null;
+    bands?: any | null;
+    duration?: number | null;
+    progressRatio: number;
+    isPlaying: boolean;
+    timeLabel: string;
+    onTogglePlay: () => void;
+    onSeekRatio: (ratio: number) => void;
+  };
+  lastAnalyzedAt?: string | null;
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -314,21 +338,25 @@ function AnalyzerHero({
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <div className="text-lg font-semibold text-white">{model.projectTitle}</div>
             <Pill tone="muted">{model.mixType}</Pill>
+            {model.referenceName ? <Pill tone="muted">{model.referenceName}</Pill> : null}
             <span className="text-xs text-white/50">{model.versionName}</span>
           </div>
           <div className="mt-1 text-sm text-white/70">
-            {model.key ?? "Key n/a"} · {model.bpm ?? "BPM n/a"} BPM · {fmt1(model.loudness?.integrated_lufs ?? null)} LUFS
+            {model.key ?? "Key n/a"} | {model.bpm ?? "BPM n/a"} BPM | {fmt1(model.loudness?.integrated_lufs ?? null)} LUFS
           </div>
+          {lastAnalyzedAt ? (
+            <div className="mt-1 text-[11px] text-white/50">Last analyzed: {new Date(lastAnalyzedAt).toLocaleString()}</div>
+          ) : null}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-white/80">
             Tekkin <span className="font-semibold text-white">{fmt0(model.overallScore ?? null)}</span>
           </div>
           <button
             type="button"
             onClick={onPlay}
-className="rounded-xl bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 ring-1 ring-white/10 hover:bg-white/8"
+            className="rounded-xl bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 ring-1 ring-white/10 hover:bg-white/8"
           >
             Play
           </button>
@@ -339,7 +367,40 @@ className="rounded-xl bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 r
           >
             Share
           </button>
+          {reanalyze ? (
+            <button
+              type="button"
+              className="rounded-xl bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 ring-1 ring-white/10 hover:bg-white/8 disabled:opacity-60"
+              onClick={reanalyze.onRun}
+              disabled={!reanalyze.canRun || reanalyze.isLoading}
+            >
+              {reanalyze.isLoading ? "Analyzing..." : "Re-analyze"}
+            </button>
+          ) : null}
         </div>
+      </div>
+
+      {reanalyze?.message ? (
+        <div className={`mt-2 text-[11px] ${reanalyze.status === "error" ? "text-rose-300" : "text-emerald-300"}`}>
+          {reanalyze.message}
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        {waveform?.peaks ? (
+          <WaveformPreviewUnified
+            peaks={waveform.peaks}
+            bands={waveform.bands ?? null}
+            duration={waveform.duration ?? null}
+            progressRatio={waveform.progressRatio}
+            isPlaying={waveform.isPlaying}
+            timeLabel={waveform.timeLabel}
+            onTogglePlay={waveform.onTogglePlay}
+            onSeekRatio={waveform.onSeekRatio}
+          />
+        ) : (
+          <div className="text-sm text-white/60">Waveform non disponibile.</div>
+        )}
       </div>
     </div>
   );
@@ -354,6 +415,7 @@ function HorizontalTonalBalance({
   referencePercentiles,
   lang = "it",
   refState,
+  embedded,
 }: {
   trackBands?: Bands | null;
   referenceBands?: Bands | null;
@@ -361,6 +423,7 @@ function HorizontalTonalBalance({
   referencePercentiles?: BandsPercentiles | null;
   lang?: "it" | "en";
   refState: RefState;
+  embedded?: boolean;
 }) {
   const trackPct = useMemo(() => bandsToPct(trackBands), [trackBands]);
 
@@ -449,28 +512,8 @@ const bandData = BAND_ORDER.map((key) => {
   const overallScore = known ? Math.round((okCount / known) * 100) : null;
   const [showDetails, setShowDetails] = React.useState(false);
 
-  return (
-    <Card
-      title={copy.title}
-      subtitle={
-        hasPerc
-          ? copy.subtitleRef(referenceName)
-          : copy.subtitleNoRef
-      }
-      right={
-        <div className="flex items-center gap-3">
-          <SourcePills state={refState} />
-          <button
-            type="button"
-            onClick={() => setShowDetails((v) => !v)}
-            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70 hover:bg-white/10"
-          >
-            {showDetails ? copy.detailsHide : copy.detailsToggle}
-          </button>
-        </div>
-      }
-    >
-      <div className="space-y-3">
+  const content = (
+    <div className="space-y-3">
         <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -538,10 +581,32 @@ const bandData = BAND_ORDER.map((key) => {
                   {showDetails ? (
                     <div className="mt-2 text-[11px] text-white/45">
                       <div className="text-[12px] text-white/80">{b.hint}</div>
-                      <div className="mt-2 flex items-center gap-2 text-[11px] text-white/60">
-                        <span>{copy.trackPercentile}: {b.tPct == null ? "n/a" : `${fmt1(b.tPct)}%`}</span>
-                        <span className="text-white/35">•</span>
-                        <span title={tooltip}>{copy.targetWindow}: {b.status.range.label}</span>
+                      <div className="mt-2 space-y-1 text-[11px] text-white/60">
+                        <div>
+                          <span className="text-white/70">{copy.trackPercentile}:</span>{" "}
+                          <span className="font-semibold text-white/85">
+                            {b.tPct == null ? "n/a" : `${fmt1(b.tPct)}%`}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span className="text-white/70">{copy.targetWindow}:</span>{" "}
+                          <span className="font-semibold text-white/85">
+                            {b.status.range.low != null && b.status.range.high != null
+                              ? `${fmt1(b.status.range.low)}% - ${fmt1(b.status.range.high)}%`
+                              : "n/a"}
+                          </span>
+                        </div>
+
+                        <div className="text-white/55">
+                          {b.status.status === "low"
+                            ? "Sei sotto il range."
+                            : b.status.status === "high"
+                            ? "Sei sopra il range."
+                            : b.status.status === "ok"
+                            ? "Sei in linea col reference."
+                            : "Reference range non disponibile."}
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -552,29 +617,65 @@ const bandData = BAND_ORDER.map((key) => {
         </div>
 
         <div className="text-xs text-white/55">{hasPerc ? copy.footerRef : copy.footerNoRef}</div>
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <Card
+      title={copy.title}
+      subtitle={
+        hasPerc
+          ? copy.subtitleRef(referenceName)
+          : copy.subtitleNoRef
+      }
+      right={
+        <div className="flex items-center gap-3">
+          <SourcePills state={refState} />
+          <button
+            type="button"
+            onClick={() => setShowDetails((v) => !v)}
+            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70 hover:bg-white/10"
+          >
+            {showDetails ? copy.detailsHide : copy.detailsToggle}
+          </button>
+        </div>
+      }
+    >
+      {content}
     </Card>
   );
 }
 
 function SoundFieldCard({
   points,
-  referencePoints,
+  stereoWidth,
+  widthByBand,
   correlation,
+  referenceStereoPercentiles,
+  referenceSoundField,
   refState,
+  embedded,
 }: {
   points: { angleDeg: number; radius: number }[] | null | undefined;
-  referencePoints?: { angleDeg: number; radius: number }[] | null;
-  correlation?: number | null;
+  stereoWidth?: number | null;
+  widthByBand?: Partial<Record<keyof Bands, number>> | null;
+  correlation?: number[] | null;
+  referenceStereoPercentiles?: AnalyzerCompareModel["referenceStereoPercentiles"] | null;
+  referenceSoundField?: AnalyzerCompareModel["referenceSoundField"] | null;
   refState: RefState;
+  embedded?: boolean;
 }) {
   const size = 220;
   const cx = size / 2;
   const cy = size / 2;
   const rMax = 92;
 
-  const buildPath = (ptsIn: { angleDeg: number; radius: number }[] | null | undefined) => {
-    const pts = Array.isArray(ptsIn) ? ptsIn : [];
+  const path = useMemo(() => {
+    const pts = Array.isArray(points) ? points : [];
     if (pts.length < 2) return "";
     const toXY = (p: { angleDeg: number; radius: number }) => {
       const a = (p.angleDeg * Math.PI) / 180;
@@ -588,142 +689,190 @@ function SoundFieldCard({
       d += ` L ${q.x.toFixed(2)} ${q.y.toFixed(2)}`;
     }
     return d;
-  };
-
-  const trackPath = useMemo(() => buildPath(points), [points]);
-  const refPath = useMemo(() => buildPath(referencePoints), [referencePoints]);
-
-  const meanRadius = useMemo(() => {
-    const pts = Array.isArray(points) ? points : [];
-    if (!pts.length) return null;
-    const m = pts.reduce((a, p) => a + safeNum((p as any).radius), 0) / pts.length;
-    return Number.isFinite(m) ? m : null;
   }, [points]);
 
-  const widthLabel =
-    typeof meanRadius !== "number"
-      ? "n/a"
-      : meanRadius < 0.25
-      ? "stretto"
-      : meanRadius < 0.38
-      ? "moderato"
-      : "wide";
+  const refBandPath = useMemo(() => {
+    const sf = referenceSoundField;
+    const angles = Array.isArray(sf?.angle_deg) ? sf?.angle_deg : null;
+    const p10 = Array.isArray(sf?.p10_radius) ? sf?.p10_radius : null;
+    const p90 = Array.isArray(sf?.p90_radius) ? sf?.p90_radius : null;
+    if (!angles || !p10 || !p90 || angles.length < 2) return null;
 
-  const corrTone: StatusTone =
-    typeof correlation !== "number"
-      ? "muted"
-      : correlation >= 0.7
-      ? "ok"
-      : correlation >= 0.3
-      ? "mid"
-      : correlation >= 0
-      ? "low"
-      : "high";
+    const buildPath = (radii: Array<number | null | undefined>) => {
+      const pts = angles
+        .map((a, i) => ({ angleDeg: a, radius: radii[i] }))
+        .filter((p): p is { angleDeg: number; radius: number } => typeof p.angleDeg === "number" && typeof p.radius === "number");
+      if (pts.length < 2) return "";
+      const toXY = (p: { angleDeg: number; radius: number }) => {
+        const a = (p.angleDeg * Math.PI) / 180;
+        const rr = clamp01(p.radius) * rMax;
+        return { x: cx + Math.cos(a) * rr, y: cy - Math.sin(a) * rr };
+      };
+      const first = toXY(pts[0]);
+      let d = `M ${first.x.toFixed(2)} ${first.y.toFixed(2)}`;
+      for (let i = 1; i < pts.length; i++) {
+        const q = toXY(pts[i]);
+        d += ` L ${q.x.toFixed(2)} ${q.y.toFixed(2)}`;
+      }
+      d += " Z";
+      return d;
+    };
+
+    const outer = buildPath(p90);
+    const inner = buildPath(p10);
+    if (!outer || !inner) return null;
+    return `${outer} ${inner}`;
+  }, [referenceSoundField]);
+
+  const widthVal =
+    typeof stereoWidth === "number" && Number.isFinite(stereoWidth) ? clamp01(stereoWidth) : null;
+
+  const corrArr = Array.isArray(correlation) ? correlation.filter((x) => typeof x === "number" && Number.isFinite(x)) : [];
+  const corrMean = corrArr.length ? corrArr.reduce((a, b) => a + b, 0) / corrArr.length : null;
+
+  const widthRef = referenceStereoPercentiles?.stereoWidth ?? null;
+  const corrRef = referenceStereoPercentiles?.lrCorrelation ?? null;
+
+  const widthLabel =
+    widthVal == null ? "n/a" : widthVal < 0.25 ? "stretto" : widthVal < 0.45 ? "moderato" : "wide";
 
   const corrLabel =
-    typeof correlation !== "number"
-      ? "n/a"
-      : correlation >= 0.7
-      ? "mono-safe"
-      : correlation >= 0.3
-      ? "ok"
-      : correlation >= 0
-      ? "attenzione"
-      : "rischio fase";
+    corrMean == null ? "n/a" : corrMean >= 0.7 ? "mono-safe" : corrMean >= 0.2 ? "attenzione fase" : "rischio fase";
 
-  return (
-    <Card
-      title="Sound field"
-      subtitle="Distribuzione stereo (track vs reference)"
-      right={<SourcePills state={refState} />}
-    >
-      <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+  const inRange = (v: number | null, p: any) =>
+    v != null && p && typeof p.p10 === "number" && typeof p.p90 === "number" ? v >= p.p10 && v <= p.p90 : null;
+
+  const widthInRef = inRange(widthVal, widthRef);
+  const corrInRef = inRange(corrMean, corrRef);
+
+  const rangeText = (p: any) =>
+    p && (typeof p.p10 === "number" || typeof p.p90 === "number")
+      ? `${typeof p.p10 === "number" ? fmt2(p.p10) : "n/a"} ↔ ${typeof p.p90 === "number" ? fmt2(p.p90) : "n/a"}`
+      : "n/a";
+
+  function fmt2(n: number) {
+    return (Math.round(n * 100) / 100).toFixed(2);
+  }
+
+  const content = (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
         <div className="flex items-center justify-center">
-          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-            <defs>
-              <radialGradient id="sfGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(52,211,153,0.20)" />
-                <stop offset="70%" stopColor="rgba(52,211,153,0.06)" />
-                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-              </radialGradient>
-            </defs>
+          <div className="relative">
+            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+              <defs>
+                <radialGradient id="sfGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="rgba(52,211,153,0.25)" />
+                  <stop offset="70%" stopColor="rgba(52,211,153,0.08)" />
+                  <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+                </radialGradient>
+              </defs>
 
-            <circle cx={cx} cy={cy} r={rMax} fill="url(#sfGlow)" stroke="rgba(255,255,255,0.12)" />
-            <circle cx={cx} cy={cy} r={rMax * 0.66} fill="none" stroke="rgba(255,255,255,0.10)" />
-            <circle cx={cx} cy={cy} r={rMax * 0.33} fill="none" stroke="rgba(255,255,255,0.08)" />
+              <circle cx={cx} cy={cy} r={rMax} fill="url(#sfGlow)" stroke="rgba(255,255,255,0.12)" />
+              <circle cx={cx} cy={cy} r={rMax * 0.66} fill="none" stroke="rgba(255,255,255,0.10)" />
+              <circle cx={cx} cy={cy} r={rMax * 0.33} fill="none" stroke="rgba(255,255,255,0.08)" />
 
-            <line x1={cx - rMax} y1={cy} x2={cx + rMax} y2={cy} stroke="rgba(255,255,255,0.10)" />
-            <line x1={cx} y1={cy - rMax} x2={cx} y2={cy + rMax} stroke="rgba(255,255,255,0.10)" />
+              <line x1={cx - rMax} y1={cy} x2={cx + rMax} y2={cy} stroke="rgba(255,255,255,0.10)" />
+              <line x1={cx} y1={cy - rMax} x2={cx} y2={cy + rMax} stroke="rgba(255,255,255,0.10)" />
 
-            {/* scale labels */}
-            <text x={cx + 6} y={cy - rMax * 0.33} fill="rgba(255,255,255,0.40)" fontSize="10">
-              0.33
-            </text>
-            <text x={cx + 6} y={cy - rMax * 0.66} fill="rgba(255,255,255,0.40)" fontSize="10">
-              0.66
-            </text>
-            <text x={cx + 6} y={cy - rMax} fill="rgba(255,255,255,0.40)" fontSize="10">
-              1.00
-            </text>
-            <text x={cx} y={cy + 4} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
-              mono
-            </text>
-            <text x={cx} y={cy - rMax - 6} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
-              wide
-            </text>
+              {refBandPath ? (
+                <path d={refBandPath} fill="rgba(59,130,246,0.15)" stroke="none" fillRule="evenodd" />
+              ) : null}
 
-            {/* reference first (so track is on top) */}
-            {refPath ? (
-              <path
-                d={refPath}
-                fill="none"
-                stroke="rgba(59,130,246,0.75)"
-                strokeWidth={2.0}
-                strokeDasharray="5 5"
-              />
-            ) : null}
+              {path ? (
+                <path d={path} fill="none" stroke="rgba(52,211,153,0.9)" strokeWidth={2.2} />
+              ) : (
+                <text x={cx} y={cy} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
+                  no data
+                </text>
+              )}
 
-            {trackPath ? (
-              <path d={trackPath} fill="none" stroke="rgba(52,211,153,0.9)" strokeWidth={2.2} />
-            ) : (
-              <text x={cx} y={cy} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
-                no data
+              {/* etichette scala */}
+              <text x={cx} y={cy - rMax - 6} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10">
+                wide 1.00
               </text>
-            )}
-          </svg>
+              <text x={cx} y={cy - rMax * 0.66 - 2} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
+                0.66
+              </text>
+              <text x={cx} y={cy - rMax * 0.33 + 2} textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">
+                0.33
+              </text>
+              <text x={cx} y={cy + 12} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10">
+                mono 0.00
+              </text>
+            </svg>
+          </div>
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-            <div className="text-xs text-white/55">Width index</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs text-white/55">Stereo width</div>
+              {widthRef && typeof widthRef.p10 === "number" && typeof widthRef.p90 === "number" ? (
+                widthInRef ? <StatusChip tone="ok">OK</StatusChip> : <StatusChip tone="high">OUT</StatusChip>
+              ) : (
+                <StatusChip tone="muted">NO REF</StatusChip>
+              )}
+            </div>
             <div className="mt-1 text-lg font-semibold text-white">
-              {typeof meanRadius === "number" ? meanRadius.toFixed(2) : "n/a"}{" "}
+              {widthVal == null ? "n/a" : widthVal.toFixed(2)}{" "}
               <span className="text-sm font-semibold text-white/60">{widthLabel}</span>
             </div>
-            <div className="mt-1 text-[11px] text-white/45">Scala 0.00 mono, 1.00 wide</div>
+            <div className="mt-1 text-[11px] text-white/55">Scala: 0.00 mono, 1.00 wide</div>
+            <div className="mt-1 text-[11px] text-white/55">Reference p10/p90: {rangeText(widthRef)}</div>
           </div>
 
           <div className="rounded-xl border border-white/10 bg-black/20 p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-white/55">Correlation</div>
-              <StatusChip tone={corrTone}>{corrLabel}</StatusChip>
+              {corrRef && typeof corrRef.p10 === "number" && typeof corrRef.p90 === "number" ? (
+                corrInRef ? <StatusChip tone="ok">OK</StatusChip> : <StatusChip tone="high">OUT</StatusChip>
+              ) : (
+                <StatusChip tone="muted">NO REF</StatusChip>
+              )}
             </div>
             <div className="mt-1 text-lg font-semibold text-white">
-              {typeof correlation === "number" ? correlation.toFixed(2) : "n/a"}
+              {corrMean == null ? "n/a" : corrMean.toFixed(2)}{" "}
+              <span className="text-sm font-semibold text-white/60">{corrLabel}</span>
             </div>
-            <div className="mt-1 text-[11px] text-white/45">1.00 mono-safe, &lt;0 rischio fase</div>
+            <div className="mt-1 text-[11px] text-white/55">Scala: -1.00 anti-phase, +1.00 mono-safe</div>
+            <div className="mt-1 text-[11px] text-white/55">Reference p10/p90: {rangeText(corrRef)}</div>
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-emerald-200">
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> Traccia
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/25 bg-white/5 px-2 py-0.5 text-blue-200">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-400" /> Reference
-          </span>
+        {widthByBand ? (
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/55 mb-2">Width by band</div>
+            <div className="grid grid-cols-2 gap-2">
+              {BAND_ORDER.map((k) => {
+                const v = (widthByBand as any)?.[k];
+                const vv = typeof v === "number" && Number.isFinite(v) ? clamp01(v) : null;
+                return (
+                  <div key={k} className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-white/55">{BAND_LABELS.it[k]}</span>
+                    <span className="text-[11px] text-white/70">{vv == null ? "n/a" : vv.toFixed(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+        <div className="mt-3 text-[10px] text-white/45">
+          Angle 0-180°, radius = stereo energy (normalized). {refBandPath ? "Range band shows p10-p90." : "No reference band."}
         </div>
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <Card
+      title="Sound field"
+      subtitle="Distribuzione stereo (track) con metrica reale e range reference"
+      right={<SourcePills state={refState} />}
+    >
+      {content}
     </Card>
   );
 }
@@ -734,56 +883,66 @@ function SpectrumCompareCard({
   reference,
   referenceName,
   refState,
+  embedded,
+  height,
 }: {
   track?: SpectrumPoint[] | null;
   reference?: SpectrumPoint[] | null;
   referenceName?: string | null;
   refState: RefState;
+  embedded?: boolean;
+  height?: number;
 }) {
-  const H = 180;
-  const pad = { l: 0, r: 0, t: 16, b: 26 };
+  const H = height ?? 180;
+  const pad = { l: 44, r: 10, t: 16, b: 26 };
+
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [svgWidth, setSvgWidth] = React.useState(820);
+  const [deltaMode, setDeltaMode] = React.useState(false);
+
   React.useEffect(() => {
     const updateWidth = () => {
-      if (containerRef.current) {
-        setSvgWidth(containerRef.current.clientWidth || 820);
-      }
+      if (containerRef.current) setSvgWidth(containerRef.current.clientWidth || 820);
     };
     updateWidth();
     if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => updateWidth());
-      if (containerRef.current) observer.observe(containerRef.current);
-      return () => observer.disconnect();
+      const obs = new ResizeObserver(() => updateWidth());
+      if (containerRef.current) obs.observe(containerRef.current);
+      return () => obs.disconnect();
     }
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
+  const hasRef = Array.isArray(reference) && reference.length > 0;
+  const hasTrack = Array.isArray(track) && track.length > 0;
+
   const data = useMemo(() => {
     const t = Array.isArray(track) ? track : [];
     const r = Array.isArray(reference) ? reference : [];
     const n = Math.max(t.length, r.length);
-    const out: { hz: number; t?: number; r?: number }[] = [];
+    const out: { hz: number; t?: number; r?: number; d?: number }[] = [];
+
     for (let i = 0; i < n; i++) {
+      const hz = (t[i]?.hz ?? r[i]?.hz) as number | undefined;
+      const tt = typeof t[i]?.mag === "number" ? t[i]!.mag : undefined;
+      const rr = typeof r[i]?.mag === "number" ? r[i]!.mag : undefined;
       out.push({
-        hz: t[i]?.hz ?? r[i]?.hz ?? i,
-        t: typeof t[i]?.mag === "number" ? t[i].mag : undefined,
-        r: typeof r[i]?.mag === "number" ? r[i].mag : undefined,
+        hz: typeof hz === "number" ? hz : i,
+        t: tt,
+        r: rr,
+        d: typeof tt === "number" && typeof rr === "number" ? tt - rr : undefined,
       });
     }
     return out;
   }, [track, reference]);
 
-  const hasRef = Array.isArray(reference) && reference.length > 0;
-  const hasTrack = Array.isArray(track) && track.length > 0;
-
-  function avgInRange(key: "t" | "r", hzMin: number, hzMax: number) {
+  function avgInRange(key: "t" | "r" | "d", hzMin: number, hzMax: number) {
     let sum = 0;
     let n = 0;
     for (const p of data) {
       const hz = typeof p.hz === "number" ? p.hz : null;
-      const v = p[key];
+      const v = (p as any)[key] as number | undefined;
       if (hz == null || typeof v !== "number") continue;
       if (hz >= hzMin && hz <= hzMax) {
         sum += v;
@@ -796,58 +955,55 @@ function SpectrumCompareCard({
   const summary = useMemo(() => {
     if (!hasRef || !hasTrack) return null;
 
-    const subT = avgInRange("t", 20, 60);
-    const subR = avgInRange("r", 20, 60);
+    const sub = avgInRange("d", 20, 60);
+    const lowmid = avgInRange("d", 150, 400);
+    const high = avgInRange("d", 6000, 12000);
 
-    const lmT = avgInRange("t", 150, 400);
-    const lmR = avgInRange("r", 150, 400);
-
-    const hiT = avgInRange("t", 6000, 12000);
-    const hiR = avgInRange("r", 6000, 12000);
-
-    const d = (a: number | null, b: number | null) =>
-      typeof a === "number" && typeof b === "number" ? a - b : null;
-
-    return {
-      sub: d(subT, subR),
-      lowmid: d(lmT, lmR),
-      high: d(hiT, hiR),
-    };
+    return { sub, lowmid, high };
   }, [data, hasRef, hasTrack]);
 
-  const { tMin, tMax } = useMemo(() => {
+  const domain = useMemo(() => {
+    if (deltaMode) {
+      let maxAbs = 0;
+      for (const p of data) {
+        if (typeof p.d === "number") maxAbs = Math.max(maxAbs, Math.abs(p.d));
+      }
+      if (!Number.isFinite(maxAbs) || maxAbs === 0) maxAbs = 6;
+      const padAbs = Math.min(12, Math.max(2, maxAbs * 1.1));
+      return { min: -padAbs, max: padAbs, isDelta: true };
+    }
+
     let min = Infinity;
     let max = -Infinity;
-    for (const d of data) {
-      if (typeof d.t === "number") {
-        min = Math.min(min, d.t);
-        max = Math.max(max, d.t);
+    for (const p of data) {
+      if (typeof p.t === "number") {
+        min = Math.min(min, p.t);
+        max = Math.max(max, p.t);
       }
-      if (typeof d.r === "number") {
-        min = Math.min(min, d.r);
-        max = Math.max(max, d.r);
+      if (typeof p.r === "number") {
+        min = Math.min(min, p.r);
+        max = Math.max(max, p.r);
       }
     }
     if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
       min = -60;
       max = 0;
     }
-    return { tMin: min, tMax: max };
-  }, [data]);
+    return { min, max, isDelta: false };
+  }, [data, deltaMode]);
 
   const xFromHz = (hz: number) => {
     const lo = Math.log10(20);
     const hi = Math.log10(20000);
     const v = clamp01((Math.log10(Math.max(20, Math.min(20000, hz))) - lo) / (hi - lo));
-    return v * svgWidth;
+    return pad.l + v * (svgWidth - pad.l - pad.r);
   };
 
-  const yFromMag = (m: number) => {
-    const v = clamp01((m - tMin) / (tMax - tMin));
-    return pad.t + (1 - v) * (H - pad.t - pad.b);
+  const yFromVal = (v: number) => {
+    const t = clamp01((v - domain.min) / (domain.max - domain.min));
+    return pad.t + (1 - t) * (H - pad.t - pad.b);
   };
 
-  // Smooth path (Catmull-Rom to Bezier)
   function smoothPath(points: { x: number; y: number }[]) {
     if (points.length < 2) return "";
     let d = `M ${points[0].x} ${points[0].y}`;
@@ -859,16 +1015,34 @@ function SpectrumCompareCard({
     }
     return d;
   }
-  const pathFrom = (key: "t" | "r") => {
-    const pts = data.filter((p) => typeof p[key] === "number").map((p) => ({ x: xFromHz(p.hz), y: yFromMag(p[key]!) }));
+
+  const pathFrom = (key: "t" | "r" | "d") => {
+    const pts = data
+      .filter((p) => typeof (p as any)[key] === "number")
+      .map((p) => ({ x: xFromHz(p.hz), y: yFromVal((p as any)[key] as number) }));
     return smoothPath(pts);
   };
 
-  const tPath = useMemo(() => pathFrom("t"), [data]);
-  const rPath = useMemo(() => pathFrom("r"), [data]);
+  const tPath = useMemo(() => (deltaMode ? "" : pathFrom("t")), [data, deltaMode, domain.min, domain.max, svgWidth]);
+  const rPath = useMemo(() => (deltaMode ? "" : pathFrom("r")), [data, deltaMode, domain.min, domain.max, svgWidth]);
+  const dPath = useMemo(() => (deltaMode ? pathFrom("d") : ""), [data, deltaMode, domain.min, domain.max, svgWidth]);
 
-  return (
-    <Card title="Spettro (confronto)" right={<SourcePills state={refState} />}>
+  const yTicks = useMemo(() => {
+    const top = domain.max;
+    const mid = (domain.min + domain.max) / 2;
+    const bot = domain.min;
+    const fmt = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(0)} dB`;
+    return [
+      { v: top, label: fmt(top) },
+      { v: mid, label: fmt(mid) },
+      { v: bot, label: fmt(bot) },
+    ];
+  }, [domain.min, domain.max]);
+
+  const zeroY = domain.isDelta ? yFromVal(0) : null;
+
+  const content = (
+    <>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-emerald-200">
@@ -877,16 +1051,20 @@ function SpectrumCompareCard({
           <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-blue-200">
             <span className="inline-block h-2 w-2 rounded-full bg-blue-400" /> Reference
           </span>
+          {deltaMode ? (
+            <span className="text-[11px] text-white/50">Mostrando Traccia - Reference</span>
+          ) : null}
         </div>
+
         {summary && (
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.sub == null ? 'border-white/10 text-white/60' : summary.sub >= 0 ? 'border-emerald-400/25 text-emerald-200' : 'border-rose-400/25 text-rose-200'}`}>
+            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.sub == null ? "border-white/10 text-white/60" : summary.sub >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
               Sub {summary.sub == null ? "n/a" : `${summary.sub >= 0 ? "+" : ""}${summary.sub.toFixed(1)} dB`}
             </span>
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.lowmid == null ? 'border-white/10 text-white/60' : summary.lowmid >= 0 ? 'border-emerald-400/25 text-emerald-200' : 'border-rose-400/25 text-rose-200'}`}>
+            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.lowmid == null ? "border-white/10 text-white/60" : summary.lowmid >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
               LowMid {summary.lowmid == null ? "n/a" : `${summary.lowmid >= 0 ? "+" : ""}${summary.lowmid.toFixed(1)} dB`}
             </span>
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.high == null ? 'border-white/10 text-white/60' : summary.high >= 0 ? 'border-emerald-400/25 text-emerald-200' : 'border-rose-400/25 text-rose-200'}`}>
+            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.high == null ? "border-white/10 text-white/60" : summary.high >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
               High {summary.high == null ? "n/a" : `${summary.high >= 0 ? "+" : ""}${summary.high.toFixed(1)} dB`}
             </span>
           </div>
@@ -895,26 +1073,26 @@ function SpectrumCompareCard({
 
       <div ref={containerRef} className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 relative w-full">
         <svg width="100%" height={H} viewBox={`0 0 ${svgWidth} ${H}`}>
-          <defs>
-            <linearGradient id="specTrack" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="rgba(236,72,153,0.65)" />
-              <stop offset="55%" stopColor="rgba(168,85,247,0.55)" />
-              <stop offset="100%" stopColor="rgba(52,211,153,0.55)" />
-            </linearGradient>
-            <linearGradient id="specTrackFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgba(52,211,153,0.18)" />
-              <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-            </linearGradient>
-          </defs>
-
           {[100, 1000, 10000].map((hz) => {
             const x = xFromHz(hz);
             return <line key={hz} x1={x} y1={pad.t} x2={x} y2={H - pad.b} stroke="rgba(255,255,255,0.08)" />;
           })}
-          {[0.25, 0.5, 0.75].map((p, i) => {
-            const y = pad.t + p * (H - pad.t - pad.b);
-            return <line key={i} x1={0} y1={y} x2={svgWidth} y2={y} stroke="rgba(255,255,255,0.06)" />;
+
+          {yTicks.map((t, i) => {
+            const y = yFromVal(t.v);
+            return (
+              <g key={i}>
+                <line x1={pad.l} y1={y} x2={svgWidth - pad.r} y2={y} stroke="rgba(255,255,255,0.06)" />
+                <text x={pad.l - 8} y={y + 4} fill="rgba(255,255,255,0.45)" fontSize="11" textAnchor="end">
+                  {t.label}
+                </text>
+              </g>
+            );
           })}
+
+          {domain.isDelta && zeroY != null ? (
+            <line x1={pad.l} y1={zeroY} x2={svgWidth - pad.r} y2={zeroY} stroke="rgba(255,255,255,0.18)" />
+          ) : null}
 
           <text x={xFromHz(20)} y={H - 8} fill="rgba(255,255,255,0.45)" fontSize="11" textAnchor="start">
             20Hz
@@ -932,24 +1110,656 @@ function SpectrumCompareCard({
             20kHz
           </text>
 
-          {hasTrack && tPath ? (
-            <path
-              d={tPath}
-              fill="none"
-              stroke="#34d399"
-              strokeWidth={2.6}
-            />
+          {!deltaMode && hasTrack && tPath ? <path d={tPath} fill="none" stroke="#34d399" strokeWidth={2.6} /> : null}
+          {!deltaMode && hasRef && rPath ? <path d={rPath} fill="none" stroke="#3b82f6" strokeWidth={2.0} /> : null}
+
+          {deltaMode && dPath ? (
+            <path d={dPath} fill="none" stroke="rgba(236,72,153,0.9)" strokeWidth={2.4} />
           ) : null}
-          {hasRef && rPath ? <path d={rPath} fill="none" stroke="#3b82f6" strokeWidth={2.0} /> : null}
 
           {!hasTrack ? (
-            <text x={svgWidth / 2} y={H / 2} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
+            <text x={(pad.l + (svgWidth - pad.r)) / 2} y={H / 2} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
               no spectrum data
             </text>
           ) : null}
         </svg>
+
+        <div className="mt-2 text-[11px] text-white/45">
+          {deltaMode
+            ? "Asse Y in dB: differenza Traccia - Reference (0 dB = uguale)."
+            : "Asse Y in dB (range auto)."}
+        </div>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <Card
+      title="Spettro (confronto)"
+      right={
+        <div className="flex items-center gap-2">
+          <SourcePills state={refState} />
+          <button
+            type="button"
+            onClick={() => setDeltaMode((v) => !v)}
+            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70 hover:bg-white/10"
+            disabled={!hasRef || !hasTrack}
+            title={!hasRef || !hasTrack ? "Delta disponibile solo con Traccia e Reference" : "Mostra Traccia - Reference"}
+          >
+            {deltaMode ? "Delta view: ON" : "Delta view"}
+          </button>
+        </div>
+      }
+    >
+      {content}
+    </Card>
+  );
+}
+
+
+function TimbreCard({
+  model,
+  tonalRefState,
+  spectrumRefState,
+}: {
+  model: AnalyzerCompareModel;
+  tonalRefState: RefState;
+  spectrumRefState: RefState;
+}) {
+  const spectral = model.spectral ?? null;
+  const refSpectral = model.referenceSpectralPercentiles ?? null;
+  const hasLive = !!(model.bandsNorm && sumBands(model.bandsNorm) > 0) || (model.spectrumTrack?.length ?? 0) > 0;
+  const hasRef = tonalRefState.ref || spectrumRefState.ref;
+  const timbreRefState = getLiveStateForX(model, {
+    hasLive,
+    ref: hasRef,
+    mockEnabled: false,
+    reason: hasRef ? "Reference timbre disponibile" : model.referenceName ? "Reference timbre mancante" : "Nessun reference timbre",
+  });
+
+  const metrics = [
+    {
+      key: "centroid",
+      label: "Centroid",
+      value: spectral?.spectral_centroid_hz ?? null,
+      unit: "Hz",
+      ref: refSpectral?.spectral_centroid_hz ?? null,
+      max: 8000,
+      hintHigh: "alto: possibile harsh e hi-hat aggressivi",
+      hintLow: "basso: mix chiuso, poco air",
+    },
+    {
+      key: "bandwidth",
+      label: "Bandwidth",
+      value: spectral?.spectral_bandwidth_hz ?? null,
+      unit: "Hz",
+      ref: refSpectral?.spectral_bandwidth_hz ?? null,
+      max: 6000,
+      hintHigh: "ampio: piu complesso/ricco",
+      hintLow: "stretto: mix concentrato",
+    },
+    {
+      key: "rolloff",
+      label: "Rolloff",
+      value: spectral?.spectral_rolloff_hz ?? null,
+      unit: "Hz",
+      ref: refSpectral?.spectral_rolloff_hz ?? null,
+      max: 12000,
+      hintHigh: "alto: top-end brillante",
+      hintLow: "basso: top-end chiuso",
+    },
+    {
+      key: "flatness",
+      label: "Flatness",
+      value: spectral?.spectral_flatness ?? null,
+      unit: "",
+      ref: refSpectral?.spectral_flatness ?? null,
+      max: 0.6,
+      hintHigh: "alto: rumore o texture diffuse",
+      hintLow: "basso: contenuto piu tonale",
+    },
+    {
+      key: "zcr",
+      label: "ZCR",
+      value: spectral?.zero_crossing_rate ?? null,
+      unit: "",
+      ref: refSpectral?.zero_crossing_rate ?? null,
+      max: 0.2,
+      hintHigh: "alto: percussivo/ruvido",
+      hintLow: "basso: piu morbido",
+    },
+  ];
+
+  const rangeText = (p: any) =>
+    p && (typeof p.p10 === "number" || typeof p.p90 === "number")
+      ? `${typeof p.p10 === "number" ? p.p10.toFixed(2) : "n/a"} / ${typeof p.p90 === "number" ? p.p90.toFixed(2) : "n/a"}`
+      : "no ref";
+
+  const normalize = (value: number | null, p: any, fallbackMax: number) => {
+    if (value == null || !Number.isFinite(value)) return 0;
+    if (p && typeof p.p10 === "number" && typeof p.p90 === "number" && p.p90 > p.p10) {
+      return clamp01((value - p.p10) / (p.p90 - p.p10));
+    }
+    return clamp01(value / fallbackMax);
+  };
+
+  return (
+    <Card
+      title="Timbre"
+      subtitle="Tonal balance + spectrum + spectral stats"
+      right={<SourcePills state={timbreRefState} />}
+      className="h-full flex flex-col"
+      bodyClassName="flex-1 overflow-auto"
+    >
+      <div className="space-y-4">
+        <HorizontalTonalBalance
+          trackBands={model.bandsNorm as any}
+          referenceBands={model.referenceBandsNorm as any}
+          referenceName={model.referenceName}
+          referencePercentiles={(model as any).referenceBandsPercentiles ?? null}
+          lang={(model as any).lang === "en" ? "en" : "it"}
+          refState={tonalRefState}
+          embedded
+        />
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <SpectrumCompareCard
+            track={model.spectrumTrack as any}
+            reference={model.spectrumRef as any}
+            referenceName={model.referenceName}
+            refState={spectrumRefState}
+            embedded
+            height={140}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {metrics.map((m) => {
+            const val = typeof m.value === "number" && Number.isFinite(m.value) ? m.value : null;
+            const pct = normalize(val, m.ref, m.max);
+            const hint = (() => {
+              if (val == null) return "n/a";
+              if (m.ref && typeof m.ref.p10 === "number" && typeof m.ref.p90 === "number") {
+                if (val > m.ref.p90) return m.hintHigh;
+                if (val < m.ref.p10) return m.hintLow;
+                return "in range";
+              }
+              return val > m.max * 0.7 ? m.hintHigh : val < m.max * 0.35 ? m.hintLow : "in range";
+            })();
+            return (
+              <div key={m.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{m.label}</div>
+                <div className="mt-1 text-sm font-semibold text-white">
+                  {val == null ? "n/a" : `${m.key === "flatness" || m.key === "zcr" ? val.toFixed(3) : Math.round(val)}${m.unit ? ` ${m.unit}` : ""}`}
+                </div>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-white/5">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" style={{ width: `${pct * 100}%` }} />
+                </div>
+                <div className="mt-1 text-[10px] text-white/45">Ref p10/p90: {rangeText(m.ref)}</div>
+                <div className="mt-1 text-[10px] text-white/55">{hint}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </Card>
+  );
+}
+
+function CorrelationMeter({
+  value,
+  ref,
+  height = 56,
+}: {
+  value: number | null;
+  ref?: { p10?: number; p50?: number; p90?: number } | null;
+  height?: number;
+}) {
+  const W = 520;
+  const H = height;
+  const pad = { l: 18, r: 18, t: 10, b: 18 };
+  const innerW = W - pad.l - pad.r;
+  const xFromVal = (v: number) => pad.l + ((v + 1) / 2) * innerW;
+  const needle = typeof value === "number" && Number.isFinite(value) ? xFromVal(Math.max(-1, Math.min(1, value))) : null;
+  const refBand =
+    ref && typeof ref.p10 === "number" && typeof ref.p90 === "number"
+      ? { left: xFromVal(ref.p10), right: xFromVal(ref.p90) }
+      : null;
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between text-[11px] text-white/55">
+        <span>Correlation meter</span>
+        <span>{typeof value === "number" ? value.toFixed(2) : "n/a"}</span>
+      </div>
+      <div className="mt-2">
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+          <rect x={pad.l} y={pad.t} width={innerW} height={16} fill="rgba(255,255,255,0.05)" rx={8} />
+          <rect x={pad.l} y={pad.t} width={innerW / 2} height={16} fill="#dc2626" rx={8} />
+          <rect x={pad.l + innerW / 2} y={pad.t} width={innerW / 2} height={16} fill="#22c55e" rx={8} />
+
+          {refBand ? (
+            <rect
+              x={refBand.left}
+              y={pad.t - 2}
+              width={Math.max(2, refBand.right - refBand.left)}
+              height={20}
+              fill="rgba(59,130,246,0.22)"
+            />
+          ) : null}
+
+          {needle != null ? (
+            <line x1={needle} y1={pad.t - 4} x2={needle} y2={pad.t + 20} stroke="white" strokeWidth={2} />
+          ) : null}
+
+          {[-1, -0.5, 0, 0.5, 1].map((v) => (
+            <g key={v}>
+              <line x1={xFromVal(v)} y1={pad.t + 20} x2={xFromVal(v)} y2={pad.t + 26} stroke="rgba(255,255,255,0.35)" />
+              <text x={xFromVal(v)} y={H - 2} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="10">
+                {v > 0 ? `+${v}` : `${v}`}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div className="mt-2 text-[10px] text-white/45">
+        Rosso = anti-phase, verde = mono-safe. Fascia blu = reference p10-p90.
+      </div>
+    </div>
+  );
+}
+
+function StereoScope({
+  pointsXY,
+  referenceXY,
+  size = 320,
+}: {
+  pointsXY?: { x: number; y: number }[] | null;
+  referenceXY?: { x: number; y: number }[] | null;
+  size?: number;
+}) {
+  const W = size;
+  const H = size;
+  const cx = W / 2;
+  const cy = H / 2;
+  const rMax = W * 0.42;
+
+  const pts = useMemo(() => {
+    const raw = Array.isArray(pointsXY)
+      ? pointsXY.filter((p) => typeof p.x === "number" && typeof p.y === "number")
+      : [];
+    if (!raw.length) return [] as Array<{ x: number; y: number }>;
+    const maxPts = 1800;
+    const step = Math.max(1, Math.ceil(raw.length / maxPts));
+    const out: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < raw.length; i += step) {
+      const p = raw[i];
+      const x = Math.max(-1, Math.min(1, p.x));
+      const y = Math.max(-1, Math.min(1, p.y));
+      out.push({ x, y });
+    }
+    return out;
+  }, [pointsXY]);
+
+  const refPts = useMemo(() => {
+    const raw = Array.isArray(referenceXY)
+      ? referenceXY.filter((p) => typeof p.x === "number" && typeof p.y === "number")
+      : [];
+    if (!raw.length) return [] as Array<{ x: number; y: number }>;
+    const maxPts = 1200;
+    const step = Math.max(1, Math.ceil(raw.length / maxPts));
+    const out: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < raw.length; i += step) {
+      const p = raw[i];
+      const x = Math.max(-1, Math.min(1, p.x));
+      const y = Math.max(-1, Math.min(1, p.y));
+      out.push({ x, y });
+    }
+    return out;
+  }, [referenceXY]);
+
+  const toXY = (p: { x: number; y: number }) => ({
+    x: cx + p.x * rMax,
+    y: cy - p.y * rMax,
+  });
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="flex items-center justify-between text-[11px] text-white/55">
+        <span>Stereo field (Lissajous)</span>
+        <span>{pts.length ? `${pts.length} pts` : "n/a"}</span>
+      </div>
+      <div className="mt-3 w-full">
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+          <rect x={0} y={0} width={W} height={H} fill="rgba(255,255,255,0.02)" />
+          <line x1={cx} y1={cy - rMax} x2={cx} y2={cy + rMax} stroke="rgba(255,255,255,0.08)" />
+          <line x1={cx - rMax} y1={cy} x2={cx + rMax} y2={cy} stroke="rgba(255,255,255,0.08)" />
+          <rect
+            x={cx - rMax}
+            y={cy - rMax}
+            width={rMax * 2}
+            height={rMax * 2}
+            fill="none"
+            stroke="rgba(255,255,255,0.1)"
+          />
+
+          {refPts.length ? (
+            <g>
+              {refPts.map((p, i) => {
+                const q = toXY(p);
+                return <circle key={`r-${i}`} cx={q.x} cy={q.y} r={1} fill="rgba(255,255,255,0.18)" />;
+              })}
+            </g>
+          ) : null}
+
+          {pts.length ? (
+            <g>
+              {pts.map((p, i) => {
+                const q = toXY(p);
+                return <circle key={i} cx={q.x} cy={q.y} r={1} fill="rgba(255,255,255,0.55)" />;
+              })}
+            </g>
+          ) : (
+            <text x={cx} y={cy} textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="12">
+              no data
+            </text>
+          )}
+
+          <text x={cx} y={cy - rMax - 6} textAnchor="middle" fill="rgba(255,255,255,0.55)" fontSize="10">
+            R
+          </text>
+          <text x={cx} y={cy + rMax + 14} textAnchor="middle" fill="rgba(255,255,255,0.55)" fontSize="10">
+            L
+          </text>
+          <text x={cx - rMax - 6} y={cy + 4} textAnchor="end" fill="rgba(255,255,255,0.55)" fontSize="10">
+            L
+          </text>
+          <text x={cx + rMax + 6} y={cy + 4} textAnchor="start" fill="rgba(255,255,255,0.55)" fontSize="10">
+            R
+          </text>
+        </svg>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-white/55">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-white/80" /> Track (X=L, Y=R)
+        </span>
+        {refPts.length ? (
+          <span className="inline-flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-white/40" /> Reference XY
+          </span>
+        ) : (
+          <span className="text-white/40">Reference XY non disponibile</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StereoCard({
+  model,
+  refState,
+}: {
+  model: AnalyzerCompareModel;
+  refState: RefState;
+}) {
+  const widthVal = typeof model.stereoWidth === "number" ? model.stereoWidth : null;
+  const widthRef = model.referenceStereoPercentiles?.stereoWidth ?? null;
+  const corrRef = model.referenceStereoPercentiles?.lrCorrelation ?? null;
+  const corrArr = Array.isArray(model.correlation) ? model.correlation.filter((x) => typeof x === "number") : [];
+  const corrMean = corrArr.length ? corrArr.reduce((a, b) => a + b, 0) / corrArr.length : null;
+
+  const rangeText = (p: any) =>
+    p && (typeof p.p10 === "number" || typeof p.p90 === "number")
+      ? `${typeof p.p10 === "number" ? p.p10.toFixed(2) : "n/a"} / ${typeof p.p90 === "number" ? p.p90.toFixed(2) : "n/a"}`
+      : "no ref";
+
+  return (
+    <Card
+      title="Stereo"
+      subtitle="Width, correlation, width by band"
+      right={
+        <div className="flex items-center gap-2">
+          <SourcePills state={refState} />
+        </div>
+      }
+      className="h-full flex flex-col"
+      bodyClassName="flex-1 overflow-auto"
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/60">Stereo width</div>
+            <div className="mt-1 text-lg font-semibold text-white">{widthVal == null ? "n/a" : widthVal.toFixed(2)}</div>
+            <div className="text-[10px] text-white/50">Ref p10/p90: {rangeText(widthRef)}</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/60">Correlation</div>
+            <div className="mt-1 text-lg font-semibold text-white">{corrMean == null ? "n/a" : corrMean.toFixed(2)}</div>
+            <div className="text-[10px] text-white/50">Ref p10/p90: {rangeText(corrRef)}</div>
+          </div>
+        </div>
+
+        <CorrelationMeter value={corrMean} ref={corrRef ?? null} />
+
+        <StereoScope pointsXY={model.soundFieldXY ?? null} referenceXY={model.referenceSoundFieldXY ?? null} />
+
+        {model.widthByBand ? (
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/55 mb-2">Width by band</div>
+            <div className="grid grid-cols-2 gap-2">
+              {BAND_ORDER.map((k) => {
+                const v = (model.widthByBand as any)?.[k];
+                const vv = typeof v === "number" && Number.isFinite(v) ? clamp01(v) : null;
+                return (
+                  <div key={k} className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-white/55">{BAND_LABELS.it[k]}</span>
+                    <span className="text-[11px] text-white/70">{vv == null ? "n/a" : vv.toFixed(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function ExtraCard({ extra }: { extra?: AnalyzerCompareModel["extra"] | null }) {
+  const mfcc = Array.isArray(extra?.mfcc_mean) ? extra?.mfcc_mean.slice(0, 13) : [];
+  const hfc = typeof extra?.hfc === "number" ? extra?.hfc : null;
+  const peaksCount = typeof extra?.spectral_peaks_count === "number" ? extra?.spectral_peaks_count : null;
+  const peaksEnergy = typeof extra?.spectral_peaks_energy === "number" ? extra?.spectral_peaks_energy : null;
+  const hasAny = mfcc.length > 0 || hfc != null || peaksCount != null || peaksEnergy != null;
+  const countPct = clamp01((peaksCount ?? 0) / 24);
+  const energyPct = clamp01((peaksEnergy ?? 0) / 1.2);
+  const mfccMin = mfcc.length ? Math.min(...mfcc) : 0;
+  const mfccMax = mfcc.length ? Math.max(...mfcc) : 1;
+  const mfccDenom = mfccMax - mfccMin || 1;
+  const mfccBars = mfcc.map((v) => clamp01((v - mfccMin) / mfccDenom));
+
+  return (
+    <Card title="Extra" subtitle="MFCC, HFC, spectral peaks" className="h-full flex flex-col" bodyClassName="flex-1 overflow-auto">
+      <div className="space-y-4">
+        {!hasAny ? <div className="text-sm text-white/60">Dati extra non disponibili.</div> : null}
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-xs text-white/60">MFCC profile (1-13)</div>
+          {mfccBars.length ? (
+            <div className="mt-2">
+              <div className="flex h-16 items-end gap-1">
+                {mfccBars.map((pct, i) => (
+                  <div
+                    key={`mfcc-${i}`}
+                    className="flex-1 rounded-full bg-emerald-400/70"
+                    style={{ height: `${Math.max(6, pct * 100)}%` }}
+                  />
+                ))}
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] text-white/45">
+                <span>low</span>
+                <span>mid</span>
+                <span>high</span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 text-[11px] text-white/50">n/a</div>
+          )}
+          <div className="mt-1 text-[10px] text-white/45">
+            MFCC = firma timbrica. Valori alti su bande alte = brillantezza; bassi = suono piu scuro.
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/60">HFC</div>
+            <div className="mt-1 text-lg font-semibold text-white">{hfc == null ? "n/a" : hfc.toFixed(2)}</div>
+            <div className="mt-2 h-1.5 w-full rounded-full bg-white/5">
+              <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-400" style={{ width: `${clamp01((hfc ?? 0) / 1.5) * 100}%` }} />
+            </div>
+            <div className="mt-1 text-[10px] text-white/45">HFC = energia delle alte. Alto = brillante/harsh, basso = piu scuro.</div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/60">Spectral peaks</div>
+            <div className="mt-1 text-sm text-white/70">Count: {peaksCount ?? "n/a"} (0-80)</div>
+            <div className="text-sm text-white/70">Energy: {peaksEnergy ?? "n/a"} dB</div>
+            <div className="mt-2 space-y-1">
+              <div className="text-[10px] text-white/50">Normalized count</div>
+              <div className="h-1.5 w-full rounded-full bg-white/5">
+                <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400" style={{ width: `${countPct * 100}%` }} />
+              </div>
+              <div className="text-[10px] text-white/50">Normalized energy</div>
+              <div className="h-1.5 w-full rounded-full bg-white/5">
+                <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-400" style={{ width: `${energyPct * 100}%` }} />
+              </div>
+            </div>
+            <div className="mt-1 text-[10px] text-white/45">
+              Count = numero di picchi. Energy = forza media dei picchi (alto = contenuto complesso o aggressivo).
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-[11px] text-white/60">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Interpretation</div>
+          <div className="mt-1">MFCC e peaks descrivono timbro e densita armonica.</div>
+          <div className="mt-2 text-white/70">Action: se peaks count/energy sono alti, riduci saturazione o filtra il top-end.</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function OverviewStrip({ model }: { model: AnalyzerCompareModel }) {
+  const lufs = model.loudness?.integrated_lufs ?? null;
+  const peak = model.loudness?.true_peak_db ?? model.loudness?.sample_peak_db ?? null;
+  const lra = model.loudness?.lra ?? null;
+  const width = typeof model.stereoWidth === "number" ? model.stereoWidth : null;
+  const dance = model.rhythm?.danceability ?? null;
+  const strength = typeof model.transients?.strength === "number" ? model.transients?.strength : null;
+
+  const fmt = (v: number | null, unit: string) =>
+    typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(1)}${unit}` : "n/a";
+
+  const tiles = [
+    { key: "lufs", label: "Integrated", value: fmt(lufs, " LUFS"), pct: lufs != null ? clamp01((lufs + 24) / 16) : 0, tone: "bg-emerald-400/70" },
+    { key: "peak", label: "Peak", value: peak != null ? formatDb(peak, 1) : "n/a", pct: peak != null ? clamp01((peak + 12) / 12) : 0, tone: "bg-rose-400/70" },
+    { key: "lra", label: "LRA", value: typeof lra === "number" ? `${lra.toFixed(1)} LU` : "n/a", pct: lra != null ? clamp01(lra / 16) : 0, tone: "bg-amber-300/70" },
+    { key: "width", label: "Width", value: width != null ? width.toFixed(2) : "n/a", pct: width != null ? clamp01(width) : 0, tone: "bg-cyan-400/70" },
+    { key: "dance", label: "Dance", value: dance != null ? dance.toFixed(2) : "n/a", pct: dance != null ? clamp01(dance / 2) : 0, tone: "bg-sky-400/70" },
+    { key: "strength", label: "Strength", value: strength != null ? strength.toFixed(2) : "n/a", pct: strength != null ? clamp01(strength / 1.5) : 0, tone: "bg-violet-400/70" },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {tiles.map((t) => (
+        <div key={t.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{t.label}</div>
+          <div className="mt-1 text-lg font-semibold text-white">{t.value}</div>
+          <div className="mt-3 flex items-end gap-3">
+            <div className="relative h-12 w-3 rounded-full bg-white/5">
+              <div className={`absolute bottom-0 left-0 right-0 rounded-full ${t.tone}`} style={{ height: `${Math.max(8, t.pct * 100)}%` }} />
+            </div>
+            <div className="text-[10px] text-white/45">trend</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FocusMap({ model }: { model: AnalyzerCompareModel }) {
+  const score = (value: number) => Math.max(0, Math.min(1, value));
+
+  const loud = (() => {
+    const v = model.loudness?.integrated_lufs ?? null;
+    const ref = model.referenceFeaturesPercentiles?.lufs ?? null;
+    if (v == null) return 0.35;
+    if (ref?.p10 != null && ref?.p90 != null) return score(v < ref.p10 || v > ref.p90 ? 1 : 0.4);
+    return 0.5;
+  })();
+
+  const timbre = (() => {
+    const hasBands = !!(model.bandsNorm && sumBands(model.bandsNorm) > 0);
+    const hasSpectral = !!model.spectral;
+    return score(hasBands && hasSpectral ? 0.35 : 0.65);
+  })();
+
+  const stereo = (() => {
+    const width = typeof model.stereoWidth === "number" ? model.stereoWidth : null;
+    const ref = model.referenceStereoPercentiles?.stereoWidth ?? null;
+    if (width == null) return 0.4;
+    if (ref?.p10 != null && ref?.p90 != null) return score(width < ref.p10 || width > ref.p90 ? 1 : 0.4);
+    return 0.5;
+  })();
+
+  const transients = (() => {
+    const t = model.transients;
+    if (!t) return 0.5;
+    const strength = typeof t.strength === "number" ? t.strength : null;
+    return score(strength != null && strength > 0 ? 0.4 : 0.7);
+  })();
+
+  const rhythm = (() => {
+    const hasRhythm = !!model.rhythm;
+    return score(hasRhythm ? 0.4 : 0.7);
+  })();
+
+  const extra = (() => {
+    const hasExtra = !!model.extra?.mfcc_mean || typeof model.extra?.spectral_peaks_count === "number";
+    return score(hasExtra ? 0.45 : 0.7);
+  })();
+
+  const rows = [
+    { key: "loud", label: "Loudness", value: loud },
+    { key: "timbre", label: "Timbre", value: timbre },
+    { key: "stereo", label: "Stereo", value: stereo },
+    { key: "transients", label: "Transients", value: transients },
+    { key: "rhythm", label: "Rhythm", value: rhythm },
+    { key: "extra", label: "Extra", value: extra },
+  ];
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+      <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Focus map</div>
+      <div className="mt-2 grid grid-cols-1 gap-2">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-3">
+            <div className="w-20 text-[11px] text-white/60">{r.label}</div>
+            <div className="flex-1 h-2 rounded-full bg-white/5">
+              <div
+                className={`h-full rounded-full ${r.value >= 0.75 ? "bg-rose-400/80" : r.value >= 0.5 ? "bg-amber-300/80" : "bg-emerald-400/70"}`}
+                style={{ width: `${r.value * 100}%` }}
+              />
+            </div>
+            <div className="w-12 text-right text-[10px] text-white/50">{Math.round(r.value * 100)}%</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 text-[11px] text-white/45">Barre piu alte = priorita di lavoro consigliata.</div>
+    </div>
   );
 }
 
@@ -1108,9 +1918,8 @@ function deriveChecks(model: AnalyzerCompareModel) {
   const noiseRisk = typeof flat === "number" ? flat > 0.18 : false;
   const whistleRisk = typeof centroid === "number" && typeof zcr === "number" ? centroid > 4200 && zcr > 0.08 : false;
 
-  const sf = Array.isArray(model.soundField) ? model.soundField : null;
-  const sfMean = sf && sf.length ? sf.reduce((a, p) => a + safeNum(p.radius), 0) / sf.length : null;
-  const tooNarrow = typeof sfMean === "number" ? sfMean < 0.28 : false;
+  const widthVal = typeof model.stereoWidth === "number" ? model.stereoWidth : null;
+  const tooNarrow = typeof widthVal === "number" ? widthVal < 0.28 : false;
 
   return {
     clippingRisk,
@@ -1293,14 +2102,110 @@ const quickFacts: Array<{
   );
 }
 
+function makeTransientSignaturePath({
+  height,
+  width,
+  pulses,
+  amp,
+  attack,
+}: {
+  height: number;
+  width: number;
+  pulses: number;
+  amp: number;
+  attack: number;
+}) {
+  const total = 240;
+  const decay = 6.5;
+  const points: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < total; i++) {
+    const t = i / (total - 1);
+    const local = (t * pulses) % 1;
+    let v = 0;
+    if (local < attack) {
+      v = local / attack;
+    } else {
+      v = Math.exp(-(local - attack) * decay);
+    }
+    const y = height - v * amp * height;
+    points.push({ x: t * width, y });
+  }
+  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+}
+
+function TransientSignature({
+  strengthValue,
+  densityValue,
+  attackValue,
+}: {
+  strengthValue: number | null;
+  densityValue: number | null;
+  attackValue: number | null;
+}) {
+  const W = 520;
+  const H = 120;
+  const pulses = Math.min(8, Math.max(2, Math.round(densityValue ?? 4)));
+  const hitsPerMin = typeof densityValue === "number" ? Math.round(densityValue * 60) : null;
+  const attack = Math.min(0.35, Math.max(0.06, (attackValue ?? 0.02) * 2));
+  const amp = Math.min(0.95, Math.max(0.35, (strengthValue ?? 1) / 4));
+
+  const topPath = makeTransientSignaturePath({ height: H - 10, width: W, pulses, amp, attack });
+  const lowPath = makeTransientSignaturePath({ height: H - 10, width: W, pulses, amp: amp * 0.55, attack: attack * 1.4 });
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <div className="flex items-center justify-between text-[11px] text-white/55">
+        <span>Transient signature</span>
+        <span>{hitsPerMin != null ? `${hitsPerMin} hits/min` : "n/a"}</span>
+      </div>
+      <div className="mt-2">
+        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+          <rect x={0} y={0} width={W} height={H} fill="rgba(255,255,255,0.02)" />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <line key={i} x1={(W / 5) * i} y1={6} x2={(W / 5) * i} y2={H - 6} stroke="rgba(255,255,255,0.05)" />
+          ))}
+          <path d={topPath} fill="none" stroke="#eab308" strokeWidth={2.2} />
+          <path d={lowPath} fill="none" stroke="#a855f7" strokeWidth={2} />
+          <text x={W - 6} y={H - 6} textAnchor="end" fill="rgba(255,255,255,0.35)" fontSize="10">
+            time (sec)
+          </text>
+          <text x={6} y={H - 6} textAnchor="start" fill="rgba(255,255,255,0.3)" fontSize="10">
+            0s
+          </text>
+          <text
+            x={6}
+            y={12}
+            textAnchor="start"
+            fill="rgba(255,255,255,0.35)"
+            fontSize="10"
+            transform={`rotate(-90 6 12)`}
+          >
+            amp / hits/min
+          </text>
+        </svg>
+      </div>
+      <div className="mt-2 text-[10px] text-white/45">
+        Giallo = attacco, viola = sustain. Grafico sintetico basato su strength, density e attack time.
+      </div>
+    </div>
+  );
+}
+
 function TransientsCard({
   transients,
+  referencePercentiles,
+  referenceName,
+  fixSuggestions,
 }: {
-  transients?: { strength?: number; density?: number; crestFactorDb?: number } | null;
+  transients?: { strength?: number | null; density?: number | null; crestFactorDb?: number | null; log_attack_time?: number | null } | null;
+  referencePercentiles?: AnalyzerCompareModel["referenceTransientsPercentiles"] | null;
+  referenceName?: string | null;
+  fixSuggestions?: string[] | null;
 }) {
   if (!transients) {
     return (
-      <Card title="Transients" subtitle="Impatto e densità">
+      <Card title="Transients" subtitle="Impatto e densita">
         <div className="text-sm text-white/65">Dati transients non disponibili.</div>
       </Card>
     );
@@ -1311,14 +2216,14 @@ function TransientsCard({
       ? (transients as any).strength
       : typeof (transients as any).transient_strength === "number"
         ? (transients as any).transient_strength
-        : 0;
+        : null;
 
   const density =
     typeof (transients as any).density === "number"
       ? (transients as any).density
       : typeof (transients as any).transient_density === "number"
         ? (transients as any).transient_density
-        : 0;
+        : null;
 
   const crest =
     typeof (transients as any).crestFactorDb === "number"
@@ -1327,8 +2232,8 @@ function TransientsCard({
         ? (transients as any).crest_factor_db
         : null;
 
-  const hasStrength = typeof strength === "number" && strength > 0;
-  const hasDensity = typeof density === "number" && density > 0;
+  const hasStrength = typeof strength === "number" && Number.isFinite(strength);
+  const hasDensity = typeof density === "number" && Number.isFinite(density);
 
   const crestClassification = (() => {
     if (crest == null) return null;
@@ -1337,14 +2242,7 @@ function TransientsCard({
     return { label: "Spiky", tone: "high" as StatusTone };
   })();
 
-  const crestAction =
-    crestClassification?.label === "Soft / flattened"
-      ? "Riduci limiting sul bus e prova un transient shaper per ritrovare attacco."
-      : crestClassification?.label === "Balanced"
-      ? "Mantieni il bilanciamento attuale ma controlla i picchi con automation leggera."
-      : crestClassification?.label === "Spiky"
-      ? "Doma i picchi con clipper/limiter e controlla le percussioni più incisive."
-      : "Monitora il rapporto picco/RMS con transient shaper o limiter se serve.";
+  const ref = referencePercentiles ?? null;
 
   const logAttack =
     typeof (transients as any).logAttackTime === "number"
@@ -1356,94 +2254,127 @@ function TransientsCard({
   const attackSeconds =
     typeof logAttack === "number" && Number.isFinite(logAttack) ? Math.pow(10, logAttack) : null;
 
+  const actionFallback = (() => {
+    const hints: string[] = [];
+    if (crest != null && crest < 10) hints.push("Riduci limiting e recupera attacco con transient shaper.");
+    if (density != null && density > 10) hints.push("Semplifica layering o accorcia code per piu spazio.");
+    if (strength != null && strength < 0.5) hints.push("Aumenta contrasto attacco/sustain con comp o shaper.");
+    return hints.length ? hints.slice(0, 3) : ["Ascolta per coerenza: usa transient shaper solo dove serve."];
+  })();
+
+  const actions = Array.isArray(fixSuggestions) && fixSuggestions.length ? fixSuggestions.slice(0, 3) : actionFallback;
+
+  const targetBar = ({
+    label,
+    value,
+    unit,
+    refPct,
+    max,
+    meaning,
+  }: {
+    label: string;
+    value: number | null;
+    unit: string;
+    refPct: { p10?: number; p90?: number } | null | undefined;
+    max: number;
+    meaning: string;
+  }) => {
+    const domainMin = typeof refPct?.p10 === "number" ? refPct.p10 : 0;
+    const domainMax = typeof refPct?.p90 === "number" ? refPct.p90 : max;
+    const denom = domainMax - domainMin || 1;
+    const refLeft = typeof refPct?.p10 === "number" ? clamp01((refPct.p10 - domainMin) / denom) : null;
+    const refRight = typeof refPct?.p90 === "number" ? clamp01((refPct.p90 - domainMin) / denom) : null;
+    const marker = typeof value === "number" ? clamp01((value - domainMin) / denom) : null;
+
+    const refText =
+      refPct && (typeof refPct.p10 === "number" || typeof refPct.p90 === "number")
+        ? `Ref p10/p90: ${typeof refPct.p10 === "number" ? refPct.p10.toFixed(2) : "n/a"} / ${typeof refPct.p90 === "number" ? refPct.p90.toFixed(2) : "n/a"}`
+        : "Ref p10/p90: n/a";
+
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[11px] text-white/60">
+          <span>{label}</span>
+          <span>{value == null ? "n/a" : `${value.toFixed(2)}${unit}`}</span>
+        </div>
+        <div className="relative h-3 w-full rounded-full bg-white/5">
+          {refLeft != null && refRight != null ? (
+            <div
+              className="absolute inset-y-0 rounded-full bg-blue-500/25"
+              style={{ left: `${refLeft * 100}%`, width: `${Math.max(2, (refRight - refLeft) * 100)}%` }}
+            />
+          ) : null}
+          {marker != null ? (
+            <div className="absolute inset-y-0 w-0.5 bg-emerald-300" style={{ left: `${marker * 100}%` }} />
+          ) : null}
+        </div>
+        <div className="text-[10px] text-white/40">{refText}</div>
+        <div className="text-[10px] text-white/40">
+          <span className="font-semibold">Meaning:</span> {meaning}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <Card title="Transients" subtitle="Impatto e densità">
+    <Card title="Transients" subtitle="Impatto e densita" className="h-full flex flex-col" bodyClassName="flex-1 overflow-auto">
       <div className="space-y-3 text-white/70">
-        <MetricRow
-          label="Strength"
-          value={hasStrength ? strength.toFixed(2) : "MISSING"}
-          meaning="Indica quanto l'impatto si distingue dal sustain."
-          action={
-            hasStrength
-              ? "Modella l'attacco con compressor/shaper per ottenere il livello desiderato."
-              : "Rianalizza o controlla il passaggio analyzer per ottenere i transienti."
-          }
-        />
-        <MetricRow
-          label="Density (1/s)"
-          value={hasDensity ? density.toFixed(2) : "MISSING"}
-          meaning="Numero di transienti al secondo: misura la complessità ritmica."
-          action={
-            hasDensity
-              ? "Semplifica layering o regola sustain per avere la densità voluta."
-              : "Rianalizza o controlla il passaggio analyzer per ottenere i transienti."
-          }
-        />
-        {crest != null && (
-          <MetricRow
-            label="Crest (dB)"
-            value={crest.toFixed(1)}
-            chip={crestClassification ?? undefined}
-            meaning="Rapporto picco/RMS che segnala quanto i transienti emergono."
-            action={crestAction}
-            note="Heuristic classification."
-          />
-        )}
-        <MetricRow
-          label="Log attack time"
-          value={attackSeconds != null ? `${attackSeconds.toFixed(3)} s` : "n/a"}
-          chip={{ label: "INFO", tone: "muted" }}
-          meaning="Tempo di attacco stimato"
-          action="Usa transient shaper/compressor per regolare l'attacco, ascoltando il risultato."
-        />
-        <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Grafico transients</div>
-          {[
-            {
-              label: "Strength",
-              value: hasStrength ? strength : null,
-              max: 8,
-              color: "bg-gradient-to-r from-emerald-400 to-cyan-400",
-            },
-            {
-              label: "Density",
-              value: hasDensity ? density : null,
-              max: 16,
-              color: "bg-gradient-to-r from-orange-400 to-amber-400",
-            },
-          ].map((item) => {
-            const pct = item.value ? Math.min(1, item.value / item.max) : 0;
-            const displayValue = item.value ? item.value.toFixed(1) : "n/a";
-            return (
-              <div key={item.label} className="space-y-1">
-                <div className="flex items-center justify-between text-[11px] text-white/60">
-                  <span>{item.label}</span>
-                  <span>{displayValue}</span>
-                </div>
-                <div className="h-3 w-full rounded-full bg-white/5">
-                  <div
-                    className={`h-full rounded-full ${item.color}`}
-                    style={{ width: `${pct * 100}%` }}
-                  />
-                </div>
-              </div>
-            );
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {targetBar({
+            label: "Strength",
+            value: hasStrength ? strength : null,
+            unit: "",
+            refPct: ref?.strength ?? null,
+            max: 8,
+            meaning: "Impact vs sustain: quanto emergono i transienti rispetto al sustain.",
           })}
-          <div className="text-[10px] text-white/40">
-            Barre relative ai range tipici: ascolta comunque il risultato finale.
+          {targetBar({
+            label: "Density",
+            value: hasDensity ? density : null,
+            unit: " 1/s",
+            refPct: ref?.density ?? null,
+            max: 16,
+            meaning: "Hit per secondo: traccia quanto e ritmico il contenuto.",
+          })}
+          {targetBar({
+            label: "Crest",
+            value: crest,
+            unit: " dB",
+            refPct: ref?.crest_factor_db ?? null,
+            max: 24,
+            meaning: crestClassification?.label ?? "Peak/RMS ratio",
+          })}
+          {targetBar({
+            label: "Attack time",
+            value: attackSeconds,
+            unit: " s",
+            refPct: ref?.log_attack_time
+              ? {
+                  p10: typeof ref.log_attack_time.p10 === "number" ? Math.pow(10, ref.log_attack_time.p10) : undefined,
+                  p90: typeof ref.log_attack_time.p90 === "number" ? Math.pow(10, ref.log_attack_time.p90) : undefined,
+                }
+              : null,
+            max: 0.12,
+            meaning: "Tempo stimato: un attacco troppo breve può sembrare impastato.",
+          })}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-white/55">
+            <span>Reference</span>
+            <span>{referenceName ?? "no ref"}</span>
           </div>
+          <TransientSignature strengthValue={strength} densityValue={density} attackValue={attackSeconds} />
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">What to do</div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">What to do next</div>
           <div className="mt-1 space-y-1 text-[11px]">
-            <div className="flex gap-2">
-              <span className="text-white/60">•</span>
-              <span>Flattened: riduci limiting sul bus e aggiungi transient shaper.</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-white/60">•</span>
-              <span>Spiky: doma con clipper/limiter e controlla i picchi di percussioni.</span>
-            </div>
+            {actions.map((hint, idx) => (
+              <div key={idx} className="flex gap-2">
+                <span className="text-white/60">-</span>
+                <span>{hint}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -1598,6 +2529,7 @@ export default function AnalyzerV2ProPanel({
   onPlay,
   onShare,
   reanalyze,
+  track,
 }: {
   model: AnalyzerCompareModel;
   onPlay?: () => void;
@@ -1606,176 +2538,304 @@ export default function AnalyzerV2ProPanel({
     isLoading: boolean;
     canRun: boolean;
     onRun: () => void;
+    status?: "idle" | "running" | "success" | "error";
+    message?: string | null;
+  };
+  track?: {
+    versionId: string;
+    projectId?: string | null;
+    title: string;
+    subtitle?: string;
+    audioUrl?: string | null;
+    waveformPeaks?: number[] | null;
+    waveformBands?: any | null;
+    waveformDuration?: number | null;
+    createdAt?: string | null;
+    isPlaying?: boolean;
   };
 }) {
-  const stableSeed = useMemo(() => hashSeed(`${model.projectTitle}|${model.versionName}`) % 30, [model.projectTitle, model.versionName]);
+  const player = useTekkinPlayer();
+  const currentVersionId = useTekkinPlayer((state) => state.versionId);
+  const isPlaying = useTekkinPlayer((state) => state.isPlaying);
+  const currentTime = useTekkinPlayer((state) => state.currentTime);
+  const duration = useTekkinPlayer((state) => state.duration);
+
+  const isActive = !!track?.versionId && currentVersionId === track.versionId;
+  const progressRatio = isActive && duration > 0 ? currentTime / duration : 0;
+  const timeLabel = (() => {
+    if (!isActive || !duration || !Number.isFinite(duration)) return "--:--";
+    const m = Math.floor(currentTime / 60);
+    const s = Math.floor(currentTime % 60);
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  })();
+
+  const playPayload =
+    track?.audioUrl && track.versionId
+      ? {
+          projectId: track.projectId ?? null,
+          versionId: track.versionId,
+          title: track.title ?? "Untitled",
+          subtitle: track.subtitle ?? undefined,
+          audioUrl: track.audioUrl,
+          duration: track.waveformDuration ?? undefined,
+        }
+      : null;
+
+  const handleTogglePlay = () => {
+    if (!playPayload) return;
+    if (isActive) {
+      useTekkinPlayer.getState().toggle();
+      return;
+    }
+    player.play(playPayload);
+  };
+
+  const handleSeekRatio = (ratio: number) => {
+    if (!playPayload) return;
+    if (isActive) {
+      player.seekToRatio(ratio);
+      return;
+    }
+    player.playAtRatio(playPayload, ratio);
+  };
+
+  const handlePlay = onPlay ?? handleTogglePlay;
+  const [activeTab, setActiveTab] = useState<"overview" | "loudness" | "timbre" | "stereo" | "transients" | "rhythm" | "extra">("overview");
+
 
   const live = useMemo(
     () => ({
       spectrumTrack: Array.isArray(model.spectrumTrack) && model.spectrumTrack.length > 0,
       spectrumRef: Array.isArray(model.spectrumRef) && model.spectrumRef.length > 0,
-      soundField: Array.isArray(model.soundField) && model.soundField.length > 0,
+      soundField: Array.isArray(model.soundFieldXY) && model.soundFieldXY.length > 0,
       levels: Array.isArray(model.levels) && model.levels.length > 0,
     }),
-    [model.spectrumTrack, model.spectrumRef, model.soundField, model.levels]
+    [model.spectrumTrack, model.spectrumRef, model.soundFieldXY, model.levels]
   );
 
   const rhythmLive = useMemo(() => {
-    const data = model.rhythm ?? null;
-    return (
-      typeof data?.danceability === "number" ||
-      (Array.isArray(data?.beat_times) && data?.beat_times.length > 0) ||
-      (data?.descriptors && Object.keys(data.descriptors).length > 0)
+    const rhythm = model?.rhythm ?? null;
+    const hasLive = !!(
+      typeof model?.bpm === "number" ||
+      (typeof model?.key === "string" && model.key.trim().length > 0) ||
+      typeof rhythm?.danceability === "number" ||
+      (Array.isArray(rhythm?.beat_times) && rhythm.beat_times.length > 0) ||
+      (rhythm?.descriptors && Object.keys(rhythm.descriptors).length > 0)
     );
-  }, [model.rhythm]);
+    return {
+      bpm: model?.bpm ?? null,
+      keyName: model?.key ?? null,
+      rhythm,
+      hasLive,
+    };
+  }, [model]);
+
+  const rhythmRefState = useMemo(() => {
+    const hasRef = !!(model?.referenceRhythmPercentiles || model?.referenceRhythmDescriptorsPercentiles);
+    const base = getLiveStateForX(model, {
+      hasLive: rhythmLive.hasLive,
+      ref: hasRef,
+      reason: hasRef
+        ? "Reference rhythm percentiles available"
+        : model?.referenceName
+        ? "Reference rhythm percentiles missing"
+        : "No reference rhythm",
+    });
+    return { ...base, rangeLabel: "p10/p90" };
+  }, [model, rhythmLive.hasLive]);
+
+
 
   const tonalRefState = useMemo(() => getRefStateForTonal(model), [model]);
-  const spectrumRefState = useMemo(() => getRefStateForSpectrum(model, { mockEnabled: true }), [model]);
+  const spectrumRefState = useMemo(() => getRefStateForSpectrum(model, { mockEnabled: false }), [model]);
   const loudnessRefState = useMemo(() => getRefStateForLoudness(model), [model]);
-  const soundFieldRefState = useMemo(
-    () =>
-      getLiveStateForX(model, {
-        hasLive: live.soundField,
-        mockEnabled: true,
-        reason: live.soundField ? "Sound field live" : "Sound field placeholder",
-      }),
-    [model, live.soundField]
-  );
-  const levelsRefState = useMemo(
-    () =>
-      getLiveStateForX(model, {
-        hasLive: live.levels,
-        mockEnabled: true,
-        reason: live.levels ? "Level meters live" : "Level meters placeholder",
-      }),
-    [model, live.levels]
-  );
-  const rhythmRefState = useMemo(
-    () =>
-      getLiveStateForX(model, {
-        hasLive: rhythmLive,
-        mockEnabled: true,
-        reason: rhythmLive ? "Rhythm data live" : "No rhythm data",
-      }),
-    [model, rhythmLive]
+  const soundFieldRefState = useMemo(() => {
+  const hasRef = !!(
+    (model.referenceStereoPercentiles &&
+      (model.referenceStereoPercentiles.stereoWidth || model.referenceStereoPercentiles.lrCorrelation)) ||
+    model.referenceSoundField ||
+    model.referenceSoundFieldXY
   );
 
-  const merged: AnalyzerCompareModel = useMemo(() => {
-    const spectrumTrack = model.spectrumTrack && model.spectrumTrack.length ? model.spectrumTrack : makeMockSpectrum(stableSeed);
-    const soundField = model.soundField && model.soundField.length ? model.soundField : makeMockSoundField(stableSeed);
-    const levels = model.levels && model.levels.length ? model.levels : makeMockLevels(stableSeed);
+  return getLiveStateForX(model, {
+    hasLive: live.soundField,
+    ref: hasRef,
+    mockEnabled: false,
+    reason: hasRef ? "Stereo reference disponibile" : model.referenceName ? "Reference stereo mancante" : "Nessun reference stereo",
+  });
+}, [model, live.soundField]);
 
-    return {
-      ...model,
-      spectrumTrack,
-      soundField,
-      levels,
-      // spectrumRef resta null finché non la calcoli nel backend
-    };
-  }, [model, stableSeed]);
+const merged: AnalyzerCompareModel = useMemo(() => {
+  // Definitivo: niente dati inventati.
+  // Se mancano, la UI mostra "no data" o "n/a".
+  return { ...model };
+}, [model]);
+
+  const overviewCorrMean = useMemo(() => {
+    const corrArr = Array.isArray(merged.correlation)
+      ? merged.correlation.filter((x) => typeof x === "number" && Number.isFinite(x))
+      : [];
+    return corrArr.length ? corrArr.reduce((a, b) => a + b, 0) / corrArr.length : null;
+  }, [merged.correlation]);
+
+  const overviewStrength =
+    typeof (merged as any).transients?.strength === "number"
+      ? (merged as any).transients.strength
+      : typeof (merged as any).transients?.transient_strength === "number"
+        ? (merged as any).transients.transient_strength
+        : null;
+
+  const overviewDensity =
+    typeof (merged as any).transients?.density === "number"
+      ? (merged as any).transients.density
+      : typeof (merged as any).transients?.transient_density === "number"
+        ? (merged as any).transients.transient_density
+        : null;
+
+  const overviewAttackSeconds = (() => {
+    const logAttack =
+      typeof (merged as any).transients?.logAttackTime === "number"
+        ? (merged as any).transients.logAttackTime
+        : typeof (merged as any).transients?.log_attack_time === "number"
+          ? (merged as any).transients.log_attack_time
+          : null;
+    return typeof logAttack === "number" && Number.isFinite(logAttack) ? Math.pow(10, logAttack) : null;
+  })();
 
   return (
     <div className="min-h-screen bg-black">
       <div className="mx-auto w-full max-w-6xl px-6 pb-20 pt-8">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/4 p-4">
-          <div>
-            <div className="text-xs text-white/55">Analyzer controls</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Pill tone="muted">ui v2</Pill>
-              <Pill tone={model.referenceName ? "ok" : "muted"}>{model.referenceName ? "REF ON" : "REF OFF"}</Pill>
-              <Pill tone={model.spectrumTrack?.length ? "ok" : "muted"}>{model.spectrumTrack?.length ? "DATA" : "MOCK"}</Pill>
-            </div>
-          </div>
+        <AnalyzerHero
+          model={merged}
+          onPlay={handlePlay}
+          onShare={onShare}
+          reanalyze={reanalyze}
+          lastAnalyzedAt={track?.createdAt ?? null}
+          waveform={
+            track?.waveformPeaks
+              ? {
+                  peaks: track.waveformPeaks ?? null,
+                  bands: track.waveformBands ?? null,
+                  duration: track.waveformDuration ?? null,
+                  progressRatio,
+                  isPlaying: isActive && isPlaying,
+                  timeLabel,
+                  onTogglePlay: handleTogglePlay,
+                  onSeekRatio: handleSeekRatio,
+                }
+              : undefined
+          }
+        />
 
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          {[
+            { key: "overview", label: "Overview" },
+            { key: "loudness", label: "Loudness" },
+            { key: "timbre", label: "Timbre" },
+            { key: "stereo", label: "Stereo" },
+            { key: "transients", label: "Transients" },
+            { key: "rhythm", label: "Rhythm" },
+            { key: "extra", label: "Extra" },
+          ].map((tab) => (
             <button
+              key={tab.key}
               type="button"
-              className="rounded-xl bg-white/5 px-3 py-2 text-sm font-semibold text-white/80 ring-1 ring-white/10 hover:bg-white/8"
-              onClick={reanalyze?.onRun}
-              disabled={!reanalyze?.canRun || reanalyze?.isLoading}
+              onClick={() => setActiveTab(tab.key as any)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                activeTab === tab.key
+                  ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                  : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10"
+              }`}
             >
-              {reanalyze?.isLoading ? "Analyzing..." : "Re-analyze"}
+              {tab.label}
             </button>
-<div className="hidden sm:flex items-center gap-2 text-xs text-white/45">
-  <Pill tone="muted">DATA</Pill>
-  <span>spectrum, sound field, levels, transients</span>
-</div>
-
-          </div>
+          ))}
         </div>
-
-        <AnalyzerHero model={merged} onPlay={onPlay} onShare={onShare} />
 
         <div className="mt-4">
-          <LoudnessMeterCard
-            loudness={merged.loudness ?? null}
-            referenceName={merged.referenceName}
-            referenceTarget={merged.referenceFeaturesPercentiles?.lufs ?? null}
-            momentary={merged.momentaryLufs ?? null}
-            shortTerm={merged.shortTermLufs ?? null}
-            refState={loudnessRefState}
-          />
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 gap-4">
-          <HorizontalTonalBalance
-            trackBands={merged.bandsNorm as any}
-            referenceBands={merged.referenceBandsNorm as any}
-            referenceName={merged.referenceName}
-            referencePercentiles={(merged as any).referenceBandsPercentiles ?? null}
-            lang={(merged as any).lang === "en" ? "en" : "it"}
-            refState={tonalRefState}
-          />
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-<SoundFieldCard
-  points={merged.soundField as any}
-  referencePoints={
-    ((merged as any).referenceSoundField ??
-      (merged as any).soundFieldRef ??
-      (merged as any).reference_sound_field ??
-      null) as any
-  }
-  correlation={
-    ((merged as any).correlation ??
-      (merged as any).stereoSummary?.correlation ??
-      (merged as any).stereo_summary?.correlation ??
-      null) as any
-  }
-  refState={soundFieldRefState}
-/>
-
-            <div className="lg:col-span-2">
-              <SpectrumCompareCard
-                track={merged.spectrumTrack as any}
-                reference={merged.spectrumRef as any}
-                referenceName={merged.referenceName}
-                refState={spectrumRefState}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
-            <LevelsMetersCard
-              levels={merged.levels as any}
-              referenceStereoPercentiles={merged.referenceStereoPercentiles as any}
-              refState={levelsRefState}
-            />
-            </div>
+          {activeTab === "overview" ? (
             <div className="space-y-4">
-              <QuickFacts model={merged} />
-              <TransientsCard transients={(merged as any).transients ?? null} />
+              <OverviewStrip model={merged} />
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <Card title="Focus map" subtitle="Dove intervenire prima" className="h-full">
+                  <FocusMap model={merged} />
+                </Card>
+
+                <Card title="Stereo snapshot" subtitle="Correlation + field" className="h-full">
+                  <div className="space-y-3">
+                    <CorrelationMeter value={overviewCorrMean} ref={merged.referenceStereoPercentiles?.lrCorrelation ?? null} />
+                    <StereoScope pointsXY={merged.soundFieldXY ?? null} referenceXY={merged.referenceSoundFieldXY ?? null} />
+                  </div>
+                </Card>
+
+                <Card title="Transient snapshot" subtitle="Attack + density" className="h-full">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-[11px] text-white/55">
+                      <span>Reference</span>
+                      <span>{merged.referenceName ?? "no ref"}</span>
+                    </div>
+                    <TransientSignature
+                      strengthValue={overviewStrength}
+                      densityValue={overviewDensity}
+                      attackValue={overviewAttackSeconds}
+                    />
+                  </div>
+                </Card>
+              </div>
             </div>
-          </div>
+          ) : null}
 
-          <RhythmCard bpm={merged.bpm} keyName={merged.key} rhythm={merged.rhythm ?? null} refState={rhythmRefState} />
+          {activeTab === "loudness" ? (
+            <LoudnessMeterCard
+              loudness={merged.loudness ?? null}
+              referenceName={merged.referenceName}
+              referenceTarget={merged.referenceFeaturesPercentiles?.lufs ?? null}
+              referenceLra={merged.referenceFeaturesPercentiles?.lra ?? null}
+              referencePeak={
+                merged.referenceFeaturesPercentiles?.true_peak_db ??
+                merged.referenceFeaturesPercentiles?.sample_peak_db ??
+                null
+              }
+              momentary={merged.momentaryLufs ?? null}
+              shortTerm={merged.shortTermLufs ?? null}
+              levels={merged.levels ?? null}
+              refState={loudnessRefState}
+            />
+          ) : null}
 
-          <HealthChecks model={merged} />
-          <HumanAdvice model={merged} />
-          <WhyThisScore model={merged} />
+          {activeTab === "timbre" ? (
+            <TimbreCard model={merged} tonalRefState={tonalRefState} spectrumRefState={spectrumRefState} />
+          ) : null}
+
+          {activeTab === "stereo" ? (
+            <StereoCard model={merged} refState={soundFieldRefState} />
+          ) : null}
+
+          {activeTab === "transients" ? (
+            <TransientsCard
+              transients={(merged as any).transients ?? null}
+              referencePercentiles={merged.referenceTransientsPercentiles ?? null}
+              referenceName={merged.referenceName}
+            />
+          ) : null}
+
+          {activeTab === "rhythm" ? (
+            <RhythmCard
+              bpm={merged.bpm}
+              keyName={merged.key}
+              rhythm={merged.rhythm ?? null}
+              percentiles={merged.referenceRhythmPercentiles ?? null}
+              descriptorsPercentiles={merged.referenceRhythmDescriptorsPercentiles ?? null}
+              refState={rhythmRefState}
+            />
+          ) : null}
+
+          {activeTab === "extra" ? <ExtraCard extra={merged.extra ?? null} /> : null}
         </div>
       </div>
     </div>
   );
 }
+
+

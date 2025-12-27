@@ -97,7 +97,7 @@ export default function ChartsReferenceLayout(props: {
                   <div className="mb-3 flex items-center justify-between">
                     <div className="text-sm font-semibold text-white/80">Favorite Artists</div>
                     <Link
-                      href="/circuit"
+                      href="/discovery"
                       className="text-xs font-semibold uppercase tracking-[0.25em] text-orange-400/90 hover:text-orange-300"
                     >
                       View more

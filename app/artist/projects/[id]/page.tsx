@@ -32,7 +32,7 @@ type ProjectVersionRow = AnalyzerMetricsFields & {
   // IMPORTANT: nel tuo DB audio_url contiene la path storage nel bucket tracks
 audio_url: string | null;   // può essere URL http firmato (se usato) oppure null
 audio_path: string | null;  // path nel bucket tracks
-
+  analyzer_key?: string | null;
 
 
   analyzer_json?: AnalyzerResult | null;
@@ -509,6 +509,19 @@ const path = rawPath;
   }, [selectedVersion?.waveform_duration, isActive, player.duration]);
 
   const timeLabel = durationForLabel ? formatTime(durationForLabel) : "--:--";
+  const isAnalyzerBusy = analyzerStatus !== "idle";
+  const analyzerOverlayText =
+    analyzerStatus === "starting"
+      ? "Preparazione Tekkin Analyzer..."
+      : analyzerStatus === "analyzing"
+      ? "Analisi in corso..."
+      : analyzerStatus === "saving"
+      ? "Registrazione risultati..."
+      : analyzerStatus === "done"
+      ? "Analisi completata"
+      : analyzerStatus === "error"
+      ? "Errore nel Tekkin Analyzer"
+      : "Analisi in corso...";
 
   if (!projectId) {
     return (
@@ -519,7 +532,110 @@ const path = rawPath;
   }
 
   return (
-    <div className="w-full max-w-5xl mx-auto py-8">
+    <>
+      {isAnalyzerBusy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
+          <div className="absolute inset-0 tekkin-grid pointer-events-none" />
+          <div className="relative z-10 flex flex-col items-center gap-4 rounded-2xl border border-white/10 bg-black/80 px-8 py-6 text-center shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+            <div className="glitch-icon mb-2" aria-hidden />
+            <p className="text-[10px] uppercase tracking-[0.5em] text-white/60">tekkin analyzer</p>
+            <p className="text-lg font-semibold text-white">{analyzerOverlayText}</p>
+          </div>
+          <style jsx>{`
+            .tekkin-grid {
+              background-image:
+                radial-gradient(circle at 25% 15%, transparent 0, rgba(255, 255, 255, 0.06) 40%, rgba(255, 255, 255, 0.02) 70%, transparent 80%),
+                linear-gradient(140deg, transparent 45%, rgba(255, 255, 255, 0.08) 49%, rgba(255, 255, 255, 0.08) 53%, transparent 60%),
+                repeating-linear-gradient(
+                  5deg,
+                  rgba(255, 255, 255, 0.03),
+                  rgba(255, 255, 255, 0.03) 2px,
+                  transparent 2px,
+                  transparent 9px,
+                  rgba(255, 255, 255, 0.05) 9px,
+                  rgba(255, 255, 255, 0.05) 10px,
+                  transparent 10px,
+                  transparent 18px
+                ),
+                linear-gradient(95deg, rgba(255, 255, 255, 0.02), transparent 65%, rgba(255, 255, 255, 0.02) 90%),
+                linear-gradient(10deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+              background-size: 180% 180%, 180% 180%, 120% 150%, 140% 90%, 160% 160%;
+              opacity: 0.45;
+              filter: blur(0.9px);
+              animation: tekkin-grid-wave 6s linear infinite, tekkin-grid-band 3.8s ease-in-out infinite alternate;
+            }
+            @keyframes tekkin-grid-wave {
+              0% {
+                background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+              }
+              40% {
+                background-position: -30px 20px, 15px -20px, 25px 5px, -15px 10px, 5px -15px;
+              }
+              80% {
+                background-position: 30px -15px, -25px 18px, -10px 30px, 20px -5px, -10px 8px;
+              }
+              100% {
+                background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+              }
+            }
+            @keyframes tekkin-grid-band {
+              0% {
+                transform: translateY(0) skewX(-2deg);
+                opacity: 0.3;
+              }
+              50% {
+                transform: translateY(-8px) skewX(3deg);
+                opacity: 0.6;
+              }
+              100% {
+                transform: translateY(4px) skewX(-1deg);
+                opacity: 0.4;
+              }
+            }
+            .glitch-icon {
+              width: 72px;
+              height: 72px;
+              border-radius: 18px;
+              background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.05) 70%, transparent 90%);
+              box-shadow: 0 25px 60px rgba(255, 255, 255, 0.06), inset 0 0 10px rgba(255, 255, 255, 0.15);
+              position: relative;
+            }
+            .glitch-icon::after,
+            .glitch-icon::before {
+              content: "";
+              position: absolute;
+              inset: 12%;
+              border-radius: 12px;
+              border: 1px solid rgba(255, 255, 255, 0.35);
+              mix-blend-mode: screen;
+              animation: tekkin-glitch 2.2s linear infinite;
+            }
+            .glitch-icon::after {
+              animation-delay: 0.2s;
+              opacity: 0.7;
+            }
+            .glitch-icon::before {
+              animation-delay: 0.5s;
+              opacity: 0.4;
+            }
+            @keyframes tekkin-glitch {
+              0% {
+                transform: translate(-6px, 0) skewX(-10deg);
+              }
+              35% {
+                transform: translate(6px, -5px) skewX(8deg);
+              }
+              65% {
+                transform: translate(-3px, 5px) skewX(-5deg);
+              }
+              100% {
+                transform: translate(-6px, 0) skewX(-10deg);
+              }
+            }
+          `}</style>
+        </div>
+      )}
+      <div className="w-full max-w-5xl mx-auto py-8">
       <Link href="/artist/projects" className="mb-4 inline-flex text-sm text-white/60 hover:text-white">
         ← Back to Projects
       </Link>
@@ -529,65 +645,71 @@ const path = rawPath;
 
       {!loading && project && (
         <>
-          <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-5">
-            <div className="flex flex-wrap items-start justify-between gap-6">
-              <div className="flex flex-1 min-w-0 items-start gap-6">
-                <div className="flex flex-col items-center gap-2">
-                  <div className="relative h-36 w-36 overflow-hidden rounded-3xl border border-white/15 bg-white/5">
-                    {project.cover_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={project.cover_url} alt={`${project.title} cover`} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-[11px] text-white/60">
-                        <span>Cover</span>
-                        <span>mancante</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-center gap-1 text-center">
-                    <button
-                      type="button"
-                      onClick={openCoverPicker}
-                      disabled={coverUploading}
-                      className="rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300 hover:text-white disabled:opacity-60"
-                    >
-                      {coverUploading ? "Uploading..." : project.cover_url ? "Cambia cover" : "Aggiungi cover"}
-                    </button>
-                    <p className="text-[11px] text-white/50">PNG/JPG ? max 5 MB</p>
-                  </div>
-                  <input
-                    ref={coverInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleCoverInputChange}
-                  />
-                  {coverError && <p className="text-[11px] text-red-300">{coverError}</p>}
+          <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-0">
+            <div className="relative h-[360px] overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+              {project.cover_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={project.cover_url} alt={`${project.title} cover`} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-sm text-white/60">
+                  Copertura mancante
                 </div>
-
-                <div className="flex flex-1 min-w-0 flex-col gap-2">
-                  <div>
-                    <div className="text-xl font-semibold text-white truncate">{project.title}</div>
-                    <div className="mt-1 text-sm text-white/60">
-                      {profileLabel} ? {versions.length} versione{versions.length === 1 ? "" : "i"}
+              )}
+              <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-transparent to-black/80 p-8">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="text-2xl font-semibold text-white">{project.title}</div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.3em] text-white/70">
+                      <span>{profileLabel}</span>
+                      <span>{versions.length} versione{versions.length === 1 ? "" : "i"}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {latestVersion?.lufs != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          {latestVersion.lufs.toFixed(1)} LUFS integrati
+                        </span>
+                      )}
+                      {latestVersion?.overall_score != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          Tekkin {latestVersion.overall_score.toFixed(1)}
+                        </span>
+                      )}
+                      {latestVersion?.analyzer_bpm != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          BPM {Math.round(latestVersion.analyzer_bpm)}
+                        </span>
+                      )}
+                      {latestVersion?.analyzer_key && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          Key {latestVersion.analyzer_key}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-3">
+                    <div>
+                      <button
+                        type="button"
+                        onClick={openCoverPicker}
+                        disabled={coverUploading}
+                        className="rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300 hover:text-white disabled:opacity-60"
+                      >
+                        {coverUploading ? "Uploading..." : project.cover_url ? "Cambia cover" : "Aggiungi cover"}
+                      </button>
+                      <p className="mt-2 text-[11px] text-white/50">PNG/JPG – max {MAX_COVER_SIZE_BYTES / (1024 * 1024)} MB</p>
                     </div>
                   </div>
                 </div>
               </div>
-
-              <div className="flex shrink-0 items-center gap-2">
-                {latestVersion?.lufs != null && (
-                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
-                    {latestVersion.lufs.toFixed(1)} LUFS
-                  </span>
-                )}
-                {latestVersion?.overall_score != null && (
-                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
-                    Tekkin {latestVersion.overall_score.toFixed(1)}
-                  </span>
-                )}
-              </div>
             </div>
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleCoverInputChange}
+            />
+            {coverError && <p className="px-8 pt-2 text-[11px] text-red-300">{coverError}</p>}
           </header>
 
 
@@ -852,5 +974,6 @@ const path = rawPath;
         </div>
       )}
     </div>
+  </>
   );
 }

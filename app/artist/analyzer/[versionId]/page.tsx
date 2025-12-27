@@ -80,6 +80,10 @@ export default async function Page({
       analyzer_key,
       analyzer_profile_key,
       reference_model_key,
+      waveform_peaks,
+      waveform_bands,
+      waveform_duration,
+      created_at,
       analyzer_json,
       analyzer_bands_norm,
       arrays_blob_path,
@@ -246,6 +250,10 @@ export default async function Page({
     artistId: row.project_id as string,
     artistSlug: null,
     profileKey: (row.analyzer_profile_key as string) ?? null,
+    waveformPeaks: (row as any).waveform_peaks ?? null,
+    waveformBands: (row as any).waveform_bands ?? null,
+    waveformDuration: (row as any).waveform_duration ?? null,
+    createdAt: (row as any).created_at ?? null,
   };
 
   // UI resolve

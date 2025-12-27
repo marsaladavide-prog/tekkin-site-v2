@@ -85,8 +85,14 @@ export function useArtistRank() {
         const { data: artistRow, error: _artistErr } = await supabase
           .from("artists")
           .select(
-            "id,user_id,artist_name,artist_photo_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
+            "id,user_id,artist_name,artist_photo_url,avatar_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
           )
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        const { data: profileRow } = await supabase
+          .from("users_profile")
+          .select("photo_url")
           .eq("user_id", user.id)
           .maybeSingle();
 
@@ -146,6 +152,8 @@ export function useArtistRank() {
 
           artist_photo_url:
             (artistRow?.artist_photo_url as string | undefined) ||
+            (artistRow?.avatar_url as string | undefined) ||
+            (profileRow?.photo_url as string | undefined) ||
             metaPhoto ||
             (localProfile.artist_photo_url as string | undefined) ||
             "/images/default-artist.png",

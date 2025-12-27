@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DateInput from "@/components/ui/DateInput";
 
 type AgentDmProject = {
@@ -110,23 +110,6 @@ export default function AgentDmPage() {
     [tasks, todayIso]
   );
 
-  // load iniziale
-  useEffect(() => {
-    loadProjects();
-    loadGoals();
-  }, []);
-
-  // carica task quando cambia progetto
-  useEffect(() => {
-    if (selectedProjectId) {
-      loadTasks(selectedProjectId);
-      setAdvice(null); // quando cambi progetto resetti i consigli
-    } else {
-      setTasks([]);
-      setAdvice(null);
-    }
-  }, [selectedProjectId]);
-
   const selectedProject = useMemo(
     () => projects.find(p => p.id === selectedProjectId) ?? null,
     [projects, selectedProjectId]
@@ -142,7 +125,7 @@ export default function AgentDmPage() {
     return byCategory;
   }, [projects]);
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
     try {
       setLoadingProjects(true);
       const res = await fetch("/api/agent-dm/projects");
@@ -152,17 +135,15 @@ export default function AgentDmPage() {
       }
       const json = await res.json();
       setProjects(json.projects ?? []);
-      if (!selectedProjectId && json.projects?.length) {
-        setSelectedProjectId(json.projects[0].id);
-      }
+      setSelectedProjectId(prev => prev ?? json.projects?.[0]?.id ?? null);
     } catch (err) {
       console.error("loadProjects error", err);
     } finally {
       setLoadingProjects(false);
     }
-  }
+  }, []);
 
-  async function loadTasks(projectId: string) {
+  const loadTasks = useCallback(async (projectId: string) => {
     try {
       setLoadingTasks(true);
       const res = await fetch(`/api/agent-dm/tasks?projectId=${encodeURIComponent(projectId)}`);
@@ -177,9 +158,9 @@ export default function AgentDmPage() {
     } finally {
       setLoadingTasks(false);
     }
-  }
+  }, []);
 
-  async function loadGoals() {
+  const loadGoals = useCallback(async () => {
     try {
       setLoadingGoals(true);
       const res = await fetch("/api/agent-dm/goals");
@@ -194,7 +175,24 @@ export default function AgentDmPage() {
     } finally {
       setLoadingGoals(false);
     }
-  }
+  }, []);
+
+  // load iniziale
+  useEffect(() => {
+    loadProjects();
+    loadGoals();
+  }, [loadProjects, loadGoals]);
+
+  // carica task quando cambia progetto
+  useEffect(() => {
+    if (selectedProjectId) {
+      loadTasks(selectedProjectId);
+      setAdvice(null); // quando cambi progetto resetti i consigli
+    } else {
+      setTasks([]);
+      setAdvice(null);
+    }
+  }, [selectedProjectId, loadTasks]);
 
   async function handleCreateProject() {
     if (!newProjectName.trim()) return;

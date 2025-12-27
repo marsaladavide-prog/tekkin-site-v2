@@ -73,6 +73,29 @@ function extractBandsPercentiles(reference: any): BandsPercentiles | null {
   return has ? out : null;
 }
 
+// new helper (sanitizes band-percentile objects)
+function sanitizeBandsPercentiles(value: any): BandsPercentiles | null {
+  if (!value || typeof value !== "object") return null;
+  const out: BandsPercentiles = {};
+  let has = false;
+  for (const key of BAND_KEYS) {
+    const bandPerc = value[key];
+    if (bandPerc && typeof bandPerc === "object") {
+      const p: any = {};
+      if (typeof bandPerc.p10 === "number") p.p10 = bandPerc.p10;
+      if (typeof bandPerc.p25 === "number") p.p25 = bandPerc.p25;
+      if (typeof bandPerc.p50 === "number") p.p50 = bandPerc.p50;
+      if (typeof bandPerc.p75 === "number") p.p75 = bandPerc.p75;
+      if (typeof bandPerc.p90 === "number") p.p90 = bandPerc.p90;
+      if (Object.keys(p).length > 0) {
+        out[key] = p;
+        has = true;
+      }
+    }
+  }
+  return has ? out : null;
+}
+
 function buildPercentileRange(value: any): PercentileRange | null {
   if (!value || typeof value !== "object") return null;
   const out: PercentileRange = {};
@@ -85,21 +108,144 @@ function buildPercentileRange(value: any): PercentileRange | null {
 function extractStereoPercentiles(reference: any): ReferenceStereoPercentiles | null {
   const stereo = reference?.stereo_percentiles;
   if (!stereo || typeof stereo !== "object") return null;
+
   const lrBalance = buildPercentileRange(stereo.lr_balance_db);
   const lrCorrelation = buildPercentileRange(stereo.lr_correlation);
+
+  const stereoWidth = buildPercentileRange(stereo.stereo_width);
+
+  const widthByBand =
+    stereo.width_by_band_percentiles && typeof stereo.width_by_band_percentiles === "object"
+      ? sanitizeBandsPercentiles(stereo.width_by_band_percentiles)
+      : null;
 
   const out: ReferenceStereoPercentiles = {};
   if (lrBalance) out.lrBalanceDb = lrBalance;
   if (lrCorrelation) out.lrCorrelation = lrCorrelation;
+  if (stereoWidth) out.stereoWidth = stereoWidth;
+  if (widthByBand) out.widthByBand = widthByBand;
+
   return Object.keys(out).length ? out : null;
 }
 
+function extractTransientsPercentiles(reference: any) {
+  const transients = reference?.transients_percentiles ?? reference?.transientsPercentiles;
+  if (!transients || typeof transients !== "object") return null;
+
+  const crest = buildPercentileRange(transients.crest_factor_db ?? transients.crestFactorDb);
+  const strength = buildPercentileRange(transients.strength);
+  const density = buildPercentileRange(transients.density);
+  const logAttack = buildPercentileRange(transients.log_attack_time ?? transients.logAttackTime);
+
+  const out: any = {};
+  if (crest) out.crest_factor_db = crest;
+  if (strength) out.strength = strength;
+  if (density) out.density = density;
+  if (logAttack) out.log_attack_time = logAttack;
+  return Object.keys(out).length ? out : null;
+}
+
+function extractRhythmPercentiles(reference: any) {
+  const rhythm = reference?.rhythm_percentiles ?? reference?.rhythmPercentiles;
+  if (!rhythm || typeof rhythm !== "object") return null;
+
+  const bpm = buildPercentileRange(rhythm.bpm);
+  const stability = buildPercentileRange(rhythm.stability);
+  const danceability = buildPercentileRange(rhythm.danceability);
+
+  const out: any = {};
+  if (bpm) out.bpm = bpm;
+  if (stability) out.stability = stability;
+  if (danceability) out.danceability = danceability;
+  return Object.keys(out).length ? out : null;
+}
+
+function extractRhythmDescriptorsPercentiles(reference: any) {
+  const descriptors =
+    reference?.rhythm_descriptors_percentiles ?? reference?.rhythmDescriptorsPercentiles;
+  if (!descriptors || typeof descriptors !== "object") return null;
+
+  const ibiMean = buildPercentileRange(descriptors.ibi_mean ?? descriptors.ibiMean);
+  const ibiStd = buildPercentileRange(descriptors.ibi_std ?? descriptors.ibiStd);
+  const beatsCount = buildPercentileRange(descriptors.beats_count ?? descriptors.beatsCount);
+  const keyStrength = buildPercentileRange(descriptors.key_strength ?? descriptors.keyStrength);
+
+  const out: any = {};
+  if (ibiMean) out.ibi_mean = ibiMean;
+  if (ibiStd) out.ibi_std = ibiStd;
+  if (beatsCount) out.beats_count = beatsCount;
+  if (keyStrength) out.key_strength = keyStrength;
+  return Object.keys(out).length ? out : null;
+}
+
+function extractSpectralPercentiles(reference: any) {
+  const spectral = reference?.spectral_percentiles ?? reference?.spectralPercentiles;
+  if (!spectral || typeof spectral !== "object") return null;
+
+  const centroid = buildPercentileRange(spectral.spectral_centroid_hz ?? spectral.spectralCentroidHz);
+  const bandwidth = buildPercentileRange(spectral.spectral_bandwidth_hz ?? spectral.spectralBandwidthHz);
+  const rolloff = buildPercentileRange(spectral.spectral_rolloff_hz ?? spectral.spectralRolloffHz);
+  const flatness = buildPercentileRange(spectral.spectral_flatness ?? spectral.spectralFlatness);
+  const zcr = buildPercentileRange(spectral.zero_crossing_rate ?? spectral.zeroCrossingRate);
+
+  const out: any = {};
+  if (centroid) out.spectral_centroid_hz = centroid;
+  if (bandwidth) out.spectral_bandwidth_hz = bandwidth;
+  if (rolloff) out.spectral_rolloff_hz = rolloff;
+  if (flatness) out.spectral_flatness = flatness;
+  if (zcr) out.zero_crossing_rate = zcr;
+  return Object.keys(out).length ? out : null;
+}
+
+function extractSoundFieldRef(reference: any) {
+  const sf = reference?.sound_field_ref ?? reference?.soundFieldRef;
+  if (!sf || typeof sf !== "object") return null;
+
+  const angleDeg = Array.isArray(sf.angle_deg) ? sf.angle_deg.filter((v: any) => typeof v === "number") : null;
+  const p10 = Array.isArray(sf.p10_radius) ? sf.p10_radius.filter((v: any) => typeof v === "number" || v == null) : null;
+  const p50 = Array.isArray(sf.p50_radius) ? sf.p50_radius.filter((v: any) => typeof v === "number" || v == null) : null;
+  const p90 = Array.isArray(sf.p90_radius) ? sf.p90_radius.filter((v: any) => typeof v === "number" || v == null) : null;
+
+  const out: any = {};
+  if (angleDeg?.length) out.angle_deg = angleDeg;
+  if (p10?.length) out.p10_radius = p10;
+  if (p50?.length) out.p50_radius = p50;
+  if (p90?.length) out.p90_radius = p90;
+  if (typeof sf.bin_step_deg === "number") out.bin_step_deg = sf.bin_step_deg;
+  if (typeof sf.deg_max === "number") out.deg_max = sf.deg_max;
+  return Object.keys(out).length ? out : null;
+}
+
+function extractSoundFieldXYRef(reference: any) {
+  const sf = reference?.sound_field_xy_ref ?? reference?.soundFieldXYRef;
+  if (!Array.isArray(sf)) return null;
+  const out: { x: number; y: number }[] = [];
+  for (const p of sf) {
+    const x = (p as any)?.x;
+    const y = (p as any)?.y;
+    if (typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)) {
+      out.push({ x, y });
+    }
+  }
+  return out.length ? out : null;
+}
+
 function extractSpectrumRef(referenceModel: any): SpectrumPoint[] | null {
-  const hz: any[] = referenceModel?.spectrum_db?.hz;
+  // supporto sia schema nuovo (spectrum_db) che schema vecchio/attuale (spectrum_ref)
+  const src =
+    (referenceModel?.spectrum_db && typeof referenceModel.spectrum_db === "object"
+      ? referenceModel.spectrum_db
+      : null) ??
+    (referenceModel?.spectrum_ref && typeof referenceModel.spectrum_ref === "object"
+      ? referenceModel.spectrum_ref
+      : null);
+
+  const hz: any[] = src?.hz;
+
   const refDb: any[] =
-    referenceModel?.spectrum_db?.ref_db ??
-    referenceModel?.spectrum_db?.mean_db ??
-    referenceModel?.spectrum_db?.db ??
+    src?.ref_db ??
+    src?.mean_db ??
+    src?.db ??
     null;
 
   if (!Array.isArray(hz) || !Array.isArray(refDb)) return null;
@@ -117,6 +263,7 @@ function extractSpectrumRef(referenceModel: any): SpectrumPoint[] | null {
 
   return out.length ? out : null;
 }
+
 
 function ensureNumberArray(value: any): number[] {
   if (!Array.isArray(value)) return [];
@@ -238,8 +385,21 @@ export function mapVersionToAnalyzerCompareModel(version: any, referenceModel?: 
   const bandsNorm = sanitizeBands(trackBandsCandidate);
   const referenceBandsNorm = sanitizeBands(referenceBandsCandidate);
   const referenceBandsPercentiles = extractBandsPercentiles(referenceModel);
-  const referenceLoudnessPercentiles = buildPercentileRange(referenceModel?.features_percentiles?.lufs);
-  const referenceFeaturesPercentiles = referenceLoudnessPercentiles ? { lufs: referenceLoudnessPercentiles } : null;
+  const refFeatures = referenceModel?.features_percentiles ?? null;
+  const refLoudness = referenceModel?.loudness_percentiles ?? null;
+  const referenceLoudnessPercentiles = buildPercentileRange(refFeatures?.lufs ?? refLoudness?.integrated_lufs);
+  const referenceLraPercentiles = buildPercentileRange(refFeatures?.lra ?? refLoudness?.lra);
+  const referenceSamplePeakPercentiles = buildPercentileRange(refFeatures?.sample_peak_db ?? refLoudness?.sample_peak_db);
+  const referenceTruePeakPercentiles = buildPercentileRange(refFeatures?.true_peak_db ?? refLoudness?.true_peak_db);
+  const referenceFeaturesPercentiles =
+    referenceLoudnessPercentiles || referenceLraPercentiles || referenceSamplePeakPercentiles || referenceTruePeakPercentiles
+      ? {
+          lufs: referenceLoudnessPercentiles,
+          lra: referenceLraPercentiles,
+          sample_peak_db: referenceSamplePeakPercentiles,
+          true_peak_db: referenceTruePeakPercentiles,
+        }
+      : null;
 
   const referenceBandsFromModel = sanitizeBands(referenceModel?.bands_norm ?? null);
   const referenceBandsNormFinal = referenceBandsNorm ?? referenceBandsFromModel;
@@ -329,7 +489,13 @@ const loudness: Loudness = {
     referenceBandsNorm: referenceBandsNormFinal,
     referenceBandsPercentiles,
     referenceFeaturesPercentiles,
-    referenceStereoPercentiles: referenceModel ? extractStereoPercentiles(referenceModel) : null,
+    referenceStereoPercentiles: extractStereoPercentiles(referenceModel),
+    referenceRhythmPercentiles: extractRhythmPercentiles(referenceModel),
+    referenceRhythmDescriptorsPercentiles: extractRhythmDescriptorsPercentiles(referenceModel),
+    referenceTransientsPercentiles: extractTransientsPercentiles(referenceModel),
+    referenceSpectralPercentiles: extractSpectralPercentiles(referenceModel),
+    referenceSoundField: extractSoundFieldRef(referenceModel),
+    referenceSoundFieldXY: extractSoundFieldXYRef(referenceModel),
 
     spectrumTrack: null,
     spectrumRef: referenceModel ? extractSpectrumRef(referenceModel) : null,
@@ -379,29 +545,74 @@ const loudness: Loudness = {
     }
   }
 
-  // sound_field -> soundField
-  if (arrays?.sound_field?.angle_deg && arrays?.sound_field?.radius) {
-    const a: any[] = arrays.sound_field.angle_deg;
-    const r: any[] = arrays.sound_field.radius;
+  // sound_field -> soundField (supporta sia shape {angle_deg:[], radius:[]} che [{angle_deg, radius}, ...])
+  {
+    const sf = arrays?.sound_field_polar ?? arrays?.sound_field;
     const pts: { angleDeg: number; radius: number }[] = [];
-    for (let i = 0; i < Math.min(a.length, r.length); i++) {
-      if (typeof a[i] === "number" && typeof r[i] === "number") pts.push({ angleDeg: a[i], radius: r[i] });
+
+    if (Array.isArray(sf)) {
+      for (const p of sf) {
+        const a = (p as any)?.angle_deg;
+        const r = (p as any)?.radius;
+        if (typeof a === "number" && Number.isFinite(a) && typeof r === "number" && Number.isFinite(r)) {
+          pts.push({ angleDeg: a, radius: r });
+        }
+      }
+    } else if (sf && typeof sf === "object") {
+      const a: any[] = (sf as any).angle_deg;
+      const r: any[] = (sf as any).radius;
+      if (Array.isArray(a) && Array.isArray(r)) {
+        for (let i = 0; i < Math.min(a.length, r.length); i++) {
+          if (typeof a[i] === "number" && Number.isFinite(a[i]) && typeof r[i] === "number" && Number.isFinite(r[i])) {
+            pts.push({ angleDeg: a[i], radius: r[i] });
+          }
+        }
+      }
     }
+
     model.soundField = pts.length ? pts : null;
   }
 
-  // levels -> levels
-  if (arrays?.levels?.channels && arrays?.levels?.rms_db && arrays?.levels?.peak_db) {
-    const ch: any[] = arrays.levels.channels;
-    const rms: any[] = arrays.levels.rms_db;
-    const peak: any[] = arrays.levels.peak_db;
-    const out: any[] = [];
-    for (let i = 0; i < Math.min(ch.length, rms.length, peak.length); i++) {
-      if (typeof ch[i] === "string" && typeof rms[i] === "number" && typeof peak[i] === "number") {
-        out.push({ label: ch[i], rmsDb: rms[i], peakDb: peak[i] });
+  // sound_field_xy -> soundFieldXY
+  {
+    const sf = arrays?.sound_field_xy;
+    const pts: { x: number; y: number }[] = [];
+    if (Array.isArray(sf)) {
+      for (const p of sf) {
+        const x = (p as any)?.x;
+        const y = (p as any)?.y;
+        if (typeof x === "number" && Number.isFinite(x) && typeof y === "number" && Number.isFinite(y)) {
+          pts.push({ x, y });
+        }
       }
     }
-    model.levels = out.length ? out : null;
+    model.soundFieldXY = pts.length ? pts : null;
+  }
+
+  // levels -> levels
+  if (arrays?.levels && typeof arrays.levels === "object") {
+    const levels = arrays.levels as any;
+    if (levels.channels && levels.rms_db && levels.peak_db) {
+      const ch: any[] = levels.channels;
+      const rms: any[] = levels.rms_db;
+      const peak: any[] = levels.peak_db;
+      const out: any[] = [];
+      for (let i = 0; i < Math.min(ch.length, rms.length, peak.length); i++) {
+        if (typeof ch[i] === "string" && typeof rms[i] === "number" && typeof peak[i] === "number") {
+          out.push({ label: ch[i], rmsDb: rms[i], peakDb: peak[i] });
+        }
+      }
+      model.levels = out.length ? out : null;
+    } else {
+      const rmsL = pickNum(levels, ["rms_db_l", "rmsDbL"]);
+      const rmsR = pickNum(levels, ["rms_db_r", "rmsDbR"]);
+      const peakL = pickNum(levels, ["peak_db_l", "peakDbL"]);
+      const peakR = pickNum(levels, ["peak_db_r", "peakDbR"]);
+      const out: any[] = [];
+      if (typeof rmsL === "number" && typeof peakL === "number") out.push({ label: "L", rmsDb: rmsL, peakDb: peakL });
+      if (typeof rmsR === "number" && typeof peakR === "number") out.push({ label: "R", rmsDb: rmsR, peakDb: peakR });
+      model.levels = out.length ? out : null;
+    }
   }
 
   // transients -> transients
@@ -416,30 +627,34 @@ const loudness: Loudness = {
 
     if (tCandidate) {
       const t = tCandidate as any;
-      const out: any = {};
+      const strengthVal = typeof t.strength === "number" && Number.isFinite(t.strength) ? t.strength : null;
+      const densityVal = typeof t.density === "number" && Number.isFinite(t.density) ? t.density : null;
 
-      if (typeof t.strength === "number" && Number.isFinite(t.strength)) out.strength = t.strength;
-      if (typeof t.density === "number" && Number.isFinite(t.density)) out.density = t.density;
-
-      const crest =
-        typeof t.crestFactorDb === "number"
+      const crestVal =
+        typeof t.crestFactorDb === "number" && Number.isFinite(t.crestFactorDb)
           ? t.crestFactorDb
-          : typeof t.crest_factor_db === "number"
+          : typeof t.crest_factor_db === "number" && Number.isFinite(t.crest_factor_db)
             ? t.crest_factor_db
             : null;
-      if (typeof crest === "number" && Number.isFinite(crest)) out.crestFactorDb = crest;
 
-      const logAttack =
-        typeof t.log_attack_time === "number"
+      const logAttackVal =
+        typeof t.log_attack_time === "number" && Number.isFinite(t.log_attack_time)
           ? t.log_attack_time
-          : typeof t.logAttackTime === "number"
+          : typeof t.logAttackTime === "number" && Number.isFinite(t.logAttackTime)
             ? t.logAttackTime
             : null;
-      if (typeof logAttack === "number" && Number.isFinite(logAttack)) {
-        out.log_attack_time = logAttack;
-      }
 
-      model.transients = Object.keys(out).length ? out : null;
+      const hasAny = [strengthVal, densityVal, crestVal, logAttackVal].some(
+        (v) => typeof v === "number" && Number.isFinite(v)
+      );
+      model.transients = hasAny
+        ? {
+            strength: strengthVal,
+            density: densityVal,
+            crestFactorDb: crestVal,
+            log_attack_time: logAttackVal,
+          }
+        : null;
     } else {
       model.transients = null;
     }
@@ -470,7 +685,10 @@ const loudness: Loudness = {
 
   // rhythm (arrays.json)
   model.rhythm = {
-    relative_key: pickStr(arrays, ["relative_key"]) ?? null,
+    relative_key:
+      pickStr(arrays, ["relative_key"]) ??
+      pickStr(arrays, ["rhythm_descriptors.relative_key"]) ??
+      null,
     danceability: pickNum(arrays, ["danceability"]) ?? null,
     beat_times: (() => {
       const bt = ensureNumArr(arrays?.beat_times);
@@ -488,14 +706,35 @@ const loudness: Loudness = {
   };
 
   // extra (arrays.json)
+  const extraCandidate =
+    (arrays?.extra && typeof arrays.extra === "object" ? arrays.extra : null) ??
+    (analyzer?.extra && typeof analyzer.extra === "object" ? analyzer.extra : null) ??
+    (analyzer?.analysis_pro?.extra && typeof analyzer.analysis_pro.extra === "object"
+      ? analyzer.analysis_pro.extra
+      : null) ??
+    null;
+
   model.extra = {
     mfcc_mean: (() => {
-      const m = ensureNumArr(arrays?.mfcc_mean);
+      const m = ensureNumArr(
+        arrays?.mfcc_mean ??
+          extraCandidate?.mfcc_mean ??
+          extraCandidate?.mfcc?.mean ??
+          null
+      );
       return m.length ? m : null;
     })(),
-    hfc: pickNum(arrays, ["hfc"]) ?? null,
-    spectral_peaks_count: pickNum(arrays, ["spectral_peaks_count"]) ?? null,
-    spectral_peaks_energy: pickNum(arrays, ["spectral_peaks_energy"]) ?? null,
+    hfc: pickNum(arrays, ["hfc"]) ?? pickNum(extraCandidate, ["hfc"]) ?? null,
+    spectral_peaks_count:
+      pickNum(arrays, ["spectral_peaks_count"]) ??
+      pickNum(extraCandidate, ["spectral_peaks_count"]) ??
+      pickNum(extraCandidate, ["spectral_peaks.count"]) ??
+      null,
+    spectral_peaks_energy:
+      pickNum(arrays, ["spectral_peaks_energy"]) ??
+      pickNum(extraCandidate, ["spectral_peaks_energy"]) ??
+      pickNum(extraCandidate, ["spectral_peaks.energy"]) ??
+      null,
   };
 
   // FIX: rendi spectrumRef sempre confrontabile col track (stesso asse/lunghezza)

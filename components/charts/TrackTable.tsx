@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Pause, Play, Link2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,9 +21,17 @@ function numLabel(v: unknown) {
   return typeof v === "number" && Number.isFinite(v) ? String(v) : "--";
 }
 
-function Cover({ coverUrl, alt }: { coverUrl?: string | null; alt: string }) {
+function Cover({ coverUrl, alt, size }: { coverUrl?: string | null; alt: string; size: number }) {
   if (coverUrl) {
-    return <img src={coverUrl} alt={alt} className="h-full w-full object-cover" loading="lazy" />;
+    return (
+      <Image
+        src={coverUrl}
+        alt={alt}
+        fill
+        sizes={`${size}px`}
+        className="object-cover"
+      />
+    );
   }
   return <div className="h-full w-full bg-gradient-to-br from-white/10 via-white/5 to-transparent" />;
 }
@@ -111,6 +120,7 @@ export default function TrackTable({
 
   const padY = dense ? "py-2.5" : "py-3.5";
   const coverSize = dense ? "h-10 w-10" : "h-12 w-12";
+  const coverPx = dense ? 40 : 48;
 
   return (
     <section className="rounded-3xl bg-white/5 ring-1 ring-white/10">
@@ -157,8 +167,8 @@ export default function TrackTable({
               >
                 <div className="w-7 text-xs font-semibold text-white/55">{entry.rank_position}</div>
 
-                <div className={["shrink-0 overflow-hidden rounded-xl bg-white/5", coverSize].join(" ")}>
-                  <Cover coverUrl={entry.cover_url} alt={entry.track_title ?? "Tekkin track"} />
+                <div className={["shrink-0 overflow-hidden rounded-xl bg-white/5 relative", coverSize].join(" ")}>
+                  <Cover coverUrl={entry.cover_url} alt={entry.track_title ?? "Tekkin track"} size={coverPx} />
                 </div>
 
                 <div className="min-w-0 flex-1">

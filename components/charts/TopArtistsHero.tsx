@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ChartTopArtist } from "@/components/charts/types";
 
@@ -26,7 +27,7 @@ export default function TopArtistsHero({
           <h2 className="mt-2 text-2xl font-semibold text-white">Top Artists</h2>
 
           <Link
-            href="/artist/discovery"
+            href="/discovery"
             className="mt-1 inline-block text-sm text-white/60 hover:text-white hover:underline"
           >
             Esplora gli artisti su Circuit
@@ -40,7 +41,7 @@ export default function TopArtistsHero({
         </div>
 
         <Link
-          href="/artist/discovery"
+          href="/discovery"
           className="text-sm font-medium text-orange-400/90 hover:text-orange-300"
         >
           View more
@@ -56,10 +57,13 @@ export default function TopArtistsHero({
               <div className="min-w-[140px] text-center">
                 <div className="mx-auto h-[120px] w-[120px] overflow-hidden rounded-full bg-white/5 ring-1 ring-white/10">
                   {artist.avatarUrl ? (
-                    <img
+                    <Image
                       src={artist.avatarUrl}
                       alt={artist.name}
+                      width={120}
+                      height={120}
                       className="h-full w-full object-cover"
+                      sizes="120px"
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs font-semibold tracking-[0.25em] text-white/80">

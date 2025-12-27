@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { getSupabaseAdmin } from "@/app/api/artist/profile";
+import { notify } from "@/lib/notifications/notify";
 
 export const runtime = "nodejs";
 
@@ -58,6 +60,19 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Notifica con notify
+    await notify({
+      userId: receiver_id,
+      type: "signal_received",
+      title: "Nuovo Signal ricevuto",
+      body:
+        kind === "promo"
+          ? "Hai ricevuto una richiesta promo anonima."
+          : "Hai ricevuto una richiesta collab anonima.",
+      href: "/discovery",
+      data: { request_id: insertData.id, project_id },
+    });
 
     return NextResponse.json(
       {

@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
 
 import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
 import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
 import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
 import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
+import PublicTracksGallery from "@/components/artist/PublicTracksGallery";
 
 import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
@@ -25,7 +27,7 @@ export default async function PublicArtistPage({ params }: Props) {
 
   const { data: artistRow, error: artistErr } = await supabase
     .from("artists")
-    .select("id, slug, is_public")
+    .select("id, slug, user_id, is_public")
     .eq("slug", slug)
     .eq("is_public", true)
     .maybeSingle();
@@ -77,6 +79,11 @@ export default async function PublicArtistPage({ params }: Props) {
     );
   }
 
+  const projectOwnerId =
+    detail.profile_user_id ??
+    ((artistRow as any).user_id as string | null) ??
+    artistId;
+
   const genres =
     Array.isArray(artist.main_genres) && artist.main_genres.length > 0
       ? artist.main_genres.filter(Boolean)
@@ -120,39 +127,94 @@ export default async function PublicArtistPage({ params }: Props) {
     albumType: rel.album_type,
   }));
 
-  const { data: tracks } = await supabase
-    .from("project_versions")
-    .select(`
-      id,
-      project_id,
-      track_title,
-      audio_url,
-      cover_url,
-      score_public,
-      visibility,
-      projects!inner (
-        artist_id,
-        title
-      )
-    `)
-    .eq("projects.artist_id", artist.id)
-    .eq("visibility", "public")
-    .order("score_public", { ascending: false });
+  const admin = createAdminClient();
 
-  const items: TrackItem[] = (tracks ?? []).map((v) => ({
+  // Evitiamo filtri su join (più fragili): carichiamo prima i project dell'owner, poi le versioni public.
+  const { data: projectRowsByUser, error: projectRowsByUserErr } = await admin
+    .from("projects")
+    .select("id")
+    .eq("user_id", projectOwnerId);
+
+  if (projectRowsByUserErr) {
+    console.error("[public-artist] projects by user_id error:", projectRowsByUserErr);
+  }
+
+  let projectIds =
+    projectRowsByUser?.map((p: any) => p.id).filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+
+  // Fallback: alcuni dati legacy possono legare i project a `artist_id` invece che `user_id`.
+  if (projectIds.length === 0) {
+    const { data: projectRowsByArtist, error: projectRowsByArtistErr } = await admin
+      .from("projects")
+      .select("id")
+      .eq("artist_id", artistId);
+
+    if (projectRowsByArtistErr) {
+      console.error("[public-artist] projects by artist_id error:", projectRowsByArtistErr);
+    } else {
+      projectIds =
+        projectRowsByArtist?.map((p: any) => p.id).filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+    }
+  }
+
+const { data: tracks } =
+  projectIds.length > 0
+    ? await admin
+        .from("project_versions")
+        .select(
+          "id, project_id, version_name, audio_url, visibility, overall_score, waveform_peaks, waveform_bands, waveform_duration, projects!inner(cover_url)"
+        )
+        .in("project_id", projectIds)
+        .eq("visibility", "public")
+        .order("overall_score", { ascending: false })
+        .order("created_at", { ascending: false })
+    : { data: [] as any[] };
+
+  const resolveProjectCover = (projectData: any): string | null => {
+    if (!projectData) return null;
+    const meta = Array.isArray(projectData) ? projectData[0] : projectData;
+    if (meta && typeof meta.cover_url === "string") {
+      return meta.cover_url;
+    }
+    return null;
+  };
+
+
+const items: TrackItem[] = (tracks ?? []).map((v: any) => {
+  const rawAudio = typeof v.audio_url === "string" ? v.audio_url.trim() : "";
+  const audioUrl = rawAudio && rawAudio.startsWith("http") ? rawAudio : null;
+  const scoreValue =
+    typeof v.overall_score === "number"
+      ? v.overall_score
+      : typeof v.overall_score === "string"
+      ? Number(v.overall_score) || null
+      : null;
+
+  return {
     versionId: v.id,
-    title: v.track_title ?? "Untitled",
+    projectId: typeof v.project_id === "string" ? v.project_id : null,
+    title: v.version_name ?? "Untitled",
     artistName: artist.artist_name,
-    coverUrl: v.cover_url,
-    audioUrl: v.audio_url,
-    scorePublic: v.score_public,
+    artistId: artist.id,
+    artistSlug: slug,
+    coverUrl: resolveProjectCover(v.projects),
+    audioUrl,
+    waveformPeaks: Array.isArray(v.waveform_peaks) ? v.waveform_peaks : null,
+    waveformBands: v.waveform_bands ?? null,
+    waveformDuration:
+      typeof v.waveform_duration === "number" && Number.isFinite(v.waveform_duration)
+        ? v.waveform_duration
+        : null,
+    scorePublic: scoreValue,
     likesCount: 0,
     likedByMe: false,
-  }));
+  };
+});
+
 
   return (
-    <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
-      <div className="w-full max-w-5xl mx-auto space-y-8">
+    <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-6 md:px-10 md:py-8">
+      <div className="w-full max-w-6xl mx-auto space-y-6">
         <ArtistProfileHeader
           artistId={artistId}
           artistName={artist.artist_name || "Artista Tekkin"}
@@ -165,15 +227,44 @@ export default async function PublicArtistPage({ params }: Props) {
           presskitUrl={artist.presskit_link ?? null}
         />
 
-        <div className="flex justify-center mt-3">
+        <div className="flex justify-center mt-2">
           <EditArtistProfileButton artistId={artist.id} />
         </div>
 
         <TekkinRankSection overrideData={rankView ?? undefined} />
 
-        <section className="mt-6">
+        <div className="space-y-5">
           <ReleasesHighlights releases={highlightReleases} />
-        </section>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-mono uppercase tracking-[0.16em] text-tekkin-muted">
+                  Tracce pubbliche
+                </h2>
+                <p className="text-xs text-tekkin-text/70">
+                  {items.length > 0
+                    ? `${items.length} tracce pubblicate su Tekkin`
+                    : "Nessuna traccia pubblica al momento."}
+                </p>
+              </div>
+            </div>
+
+            {items.length > 0 && (
+              <p className="text-[11px] uppercase tracking-[0.4em] text-white/40">
+                Vedi solo le versioni analizzate e pronte alla ribalta.
+              </p>
+            )}
+
+            {items.length > 0 ? (
+              <PublicTracksGallery items={items} />
+            ) : (
+              <p className="text-xs text-tekkin-muted">
+                Le nuove release pubbliche appariranno qui.
+              </p>
+            )}
+          </section>
+        </div>
 
         {genres.length > 1 && (
           <section className="space-y-2">

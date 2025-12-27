@@ -119,6 +119,56 @@ const formatTime = (secs: number) => {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
+const DEBUG_WAVEFORM_UI = process.env.NEXT_PUBLIC_TEKKIN_WAVEFORM_DEBUG === "1";
+
+function normalizeTrackPath(p: string) {
+  let path = p.trim();
+  if (!path) return null;
+  if (path.startsWith("http")) return null; // qui vogliamo solo storage path
+  if (path.startsWith("tracks/")) path = path.slice("tracks/".length);
+  if (path.startsWith("/")) path = path.slice(1);
+  return path || null;
+}
+
+function parseNumberArray(input: unknown): number[] | null {
+  if (!input) return null;
+
+  const coerce = (arr: unknown[]): number[] => {
+    const out: number[] = [];
+    for (const v of arr) {
+      const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+      if (Number.isFinite(n)) out.push(n);
+    }
+    return out.length ? out : [];
+  };
+
+  if (Array.isArray(input)) return coerce(input);
+
+  if (typeof input === "string") {
+    const s = input.trim();
+    if (!s) return null;
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return coerce(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  // ultima spiaggia: array-like
+  if (typeof input === "object") {
+    try {
+      const values = Object.values(input as Record<string, unknown>);
+      if (values.length && values.every((v) => typeof v === "number" || typeof v === "string")) {
+        return coerce(values as unknown[]);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -270,6 +320,24 @@ export default function ProjectsPage() {
                       ? version.visibility
                       : null;
 
+                  const peaks = parseNumberArray(version.waveform_peaks);
+
+                  if (DEBUG_WAVEFORM_UI) {
+                    const bands = version.waveform_bands;
+                    const rawPeaksLen = Array.isArray(version.waveform_peaks) ? version.waveform_peaks.length : null;
+                    console.log("[ProjectsPage] waveform raw ->", {
+                      projectId: p.id,
+                      versionId: version.id,
+                      rawType: typeof version.waveform_peaks,
+                      isArray: Array.isArray(version.waveform_peaks),
+                      rawLen: rawPeaksLen,
+                      parsedLen: peaks?.length ?? null,
+                      durationRaw,
+                      durationParsed: safeDuration,
+                      bandsKeys: bands && typeof bands === "object" ? Object.keys(bands) : null,
+                    });
+                  }
+
                   return {
                     id: version.id,
                     version_name: version.version_name ?? null,
@@ -288,7 +356,7 @@ export default function ProjectsPage() {
                         : null,
                     analyzer_key: typeof version.analyzer_key === "string" ? version.analyzer_key : null,
 
-                    waveform_peaks: Array.isArray(version.waveform_peaks) ? version.waveform_peaks : null,
+                    waveform_peaks: peaks,
                     waveform_duration: safeDuration,
                     waveform_bands: version.waveform_bands ?? null,
                   } as ProjectVersionRow;
@@ -515,6 +583,29 @@ export default function ProjectsPage() {
     coverInputRef.current?.click();
   }, []);
 
+  const [coverMenuProjectId, setCoverMenuProjectId] = useState<string | null>(null);
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  const closeCoverMenu = useCallback(() => setCoverMenuProjectId(null), []);
+
+  const handleCoverPreview = useCallback((url: string) => {
+    setCoverPreviewUrl(url);
+  }, []);
+
+  const handleCoverMenuAction = useCallback(
+    (projectId: string, action: "preview" | "replace") => {
+      closeCoverMenu();
+      if (action === "replace") {
+        beginCoverUpload(projectId);
+        return;
+      }
+      const project = projects.find((p) => p.id === projectId);
+      if (project?.cover_url) {
+        handleCoverPreview(project.cover_url);
+      }
+    },
+    [beginCoverUpload, closeCoverMenu, handleCoverPreview, projects]
+  );
+
   const handleCoverFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0] ?? null;
@@ -685,11 +776,12 @@ export default function ProjectsPage() {
       if (cached && cached.startsWith("http")) return cached;
 
       const rawPath = typeof version.audio_path === "string" ? version.audio_path.trim() : "";
-      if (!rawPath) return null;
+      const storagePath = normalizeTrackPath(rawPath || rawUrl);
+      if (!storagePath) return null;
 
       try {
         const supabase = createClient();
-        const { data, error } = await supabase.storage.from("tracks").createSignedUrl(rawPath, 60 * 30);
+        const { data, error } = await supabase.storage.from("tracks").createSignedUrl(storagePath, 60 * 30);
         if (error || !data?.signedUrl) return null;
 
         const signed = data.signedUrl;
@@ -783,6 +875,20 @@ export default function ProjectsPage() {
             const serverPeaks = previewVersion?.waveform_peaks ?? null;
             const serverDuration = previewVersion?.waveform_duration ?? null;
             const hasPreviewAudio = !!(previewVersion?.audio_url || previewVersion?.audio_path);
+            if (DEBUG_WAVEFORM_UI && previewVersion) {
+              const previewBands = previewVersion.waveform_bands;
+              const finalPeaksLen = Array.isArray(previewVersion.waveform_peaks)
+                ? previewVersion.waveform_peaks.length
+                : null;
+              console.log("[ProjectsPage] waveform UI ->", {
+                projectId: p.id,
+                versionId: previewVersion.id,
+                peaksLen: finalPeaksLen,
+                duration: serverDuration ?? null,
+                bandsKeys: previewBands && typeof previewBands === "object" ? Object.keys(previewBands) : null,
+                hasPreviewAudio,
+              });
+            }
             const isActive = !!previewVersionId && player.versionId === previewVersionId;
 
             const progressRatio =
@@ -882,18 +988,56 @@ export default function ProjectsPage() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-white/10 bg-white/5 transition-all duration-300 hover:scale-[1.08] hover:border-white/25 hover:shadow-[0_0_25px_rgba(255,255,255,0.08)] cursor-pointer">
-                      {p.cover_url ? (
-                        <img src={p.cover_url} alt={`Cover ${p.title}`} className="h-full w-full object-cover transition-all duration-300 hover:brightness-115" />
-                      ) : (
-                        <div className="grid h-full w-full place-items-center text-white/60 text-xs transition-all duration-300 hover:text-white/85">
-                          <span>Cover</span>
-                          <span>mancante</span>
-                        </div>
-                      )}
+                      <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-white/10 bg-white/5 transition-all duration-300 hover:scale-[1.08] hover:border-white/25 hover:shadow-[0_0_25px_rgba(255,255,255,0.08)] cursor-pointer">
+                      <div
+                        className="h-full w-full"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setCoverMenuProjectId(p.id);
+                        }}
+                      >
+                        {p.cover_url ? (
+                          <img
+                            src={p.cover_url}
+                            alt={`Cover ${p.title}`}
+                            className="h-full w-full object-cover transition-all duration-300 hover:brightness-110"
+                          />
+                        ) : (
+                          <div className="grid h-full w-full place-items-center text-white/60 text-xs transition-all duration-300 hover:text-white/85">
+                            <span>Cover</span>
+                            <span>mancante</span>
+                          </div>
+                        )}
+                      </div>
                       {coverUploadingProjectId === p.id && (
                         <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/60 text-[10px] uppercase tracking-[0.4em] text-white/80">
                           Caricando
+                        </div>
+                      )}
+                      {coverMenuProjectId === p.id && (
+                        <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 w-48 rounded-2xl border border-white/10 bg-black/80 px-3 py-2 text-sm text-white shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => handleCoverMenuAction(p.id, "preview")}
+                            className="w-full rounded-xl py-1 text-left text-sm text-white transition hover:bg-white/10"
+                          >
+                            Anteprima
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCoverMenuAction(p.id, "replace")}
+                            className="mt-1 w-full rounded-xl py-1 text-left text-sm text-cyan-300 transition hover:bg-cyan-400/10"
+                          >
+                            Cambia cover
+                          </button>
+                          <button
+                            type="button"
+                            onClick={closeCoverMenu}
+                            className="mt-1 w-full rounded-xl py-1 text-left text-sm text-white/50 transition hover:bg-white/10"
+                          >
+                            Chiudi
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1334,10 +1478,23 @@ export default function ProjectsPage() {
         className="hidden"
         onChange={handleCoverFileChange}
       />
+      {coverPreviewUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 px-4">
+          <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-black/80 p-6 shadow-xl">
+            <img src={coverPreviewUrl} alt="Anteprima cover" className="h-[70vh] w-full object-contain" />
+            <button
+              type="button"
+              onClick={() => setCoverPreviewUrl(null)}
+              className="absolute right-4 top-4 rounded-full border border-white/30 px-3 py-1 text-xs font-semibold text-white/80 backdrop-blur"
+            >
+              Chiudi
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
 type MenuItem = {
   label: string;
   href?: string;

@@ -34,6 +34,7 @@ export type ArtistDetailResponse = {
   }[];
   error: string | null;
   artist_slug: string | null;
+  profile_user_id: string | null;
 };
 
 export async function getArtistDetail(artistId: string): Promise<ArtistDetailResponse> {
@@ -45,6 +46,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       releases: [],
       error: "ID artista non valido",
       artist_slug: null,
+      profile_user_id: null,
     };
   }
 
@@ -83,6 +85,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         releases: [],
         error: "Errore caricando l'artista",
         artist_slug: null,
+        profile_user_id: null,
       };
     }
 
@@ -139,6 +142,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         releases: [],
         error: "Artista non trovato",
         artist_slug: null,
+        profile_user_id: null,
       };
     }
 
@@ -216,7 +220,9 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     // 3) releases
     const { data: releasesRows, error: releasesErr } = await supabase
       .from("artist_spotify_releases")
-      .select(`id, title, release_date, cover_url, spotify_url, album_type, position`)
+      .select(
+        `id, title, release_date, cover_url, spotify_url, album_type, position, spotify_id`
+      )
       .eq("artist_id", profileId)
       .order("position", { ascending: true });
 
@@ -232,6 +238,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         cover_url: r.cover_url,
         spotify_url: r.spotify_url,
         album_type: r.album_type,
+        spotify_id: r.spotify_id ?? null,
       })) ?? [];
 
     const total_releases = releasesRows?.length ?? 0;
@@ -306,6 +313,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       releases,
       error: null,
       artist_slug: artistSlug,
+      profile_user_id: typeof profileUserId === "string" ? profileUserId : null,
     };
   } catch (err) {
     console.error("[getArtistDetail] unexpected error:", err);
@@ -316,6 +324,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       releases: [],
       error: "Errore interno del server",
       artist_slug: null,
+      profile_user_id: null,
     };
   }
 }

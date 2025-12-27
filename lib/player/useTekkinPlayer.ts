@@ -14,6 +14,7 @@ export type PlayPayload = {
   duration?: number;
   artistId?: string | null;
   artistSlug?: string | null;
+  coverUrl?: string | null;
 };
 
 export type TekkinPlayerState = {

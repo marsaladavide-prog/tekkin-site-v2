@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import SoftButton from "@/components/ui/SoftButton";
@@ -7,6 +8,7 @@ type AvatarItem = {
   name: string | null;
   avatarUrl: string | null;
   href?: string;
+  slug?: string | null;
 };
 
 type AvatarRailProps = {
@@ -64,10 +66,12 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
             <div className="flex flex-col items-center gap-2 text-center">
               <div className={`relative h-16 w-16 overflow-hidden rounded-full bg-gradient-to-br ${color} to-[var(--panel)]`}>
                 {artist.avatarUrl ? (
-                  <img
+                  <Image
                     src={artist.avatarUrl}
                     alt={artist.name ?? "Tekkin artist"}
-                    className="h-full w-full object-cover"
+                    fill
+                    sizes="64px"
+                    className="object-cover"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.3em] text-white">
@@ -93,8 +97,10 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
             );
           }
 
+          const fallbackHref = artist.slug ? `/@${artist.slug}` : `/artist/discovery/${artist.id}`;
+
           return (
-            <Link key={artist.id} href={`/@${artist.slug}`} className="block">
+            <Link key={artist.id} href={fallbackHref} className="block">
               <div className="flex-shrink-0 rounded-2xl transition hover:brightness-110">
                 {content}
               </div>
@@ -105,3 +111,9 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
     </section>
   );
 }
+
+// Inserisci questi log nel punto del file dove hai accesso a queste variabili (tipicamente in una pagina o componente che mostra l'artista pubblico):
+console.log("[public-artist] artistRow", artistRow);
+console.log("[public-artist] projectOwnerId", projectOwnerId);
+console.log("[public-artist] projectIds", projectIds);
+console.log("[public-artist] tracks len", tracks?.length ?? 0);

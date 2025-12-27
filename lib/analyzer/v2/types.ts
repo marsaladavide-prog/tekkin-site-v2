@@ -33,7 +33,48 @@ export type PercentileRange3 = {
 export type ReferenceStereoPercentiles = {
   lrBalanceDb?: PercentileRange;
   lrCorrelation?: PercentileRange;
+
+  // aggiunti
+  stereoWidth?: PercentileRange;
+  widthByBand?: BandsPercentiles;
 };
+
+export type ReferenceTransientsPercentiles = {
+  crest_factor_db?: PercentileRange | null;
+  strength?: PercentileRange | null;
+  density?: PercentileRange | null;
+  log_attack_time?: PercentileRange | null;
+} | null;
+
+export type ReferenceRhythmPercentiles = {
+  bpm?: PercentileRange | null;
+  stability?: PercentileRange | null;
+  danceability?: PercentileRange | null;
+} | null;
+
+export type ReferenceRhythmDescriptorsPercentiles = {
+  ibi_mean?: PercentileRange | null;
+  ibi_std?: PercentileRange | null;
+  beats_count?: PercentileRange | null;
+  key_strength?: PercentileRange | null;
+} | null;
+
+export type ReferenceSpectralPercentiles = {
+  spectral_centroid_hz?: PercentileRange | null;
+  spectral_bandwidth_hz?: PercentileRange | null;
+  spectral_rolloff_hz?: PercentileRange | null;
+  spectral_flatness?: PercentileRange | null;
+  zero_crossing_rate?: PercentileRange | null;
+} | null;
+
+export type ReferenceSoundField = {
+  angle_deg?: number[] | null;
+  p10_radius?: number[] | null;
+  p50_radius?: number[] | null;
+  p90_radius?: number[] | null;
+  bin_step_deg?: number | null;
+  deg_max?: number | null;
+} | null;
 
 export type Spectral = {
   spectral_centroid_hz?: number | null;
@@ -124,7 +165,16 @@ export type AnalyzerCompareModel = {
   referenceStereoPercentiles?: ReferenceStereoPercentiles | null;
   referenceFeaturesPercentiles?: {
     lufs?: PercentileRange | null;
+    lra?: PercentileRange | null;
+    sample_peak_db?: PercentileRange | null;
+    true_peak_db?: PercentileRange | null;
   } | null;
+  referenceTransientsPercentiles?: ReferenceTransientsPercentiles | null;
+  referenceRhythmPercentiles?: ReferenceRhythmPercentiles | null;
+  referenceRhythmDescriptorsPercentiles?: ReferenceRhythmDescriptorsPercentiles | null;
+  referenceSpectralPercentiles?: ReferenceSpectralPercentiles | null;
+  referenceSoundField?: ReferenceSoundField | null;
+  referenceSoundFieldXY?: { x: number; y: number }[] | null;
 
   // spectrum overlay
   spectrumTrack: SpectrumPoint[] | null;
@@ -134,6 +184,7 @@ export type AnalyzerCompareModel = {
   spectral: Spectral | null;
   loudness: Loudness | null;
   soundField: { angleDeg: number; radius: number }[] | null;
+  soundFieldXY?: { x: number; y: number }[] | null;
   levels: LevelMeter[] | null;
   transients?: Transients | null;
 

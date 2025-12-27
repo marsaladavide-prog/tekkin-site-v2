@@ -1,11 +1,15 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
+
 type SpotifyRelease = {
   id: string;
   title: string;
   releaseDate: string;
   coverUrl: string | null;
   spotifyUrl: string | null;
+  spotifyId?: string | null;
   albumType: string | null; // "single", "album", "compilation", ecc
 };
 
@@ -14,6 +18,18 @@ type ReleasesHighlightsProps = {
 };
 
 export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
+  const play = useTekkinPlayer((state) => state.play);
+  const previewCacheRef = useRef<Record<string, string | null>>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [playError, setPlayError] = useState<string | null>(null);
+  const [embedAlbumId, setEmbedAlbumId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!playError) return undefined;
+    const timer = window.setTimeout(() => setPlayError(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [playError]);
+
   const hasRealData = releases.length > 0;
 
   const gradientClasses = [
@@ -41,14 +57,67 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
     }
   }
 
-  function handlePlayClick(url?: string | null) {
-    if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+  function extractSpotifyAlbumId(url: string | null): string | null {
+    if (!url) return null;
+    const match = url.match(/([A-Za-z0-9]{22})/);
+    return match ? match[1] : null;
+  }
+
+  async function handlePlayClick(rel: SpotifyRelease) {
+    console.log("[ReleasesHighlights] play requested", rel);
+    setPlayError(null);
+    const albumIdToUse = rel.spotifyId ?? extractSpotifyAlbumId(rel.spotifyUrl) ?? null;
+    if (!albumIdToUse) return;
+
+    const spotifyUrl = rel.spotifyUrl;
+    if (Object.prototype.hasOwnProperty.call(previewCacheRef.current, rel.id)) {
+      const cached = previewCacheRef.current[rel.id];
+      if (cached) {
+        startPlayback(cached, rel);
+      } else {
+        setPlayError("Anteprima non disponibile per questa release.");
+        setEmbedAlbumId(albumIdToUse);
+      }
+      return;
+    }
+
+    setLoadingId(rel.id);
+    try {
+      const response = await fetch(
+        `/api/spotify/preview?albumId=${encodeURIComponent(albumIdToUse)}`
+      );
+      const payload = (await response.json().catch(() => null)) ?? null;
+      const previewUrl = payload?.previewUrl ?? null;
+      previewCacheRef.current[rel.id] = previewUrl;
+
+      if (previewUrl) {
+        startPlayback(previewUrl, rel, payload?.trackName ?? null);
+      } else {
+        setPlayError(payload?.error ?? "Anteprima non disponibile per questa release.");
+        setEmbedAlbumId(albumIdToUse);
+      }
+    } catch (err) {
+      console.error("[ReleasesHighlights] preview error", err);
+      setPlayError("Errore caricando anteprima.");
+    } finally {
+      setLoadingId((current) => (current === rel.id ? null : current));
+    }
+  }
+
+  function startPlayback(previewUrl: string, rel: SpotifyRelease, trackName?: string | null) {
+    play({
+      versionId: rel.id,
+      title: trackName ?? rel.title ?? "Release",
+      subtitle: rel.title ?? "Release",
+      audioUrl: previewUrl,
+      coverUrl: rel.coverUrl,
+    });
+    setEmbedAlbumId(null);
   }
 
   return (
-    <section className="mb-10">
-      <div className="flex items-center justify-between mb-3">
+    <section className="mb-6">
+      <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">
           Main Releases & Highlights
         </h2>
@@ -57,11 +126,15 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
         </div>
       </div>
 
+      {playError ? (
+        <div className="mb-2 text-xs text-rose-400">{playError}</div>
+      ) : null}
+
       <div className="relative">
         <div className="absolute inset-x-0 top-3 h-px bg-gradient-to-r from-transparent via-[var(--border-color)] to-transparent opacity-60 pointer-events-none"></div>
 
         <div className="overflow-x-auto pb-2">
-          <div className="flex items-stretch gap-4 pt-4">
+          <div className="flex items-stretch gap-4 pt-3">
             {hasRealData
               ? releases.map((rel, idx) => {
                   const gradient =
@@ -92,10 +165,11 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
 
                         <div className="absolute bottom-2 left-2 flex items-center gap-2">
                           <button
-                            className="w-7 h-7 rounded-full bg-white text-black flex items-center justify-center text-[11px] hover:bg-tekkin-primary hover:text-black transition-colors"
-                            onClick={() => handlePlayClick(rel.spotifyUrl)}
+                            className="w-7 h-7 rounded-full bg-white text-black flex items-center justify-center text-[11px] hover:bg-tekkin-primary hover:text-black transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                            onClick={() => handlePlayClick(rel)}
+                            disabled={loadingId === rel.id}
                           >
-                            Play
+                            {loadingId === rel.id ? "..." : "Play"}
                           </button>
                           <span className="px-2 py-0.5 rounded-full bg-black/80 border border-[var(--border-color)] text-[10px] font-mono uppercase text-tekkin-muted">
                             {typeLabel}
@@ -192,6 +266,31 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
           </div>
         </div>
       </div>
+      {embedAlbumId ? (
+        <div
+          className="fixed inset-0 z-[899] flex items-center justify-center bg-black/70"
+          onClick={() => setEmbedAlbumId(null)}
+        >
+          <div
+            className="relative mx-4 w-full max-w-3xl rounded-3xl border border-white/10 bg-black/90 p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setEmbedAlbumId(null)}
+              className="absolute right-4 top-4 rounded-full border border-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-white"
+            >
+              Chiudi
+            </button>
+          <iframe
+            title="Spotify preview"
+            src={`https://open.spotify.com/embed/album/${embedAlbumId}`}
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+            className="h-[420px] w-full rounded-2xl border border-white/10"
+          />
+        </div>
+      </div>
+    ) : null}
     </section>
   );
 }

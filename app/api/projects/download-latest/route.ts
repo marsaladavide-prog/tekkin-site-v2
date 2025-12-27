@@ -69,7 +69,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Nessuna versione con audio disponibile" }, { status: 404 });
     }
 
-    const project = version.projects;
+  // Supabase può tipizzare la relazione come array anche se è 1:1.
+   const project = Array.isArray((version as any).projects)
+     ? (version as any).projects[0]
+      : (version as any).projects;
     if (!project || project.user_id !== user.id) {
       return NextResponse.json({ error: "Accesso negato" }, { status: 403 });
     }

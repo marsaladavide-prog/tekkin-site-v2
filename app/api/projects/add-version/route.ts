@@ -11,6 +11,16 @@ function normalizeMixType(value?: string | null): TekkinMixType {
   return DEFAULT_MIX_TYPE;
 }
 
+function formatVersionTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const day = pad(date.getDate());
+  const month = pad(date.getMonth() + 1);
+  const year = date.getFullYear();
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -33,11 +43,10 @@ export async function POST(req: NextRequest) {
     const versionNameRaw =
       typeof body?.version_name === "string" ? body.version_name.trim() : "";
 
-    const versionName =
-      versionNameRaw.length > 0
-        ? versionNameRaw
-        : `Upload ${new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, "-")}`;
     const mixType = normalizeMixType(body?.mix_type ?? null);
+    const mixLabel = mixType === "master" ? "Master" : "Premaster";
+    const defaultVersionName = `${mixLabel} • ${formatVersionTimestamp(new Date())}`;
+    const versionName = versionNameRaw.length > 0 ? versionNameRaw : defaultVersionName;
 
     const rawAudioPath = typeof body?.audio_path === "string" ? body.audio_path.trim() : "";
     const audioPath = rawAudioPath.replace(/^\/?tracks\//, "");
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
       .from("project_versions")
       .insert({
         project_id: projectId,
-        version_name: versionName || `Upload ${new Date().toISOString().slice(0, 19).replace("T", " ").replace(/:/g, "-")}`,
+        version_name: versionName,
         audio_path: audioPath,
         audio_url: null,
         mix_type: mixType,

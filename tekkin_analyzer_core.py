@@ -80,6 +80,45 @@ def _crest_db(x: np.ndarray) -> float | None:
     return _db(peak / rms)
 
 
+def compute_levels(audio_y: np.ndarray) -> dict[str, float]:
+    """
+    Compute per-channel RMS/peak levels from stereo audio.
+    lr_balance_db uses L - R (positive means left heavier).
+    """
+    stereo = _ensure_stereo(audio_y)
+    if stereo.size == 0 or stereo.shape[0] < 2:
+        return {}
+
+    left = np.asarray(stereo[0], dtype=np.float32)
+    right = np.asarray(stereo[1], dtype=np.float32)
+
+    rms_l = float(np.sqrt(np.mean(left * left))) if left.size else 0.0
+    rms_r = float(np.sqrt(np.mean(right * right))) if right.size else 0.0
+    peak_l = float(np.max(np.abs(left))) if left.size else 0.0
+    peak_r = float(np.max(np.abs(right))) if right.size else 0.0
+
+    eps = 1e-12
+    rms_db_l = float(20.0 * math.log10(max(eps, rms_l)))
+    rms_db_r = float(20.0 * math.log10(max(eps, rms_r)))
+    peak_db_l = float(20.0 * math.log10(max(eps, peak_l)))
+    peak_db_r = float(20.0 * math.log10(max(eps, peak_r)))
+    peak_max_db = float(20.0 * math.log10(max(eps, max(peak_l, peak_r))))
+    lr_balance_db = rms_db_l - rms_db_r
+
+    return {
+        "rms_l": rms_l,
+        "rms_r": rms_r,
+        "rms_db_l": rms_db_l,
+        "rms_db_r": rms_db_r,
+        "peak_l": peak_l,
+        "peak_r": peak_r,
+        "peak_db_l": peak_db_l,
+        "peak_db_r": peak_db_r,
+        "lr_balance_db": lr_balance_db,
+        "peak_max_db": peak_max_db,
+    }
+
+
 def _estimate_onset_count(odf: np.ndarray) -> int:
     if odf.size < 3:
         return 0
@@ -520,6 +559,9 @@ def analyze_track(
         warnings.append(f"transients_failed:{type(exc).__name__}")
         transients = {"strength": 0.0, "density": 0.0, "crest_factor_db": float(_crest_db(mono) or 0.0)}
 
+    # Levels (L/R)
+    levels = compute_levels(stereo)
+
     # BPM
     rhythm = es.RhythmExtractor2013(method="multifeature")
     rhythm_out = rhythm(mono)
@@ -646,6 +688,7 @@ def analyze_track(
             "short_term_lufs": loudness.get("short_term_lufs") or [],
         },
         "transients": transients,
+        "levels": levels,
         "analysis_pro": analysis_pro,
         # NOTE: spectrum_db / sound_field / levels li aggiungi altrove nella pipeline, se già li stai calcolando
     }

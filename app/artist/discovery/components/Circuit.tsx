@@ -128,7 +128,7 @@ export function Circuit() {
               ? `/@${artistSlug}`
               : a.id
               ? `/artist/discovery/${a.id}`
-              : "/artist/discovery";
+              : "/discovery";
 
             return (
               <Link

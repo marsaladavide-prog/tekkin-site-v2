@@ -1,31 +1,25 @@
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
-export async function loadReferenceModel(referenceModelKey: string) {
-  if (!referenceModelKey) return null;
+export async function loadReferenceModel(profileKey: string): Promise<any | null> {
+  if (!profileKey || !profileKey.trim()) return null;
 
-  const safeKey = referenceModelKey
-    .trim()
-    .toLowerCase()
-    .replace(/-/g, "_")
-    .replace(/[^a-z0-9_]/g, "");
+  const clean = profileKey.trim();
 
-  const filePath = path.join(
-    process.cwd(),
-    "reference_models",
-    `${safeKey}.json`
-  );
+  // Priorità ai model v3 (completi). Fallback ai legacy.
+  const candidates = [
+    path.join(process.cwd(), "reference_models_v3", `${clean}.json`),
+    path.join(process.cwd(), "reference_models", `${clean}.json`),
+  ];
 
-  try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    console.error(
-      "[reference] model not found:",
-      referenceModelKey,
-      "->",
-      filePath
-    );
-    return null;
+  for (const p of candidates) {
+    try {
+      const raw = await fs.readFile(p, "utf8");
+      return JSON.parse(raw);
+    } catch {
+      // continua col prossimo candidato
+    }
   }
+
+  return null;
 }

@@ -4,16 +4,17 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
-{ protocol: "https", hostname: "i.scdn.co" },
-    { protocol: "https", hostname: "images.unsplash.com" },
-    { protocol: "https", hostname: "placehold.co" },
-    { protocol: "https", hostname: "dummyimage.com" },
+      { protocol: "https", hostname: "i.scdn.co" },
+      { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "placehold.co" },
+      { protocol: "https", hostname: "dummyimage.com" },
+      { protocol: "https", hostname: "*.supabase.co" },
 
-    // aggiungi questi:
-    { protocol: "https", hostname: "musictech.com" },
-    { protocol: "https", hostname: "mixmag.net" },
-    { protocol: "https", hostname: "djmag.com" },
-    { protocol: "https", hostname: "*.residentadvisor.net" },
+      // aggiungi questi:
+      { protocol: "https", hostname: "musictech.com" },
+      { protocol: "https", hostname: "mixmag.net" },
+      { protocol: "https", hostname: "djmag.com" },
+      { protocol: "https", hostname: "*.residentadvisor.net" },
     ],
     formats: ["image/avif", "image/webp"],
   },

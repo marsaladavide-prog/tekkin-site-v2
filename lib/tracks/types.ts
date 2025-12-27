@@ -1,8 +1,11 @@
+import type { WaveformBands } from "@/types/analyzer";
+
 export type TrackVisibility = "public" | "private_with_secret_link" | "private";
 
 export type TrackItem = {
   // identity
   versionId: string;
+  projectId?: string | null;
 
   // display
   title: string;
@@ -14,6 +17,9 @@ export type TrackItem = {
   // audio (in charts può non esserci sempre: se vuoi zero errori, rendilo nullable)
   audioUrl: string | null;
   audioPath?: string | null;
+  waveformPeaks?: number[] | null;
+  waveformBands?: WaveformBands | null;
+  waveformDuration?: number | null;
 
   // meta
   mixType?: "premaster" | "master" | null;
