@@ -5,7 +5,11 @@ import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult"
 import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
 import { calculateTekkinVersionRankFromModel } from "@/lib/analyzer/tekkinVersionRank";
 import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
-import { isRecord, JsonObject } from "@/lib/types/json";
+
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
 
 export const runtime = "nodejs";
 
@@ -192,13 +196,25 @@ if (!audioUrl && audioPath) {
       return NextResponse.json({ error: "Analyzer returned non-JSON" }, { status: 502 });
     }
 
-    if (!isRecord(data)) {
-      console.error("[run-analyzer] analyzer returned non-object JSON");
-      return NextResponse.json({ error: "Analyzer returned invalid JSON" }, { status: 502 });
-    }
+if (!isRecord(data)) {
+  console.error("[run-analyzer] analyzer returned non-object JSON");
+  return NextResponse.json({ error: "Analyzer returned invalid JSON" }, { status: 502 });
+}
 
-    const result = data as JsonObject;
-    const updatePayload = buildAnalyzerUpdatePayload(result);
+// check minimo: deve avere almeno version_id oppure meta/version ecc
+const hasSomeId =
+  typeof (data as any).version_id === "string" ||
+  typeof (data as any).versionId === "string" ||
+  typeof (data as any).version === "string";
+
+if (!hasSomeId) {
+  console.error("[run-analyzer] analyzer json missing expected keys");
+  return NextResponse.json({ error: "Analyzer returned invalid JSON" }, { status: 502 });
+}
+
+const result = data as unknown as any;
+const updatePayload = buildAnalyzerUpdatePayload(result);
+
     if (DEBUG_ANALYZER_DEEP) {
   logAnalyzerSummary("run-analyzer", result);
 }
