@@ -1,302 +1,106 @@
-"use client";
-
+import type { ReactNode } from "react";
+import AppShell from "@/components/ui/AppShell";
+import ArtistSidebar from "@/components/nav/ArtistSidebar";
+import { createClient } from "@/utils/supabase/server";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import { createClient } from "@/utils/supabase/client";
-import { useTheme } from "./hooks/useTheme";
-import { useArtistRank } from "./hooks/useArtistRank";
 
-const navItems = [
-  {
-    label: "Projects",
-    href: "/artist/projects",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M9 18V5l12-2v13" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="16" r="3" />
-      </svg>
-    ),
-  },
-  {
-    label: "Discovery",
-    href: "/artist/discovery",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M9 18V5l12-2v13" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="16" r="3" />
-      </svg>
-    ),
-  },
-  {
-    label: "Dashboard",
-    href: "/artist",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
-      </svg>
-    ),
-  },
-];
+export const dynamic = "force-dynamic";
 
-const menuItems = [
-  { label: "Manage cookies", href: "#" },
-  { label: "Terms & policies", href: "#" },
-  { label: "Help", href: "#" },
-  { label: "Profile", href: "/artist/settings/profile" }
+export default async function ArtistLayout({ children }: { children: ReactNode }) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-];
+  const { data: access } = user
+    ? await supabase
+        .from("artist_access")
+        .select("access_status, plan")
+        .eq("user_id", user.id)
+        .maybeSingle()
+    : { data: null };
 
-export default function ArtistLayout({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
-  const { data } = useArtistRank();
+  const accessStatus = access?.access_status ?? "inactive";
+  const plan = access?.plan ?? "free";
+  const isActive = Boolean(user && accessStatus === "active");
+  const isUnauthenticated = !user;
 
-  // Stato auth solo per UI, niente piu redirect
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const heroTitle = isUnauthenticated ? "Tekkin Artist è riservato" : "Upgrade Tekkin Artist";
+  const heroDescription = isUnauthenticated
+    ? "Entra nella community Tekkin per gestire progetti, versioni e Tekkin Rank. Registrati o accedi per sbloccare strumenti e signals."
+    : "L'accesso artista è inattivo. Attiva un piano o usa un codice invito per riaccendere Projects, Analyzer e Signals.";
 
-  useEffect(() => {
-    let active = true;
+  const primaryCta = isUnauthenticated
+    ? { href: "/register", label: "Registrati gratis" }
+    : { href: "/pricing", label: "Vai a pricing" };
 
-    async function checkAuth() {
-      const supabase = await createClient();
-
-      try {
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
-
-        if (error) {
-          throw error;
-        }
-
-        if (!active) return;
-
-        if (!user) {
-          setIsAuthenticated(false);
-          setUserEmail(null);
-        } else {
-          setIsAuthenticated(true);
-          setUserEmail(user.email ?? null);
-        }
-      } catch (err) {
-        console.warn("ArtistLayout auth check failed", err);
-        if (!active) return;
-        setIsAuthenticated(false);
-        setUserEmail(null);
-      }
-    }
-
-    checkAuth();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    function handleOutside(ev: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(ev.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, []);
-
-  const artist = data?.artist;
-  const artistName = artist?.artist_name || "Artist";
-  const artistPhoto = artist?.artist_photo_url;
-  const accountSubtitle = userEmail || (isAuthenticated ? "Pro Account" : "Guest");
-
-  async function handleLogout() {
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.warn("Logout error", err);
-    } finally {
-      router.replace("/login");
-    }
-  }
+  const secondaryCtas = isUnauthenticated
+    ? [
+        { href: "/login", label: "Ho già un account" },
+        { href: "/pricing", label: "Oppure usa un codice" },
+      ]
+    : [
+        { href: "/charts", label: "Vai a charts" },
+        { href: "/discovery", label: "Vai a discovery" },
+      ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
-      <aside className="relative z-30 flex h-full w-64 shrink-0 flex-col justify-between border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
-        <div>
-          <div className="mb-3 flex items-center gap-3 px-4 pt-5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border)] bg-black/80">
-              <Image
-                src="/icon.png"
-                alt="Tekkin logo"
-                width={40}
-                height={40}
-                className="h-9 w-9 object-contain"
-                priority
-              />
-            </div>
-            <span className="text-lg font-bold tracking-tight">TEKKIN</span>
-          </div>
+    <div className="flex min-h-screen bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
+      <ArtistSidebar />
 
-          <div className="mx-3 mb-6 flex items-center gap-2 rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] px-3 py-2 text-sm font-medium text-[var(--text-muted)] shadow-sm transition-colors">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <span>New Thread...</span>
-            <span className="ml-auto rounded border border-[var(--border)] px-1.5 text-xs text-[var(--text-muted)]">
-              ⋯
-            </span>
-          </div>
+      <main className="relative flex-1 overflow-y-auto">
+        <AppShell className="bg-transparent" innerClassName="gap-6 px-0 py-8" maxWidth="full" fullHeight>
+          {isActive ? (
+            children
+          ) : (
+            <section className="relative mx-auto flex w-full max-w-2xl flex-col gap-6 rounded-3xl border border-[var(--border)] bg-[var(--panel)] p-8 shadow-soft-xl">
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-[var(--muted)]">
+                  Tekkin Artist
+                </p>
+                <h1 className="text-2xl font-semibold text-[var(--text)]">{heroTitle}</h1>
+                <p className="text-sm text-[var(--muted)]">{heroDescription}</p>
+              </div>
 
-          <nav className="space-y-1 px-3">
-            {navItems.map((item) => {
-              const active = pathname === item.href;
-              return (
+              {!isUnauthenticated && (
+                <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-soft)] p-4 text-xs text-[var(--muted)]">
+                  <div className="flex items-center justify-between">
+                    <span>Stato accesso</span>
+                    <span className="text-[var(--text)]">{accessStatus}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Piano</span>
+                    <span className="text-[var(--text)]">{plan}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3">
                 <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                    active
-                      ? "border border-[var(--accent)]/30 bg-[color-mix(in_srgb,var(--sidebar-bg)_88%,var(--border)_12%)] text-[var(--text-primary)]"
-                      : "text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_88%,var(--border)_12%)] hover:text-[var(--text-primary)]"
-                  }`}
+                  href={primaryCta.href}
+                  className="inline-flex items-center justify-center rounded-pill bg-[var(--accent)] px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-black shadow-[0_12px_40px_rgba(249,115,22,0.25)] transition hover:bg-[#ff8b3c]"
                 >
-                  <span className="text-[var(--text-muted)]">{item.icon}</span>
-                  {item.label}
+                  {primaryCta.label}
                 </Link>
-              );
-            })}
-          </nav>
-        </div>
-
-        <div className="border-t border-[var(--border)] p-4">
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="flex w-full items-center gap-3 rounded-md px-2 py-2 hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_88%,var(--border)_12%)] transition-colors"
-            >
-              <div className="h-9 w-9 overflow-hidden rounded-full bg-[var(--accent)] text-center font-bold text-black">
-                {artistPhoto ? (
-                  <img src={artistPhoto} alt={artistName} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="grid h-full w-full place-items-center text-xs font-bold">
-                    {artistName.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
+                {secondaryCtas.map((cta) => (
+                  <Link
+                    key={cta.href}
+                    href={cta.href}
+                    className="inline-flex items-center justify-center rounded-pill border border-[var(--border)] bg-[var(--panel-soft)] px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-[var(--text)] transition hover:border-[var(--accent)]"
+                  >
+                    {cta.label}
+                  </Link>
+                ))}
               </div>
-              <div className="min-w-0 flex-1 text-left">
-                <div className="truncate text-sm font-medium text-[var(--text-primary)]">
-                  {artistName}
-                </div>
-                <div className="truncate text-xs text-[var(--text-muted)]">
-                  {accountSubtitle}
-                </div>
-              </div>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="text-[var(--text-muted)]"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
 
-            {menuOpen && (
-              <div className="absolute bottom-12 left-2 w-64 rounded-xl border border-[var(--border)] bg-[var(--sidebar-bg)] text-[var(--text-primary)] shadow-2xl">
-                <div className="px-4 py-3">
-                  <div className="text-sm font-semibold truncate">{artistName}</div>
-                  <div className="text-xs text-[var(--text-muted)] truncate">
-                    {userEmail || (isAuthenticated ? "email non disponibile" : "Non loggato")}
-                  </div>
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] px-2 py-1.5">
-                    <button
-                      onClick={() => theme === "dark" && toggleTheme()}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                        theme === "light" ? "bg-[var(--accent)] text-black" : "text-[var(--text-muted)]"
-                      }`}
-                      title="Light mode"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="4" />
-                        <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m15.5 6.5-1.5-1.5M8 8 6.5 6.5m0 11L8 16m8-8 1.5-1.5" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={() => theme === "light" && toggleTheme()}
-                      className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                        theme === "dark" ? "bg-[var(--accent)] text-black" : "text-[var(--text-muted)]"
-                      }`}
-                      title="Dark mode"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                      </svg>
-                    </button>
-                    <button
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)]"
-                      title="System theme"
-                      disabled
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="4" width="18" height="14" rx="2" />
-                        <path d="M7 20h10" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-                <div className="border-t border-[var(--border)] text-sm">
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.label}
-                      className="flex w-full items-center px-4 py-2 text-left text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--sidebar-bg)_90%,var(--border)_10%)] hover:text-[var(--text-primary)] transition-colors"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        if (item.href && item.href !== "#") {
-                          router.push(item.href);
-                        }
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                  {isAuthenticated ? (
-                    <button
-                      onClick={handleLogout}
-                      className="flex w-full items-center px-4 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
-                    >
-                      Log out
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => router.push("/login")}
-                      className="flex w-full items-center px-4 py-2 text-left text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-200 transition-colors"
-                    >
-                      Login Tekkin
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      <main className="relative min-w-0 flex-1 overflow-y-auto bg-[var(--background)] transition-colors">
-        {children}
+              {isUnauthenticated && (
+                <p className="text-xs text-[var(--muted)]">
+                  Non hai ancora un account? Crea la tua crew Tekkin per pubblicare progetti, ricevere Signals e partecipare al ranking.
+                </p>
+              )}
+            </section>
+          )}
+        </AppShell>
       </main>
     </div>
   );

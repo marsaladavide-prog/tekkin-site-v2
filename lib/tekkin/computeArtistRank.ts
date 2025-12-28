@@ -13,8 +13,10 @@ import type {
  * - presence_score:  0..25   (followers totali + popularity)
  * - catalog_score:   0..30   (release negli ultimi 12 mesi + catalogo totale)
  * - activity_score:  0..15   (quante versioni sono state analizzate con Tekkin)
+ * - analysis_score:  0..100  (media delle valutazioni dell'analyzer, influisce al 40% sul punteggio finale)
  *
- * Somma massima teorica: 100 punti (con piccolo boost finale controllato).
+ * Il Tekkin Score finale è una media pesata tra le metriche (60%) e l'analisi (40%),
+ * con un piccolo boost (+4) se sono presenti dati concreti.
  */
 export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
   // Nessuna metrica: artista ancora "vuoto" lato Tekkin.
@@ -31,6 +33,7 @@ export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
       support_score: 0,
       production_score: 0,
       branding_score: 0,
+      analysis_score: 0,
     };
   }
 
@@ -134,43 +137,25 @@ export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
   // Somma dei quattro blocchi, con un piccolo boost base per non avere numeri
   // troppo bassi su profili che hanno già attività e catalogo reale.
   //
-  const partial =
+  const metricsPartial =
     growth_score + presence_score + catalog_score + activity_score;
 
-  // Boost leggero: se c'è almeno un minimo di dati, aggiungiamo 4 punti.
-  // Esempio con i tuoi dati attuali:
-  //
-  // followersNow = 280
-  // followersDiff30d = 0
-  // popularity = 12
-  // releasesLast12m = 20
-  // totalReleases = 50
-  // analyzedVersions = 0
-  //
-  // growth_score:
-  //   from followers: 0 / 20 = 0 -> 0
-  //   from popularity: 12 / 3 = 4 -> 4
-  //   => growth_score = 4
-  //
-  // presence_score:
-  //   from followers: 280 / 50 = 5.6 -> 6
-  //   from popularity: 12 / 10 = 1.2 -> 1
-  //   => presence_score = 7
-  //
-  // catalog_score:
-  //   recent: 20 -> 20
-  //   total: 50 / 10 = 5 -> 5
-  //   => catalog_score = 25
-  //
-  // activity_score:
-  //   analyzedVersions = 0 -> 0
-  //
-  // partial = 4 + 7 + 25 + 0 = 36
-  // tekkin_score = 36 + 4 (boost) = 40
-  //
-  let tekkin_score = partial;
+  const analysisScoreRaw =
+    metrics?.analysis_score_average ??
+    metrics?.analysis_score_best ??
+    metrics?.analysis_score_latest ??
+    null;
 
-  if (partial > 0) {
+  const normalizedAnalysisScore =
+    analysisScoreRaw !== null ? clamp(analysisScoreRaw, 0, 100) : 0;
+
+  const weightedBase = Math.round(
+    metricsPartial * 0.6 + normalizedAnalysisScore * 0.4
+  );
+
+  let tekkin_score = weightedBase;
+
+  if (metricsPartial > 0 || normalizedAnalysisScore > 0) {
     tekkin_score += 4;
   }
 
@@ -209,6 +194,7 @@ export function computeArtistRank(metrics: ArtistMetrics | null): ArtistRank {
     support_score: 0,
     production_score: 0,
     branding_score: 0,
+    analysis_score: normalizedAnalysisScore,
   };
 }
 

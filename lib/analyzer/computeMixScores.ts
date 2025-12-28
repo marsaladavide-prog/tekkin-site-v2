@@ -1,5 +1,3 @@
-import type { JsonObject } from "@/types/json";
-import { isJsonObject } from "@/types/json";
 import type { BandsNorm } from "@/lib/reference/types";
 
 function isFiniteNumber(x: unknown): x is number {
@@ -28,15 +26,7 @@ function penaltyOutside(value: number, min: number, max: number) {
   return 0;
 }
 
-function getObj(value: unknown): JsonObject | null {
-  return isJsonObject(value) ? value : null;
-}
-
-function getNum(obj: JsonObject | null, key: string): number | null {
-  if (!obj) return null;
-  const v = obj[key];
-  return isFiniteNumber(v) ? v : null;
-}
+// NOTE: Keep helpers above minimal. This module is hot-path and should stay lean.
 
 export type MixScores = {
   overall_score: number | null;
@@ -53,7 +43,9 @@ export function computeMixScores(args: {
   samplePeakDb: number | null;
   spectralCentroidHz: number | null;
   spectralRolloffHz: number | null;
+  spectralBandwidthHz?: number | null;
   spectralFlatness: number | null;
+  zeroCrossingRate?: number | null;
   stereoWidth: number | null;
   bandsNorm: BandsNorm;
   modelMatchPercent: number | null;

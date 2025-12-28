@@ -1,6 +1,7 @@
 export type Artist = {
   id: string;
   user_id?: string;
+  artist_slug?: string | null;
   artist_name: string;
   artist_photo_url?: string | null;
   artist_genre?: string | null;
@@ -44,6 +45,7 @@ export type ArtistRank = {
   support_score: number;     // derived support engagement
   production_score: number;  // fallback or derived production quality
   branding_score: number;    // derived branding influence
+  analysis_score: number;    // overall analyzer quality contribution (0-100)
 };
 
 
@@ -68,6 +70,11 @@ export type ArtistMetrics = {
   shows_last_90_days?: number | null;
   shows_total?: number | null;
 
+  analysis_score_average: number | null;
+  analysis_score_best: number | null;
+  analysis_score_latest: number | null;
+  analysis_score_count: number;
+
   // Metadato temporale
   collected_at: string | null;                // ultima data da metrics (ISO)
 };
@@ -90,4 +97,5 @@ export const baseFallbackRank: ArtistRank = {
   support_score: 0,
   production_score: 0,
   branding_score: 0,
+  analysis_score: 0,
 };

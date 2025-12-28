@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tekkin Analyzer V3 Result",
+  "type": "object",
+  "required": ["version", "profile_key", "meta", "blocks"],
+  "properties": {
+    "version": { "type": "string", "enum": ["v3"] },
+    "profile_key": { "type": "string", "minLength": 1 },
+    "meta": {
+      "type": "object",
+      "required": ["sr", "channels", "samples", "duration_sec"],
+      "properties": {
+        "sr": { "type": "integer" },
+        "channels": { "type": "integer" },
+        "samples": { "type": "integer" },
+        "duration_sec": { "type": "number" },
+        "took_ms_total": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "blocks": {
+      "type": "object",
+      "required": ["loudness", "timbre_spectrum", "stereo", "transients", "rhythm", "extra"],
+      "properties": {
+        "loudness": { "$ref": "#/$defs/block" },
+        "timbre_spectrum": { "$ref": "#/$defs/block" },
+        "stereo": { "$ref": "#/$defs/block" },
+        "transients": { "$ref": "#/$defs/block" },
+        "rhythm": { "$ref": "#/$defs/block" },
+        "extra": { "$ref": "#/$defs/block" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "required": ["ok", "took_ms"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "took_ms": { "type": "number" },
+        "error": { "type": ["string", "null"] },
+        "data": { "type": ["object", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { getTrackUrlCached } from "@/lib/storage/getTrackUrlCached";
+
+type DiscoveryMessage = {
+  id: string;
+  request_id: string;
+  sender_id: string | null;
+  receiver_id: string | null;
+  message: string;
+  created_at: string;
+};
 
 export const runtime = "nodejs";
 
@@ -31,8 +42,7 @@ export async function GET(req: NextRequest) {
     let reqQuery = supabase
       .from("discovery_requests")
       .select("*")
-      .eq("receiver_id", user.id)
-      .eq("status", "pending");
+      .eq("receiver_id", user.id);
 
     if (kind) {
       reqQuery = reqQuery.eq("kind", kind);
@@ -53,6 +63,10 @@ export async function GET(req: NextRequest) {
     }
 
     const projectIds = [...new Set(requests.map((r) => r.project_id))];
+    const senderIds = [
+      ...new Set(requests.map((r) => r.sender_id).filter(Boolean)),
+    ];
+
 
     const { data: projectRows, error: projectError } = await supabase
       .from("projects")
@@ -68,6 +82,27 @@ export async function GET(req: NextRequest) {
     }
 
     const projectById = new Map((projectRows ?? []).map((p) => [p.id, p]));
+
+    const senderProfiles = new Map<string, { artist_name: string | null; avatar_url: string | null }>();
+    if (senderIds.length > 0) {
+      const { data: senderRows, error: senderErr } = await supabase
+        .from("users_profile")
+        .select("id, artist_name, avatar_url")
+        .in("id", senderIds);
+
+      if (senderErr) {
+        console.error("[discovery][inbox] sender profile err", senderErr);
+      } else {
+        (senderRows ?? []).forEach((row) => {
+          if (row?.id) {
+            senderProfiles.set(row.id, {
+              artist_name: row.artist_name ?? null,
+              avatar_url: row.avatar_url ?? null,
+            });
+          }
+        });
+      }
+    }
 
     let trackQuery = supabase
       .from("discovery_tracks")
@@ -97,29 +132,122 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const trackByProjectId = new Map(
-      (tracks ?? []).map((t) => [t.project_id, t])
+    const AUDIO_BUCKET = "tracks";
+    const URL_MODE: "public" | "signed" = "signed";
+    const admin = createAdminClient();
+
+    async function signAudio(raw: string | null | undefined) {
+      if (!raw) return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith("http")) return trimmed;
+      const normalized = trimmed.startsWith("tracks/")
+        ? trimmed.slice("tracks/".length)
+        : trimmed;
+      return getTrackUrlCached(admin, AUDIO_BUCKET, normalized, {
+        mode: URL_MODE,
+        expiresInSeconds: 60 * 60,
+        revalidateSeconds: 60 * 20,
+      });
+    }
+
+    const trackByProjectId = new Map<string, any>();
+    await Promise.all(
+      (tracks ?? []).map(async (t) => {
+        const audioUrl = await signAudio(t.audio_url);
+        trackByProjectId.set(t.project_id, { ...t, audio_url: audioUrl ?? t.audio_url });
+      })
     );
 
-    const result = requests
-      .map((r) => {
-        const t = trackByProjectId.get(r.project_id);
+    if (trackByProjectId.size === 0) {
+      console.warn("[discovery][inbox] no discovery_tracks entries");
+    }
+
+    const { data: versionRows, error: versionErr } = await supabase
+      .from("project_versions")
+      .select("project_id, audio_path, audio_url, analyzer_bpm, analyzer_key")
+      .in("project_id", projectIds)
+      .order("created_at", { ascending: false });
+
+    if (versionErr) {
+      console.error("[discovery][inbox] project_versions err", versionErr);
+    }
+
+    const versionByProjectId = new Map<string, any>();
+    for (const v of versionRows ?? []) {
+      if (!v?.project_id || versionByProjectId.has(v.project_id)) continue;
+      versionByProjectId.set(v.project_id, v);
+    }
+
+    const requestIds = requests.map((r) => r.id);
+    const { data: messageRows, error: messageErr } = await supabase
+      .from("discovery_messages")
+      .select("id, request_id, sender_id, receiver_id, message, created_at")
+      .in("request_id", requestIds)
+      .order("created_at", { ascending: true });
+
+    if (messageErr) {
+      console.error("[discovery][inbox] messages err", messageErr);
+    }
+
+    const messagesByRequest = new Map<string, DiscoveryMessage[]>();
+    (messageRows ?? []).forEach((msg) => {
+      if (!msg?.request_id) return;
+      const entry = messagesByRequest.get(msg.request_id) ?? [];
+      entry.push({
+        id: msg.id,
+        request_id: msg.request_id,
+        sender_id: msg.sender_id ?? null,
+        receiver_id: msg.receiver_id ?? null,
+        message: msg.message,
+        created_at: msg.created_at,
+      });
+      messagesByRequest.set(msg.request_id, entry);
+    });
+
+    const result = await Promise.all(
+      requests.map(async (r) => {
+        let t = trackByProjectId.get(r.project_id);
+        const version = versionByProjectId.get(r.project_id);
+        if (!t && version) {
+          console.info(
+            "[discovery][inbox] fallback to project_versions",
+            r.project_id
+          );
+          const audioUrl =
+            (await signAudio(
+              version.audio_path ?? version.audio_url ?? null
+            )) ?? null;
+          t = { ...version, audio_url: audioUrl };
+        }
+        if (!t?.audio_url) {
+          console.warn("[discovery][inbox] track missing audio_url", r.project_id);
+        }
+        const sender = senderProfiles.get(r.sender_id ?? "");
         return {
           request_id: r.id,
           kind: r.kind,
           project_id: r.project_id,
           project_title: projectById.get(r.project_id)?.title ?? "Project",
+          status: r.status ?? "pending",
+          sender_id: r.sender_id ?? null,
+          sender_name: sender?.artist_name ?? null,
+          sender_avatar: sender?.avatar_url ?? null,
           // qui NON restituiamo sender_id
-          genre: t?.genre ?? null,
+          genre: t?.genre ?? version?.genre ?? null,
           overall_score: t?.overall_score ?? null,
           mix_score: t?.mix_score ?? null,
           master_score: t?.master_score ?? null,
           bass_energy: t?.bass_energy ?? null,
           has_vocals: t?.has_vocals ?? null,
-          bpm: t?.bpm ?? null,
+          bpm: t?.bpm ?? version?.analyzer_bpm ?? null,
+          key: t?.key ?? t?.analyzer_key ?? version?.analyzer_key ?? null,
+          audio_url: t?.audio_url ?? null,
           message: r.message,
+          messages: messagesByRequest.get(r.id) ?? [],
         };
-      });
+      })
+    );
 
     return NextResponse.json(result, { status: 200 });
   } catch (err) {

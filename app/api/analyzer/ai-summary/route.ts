@@ -117,6 +117,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Fetch chart positions for this version
+    const { data: chartData, error: chartError } = await supabase
+      .from("tekkin_charts_latest_snapshots_v1")
+      .select("profile_key, rank_position, score_public")
+      .eq("version_id", versionId);
+
+    if (chartError) {
+      console.error("[ai-summary] chart fetch error:", chartError);
+    }
+
+    const chartPositions = chartData ?? [];
+
     // 3) Payload per il modello (Niente mix_v1)
     const payloadForModel = {
       version_id: version.id,
@@ -128,6 +140,7 @@ export async function POST(req: NextRequest) {
       feedback: version.feedback,
       reference_ai: version.analyzer_reference_ai,
       fix_suggestions: (version.fix_suggestions ?? []) as FixSuggestion[],
+      chart_positions: chartPositions,
     };
 
     // 4) Modalità Q&A: se arriva una question, faccio solo risposta testuale e non salvo nulla
@@ -213,6 +226,7 @@ You receive a JSON payload with:
   - priority ("low" | "medium" | "high")
   - analysis (short explanation)
   - steps (concrete steps)
+- chart_positions: current positions in Tekkin charts (profile_key, rank_position, score_public)
 
 VERY IMPORTANT:
 - The top level field "lufs" is the authoritative integrated LUFS value for the mix.
@@ -232,6 +246,7 @@ Your tasks:
      - Stato tecnico del mix/master (volume, bilanciamento, dinamica, tonalità).
      - Quanto è adatto al contesto club minimal / deep tech.
      - Le 2 criticità principali che il producer deve sapere SUBITO.
+     - Posizione attuale nelle charts se presente (es. "Attualmente #X nella chart globale").
    - Fai almeno un cenno a: voce (se presente), hi-hat/percussioni oppure stereo width.
    - NON elencare tutti i dettagli tecnici: solo quelli che cambiano davvero la vita.
 
@@ -262,7 +277,7 @@ Your tasks:
        "weak_transients", "flat_stereo", "muddy_lowmid",
        "unbalanced_vocals", "weak_drop", "structure_confusing".
    - predicted_rank_gain:
-     Number (can be decimal) or null if unsure.
+     Number (can be decimal) or null if unsure. Consider current chart_positions to estimate potential improvement.
    - label_fit:
      Short sentence in Italian about DJ/label context, or null if not clear.
    - structure_feedback:

@@ -11,12 +11,15 @@ function normalizeMixType(value?: string | null): TekkinMixType {
   return DEFAULT_MIX_TYPE;
 }
 
-type AddVersionJsonBody = {
-  project_id: string;
-  version_name?: string;
-  mix_type?: string | null;
-  audio_path: string;
-};
+function formatVersionTimestamp(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const day = pad(date.getDate());
+  const month = pad(date.getMonth() + 1);
+  const year = date.getFullYear();
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,37 +27,49 @@ export async function POST(req: NextRequest) {
 
     const contentType = req.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
-      return NextResponse.json(
-        { error: "Usa upload diretto a Storage (JSON)." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Usa upload diretto a Storage (JSON)." }, { status: 400 });
     }
 
-    const body = (await req.json().catch(() => null)) as AddVersionJsonBody | null;
-    if (!body) return NextResponse.json({ error: "Body JSON mancante" }, { status: 400 });
+    const body = (await req.json().catch(() => null)) as {
+      project_id?: string;
+      version_name?: string | null;
+      mix_type?: string | null;
+      audio_path?: string | null;
+    } | null;
 
-    const projectId = String(body.project_id ?? "").trim();
-    const versionName = String(body.version_name ?? "").trim() || "v2";
-    const mixType = normalizeMixType(body.mix_type ?? null);
-    const audioPath = String(body.audio_path ?? "").trim();
+    console.log("[add-version] body.version_name =", body?.version_name);
 
-    if (!projectId || !audioPath) {
-      return NextResponse.json({ error: "project_id o audio_path mancanti" }, { status: 400 });
-    }
+    const projectId = typeof body?.project_id === "string" ? body.project_id.trim() : "";
+    const versionNameRaw =
+      typeof body?.version_name === "string" ? body.version_name.trim() : "";
 
-    if (!audioPath.startsWith(`${projectId}/`) || audioPath.includes("..")) {
-      return NextResponse.json({ error: "audio_path non valido" }, { status: 400 });
-    }
+    const mixType = normalizeMixType(body?.mix_type ?? null);
+    const mixLabel = mixType === "master" ? "Master" : "Premaster";
+    const defaultVersionName = `${mixLabel} • ${formatVersionTimestamp(new Date())}`;
+    const versionName = versionNameRaw.length > 0 ? versionNameRaw : defaultVersionName;
 
+    const rawAudioPath = typeof body?.audio_path === "string" ? body.audio_path.trim() : "";
+    const audioPath = rawAudioPath.replace(/^\/?tracks\//, "");
+
+    if (!projectId) return NextResponse.json({ error: "project_id mancante" }, { status: 400 });
+    if (!audioPath) return NextResponse.json({ error: "audio_path mancante" }, { status: 400 });
+
+    // check esistenza project (solo id)
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id, mix_type")
+      .select("id")
       .eq("id", projectId)
-      .single();
+      .maybeSingle();
 
-    if (projectError || !project) {
-      return NextResponse.json({ error: "Project non trovato" }, { status: 404 });
-    }
+    if (projectError) return NextResponse.json({ error: "Errore verificando il project" }, { status: 500 });
+    if (!project) return NextResponse.json({ error: "Project non trovato" }, { status: 404 });
+
+    console.log("[add-version] payload:", {
+      projectId,
+      versionName,
+      audioPath,
+      mixType,
+    });
 
     const { data: newVersion, error: versionError } = await supabase
       .from("project_versions")
@@ -62,32 +77,18 @@ export async function POST(req: NextRequest) {
         project_id: projectId,
         version_name: versionName,
         audio_path: audioPath,
-        audio_url: audioPath,
+        audio_url: null,
         mix_type: mixType,
       })
       .select("id, project_id, version_name, created_at, overall_score, lufs, mix_type, audio_path, audio_url")
       .single();
 
-if (versionError || !newVersion) {
-  console.error("[add-version] insert error:", versionError);
-  return NextResponse.json(
-    {
-      error: "Errore salvataggio nuova versione",
-      detail: versionError?.message ?? null,
-      code: (versionError as any)?.code ?? null,
-      hint: (versionError as any)?.hint ?? null,
-      details: (versionError as any)?.details ?? null,
-    },
-    { status: 500 }
-  );
-}
-
-
-    if (newVersion.mix_type === "master") {
-      await supabase.from("projects").update({ mix_type: "master" }).eq("id", newVersion.project_id);
+    if (versionError) {
+      console.error("[add-version] insert error:", versionError);
+      return NextResponse.json({ error: "Errore creando la versione" }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, version: newVersion }, { status: 201 });
+    return NextResponse.json({ ok: true, version: newVersion }, { status: 200 });
   } catch (err) {
     console.error("Unexpected add-version error:", err);
     return NextResponse.json({ error: "Errore inatteso add-version" }, { status: 500 });

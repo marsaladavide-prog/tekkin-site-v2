@@ -193,7 +193,7 @@ export default function AnalyzerPage() {
                 </button>
 
                 {file && !analyzing && (
-                  <span className="text-[11px] text-white/60">Pronto per l'invio</span>
+                  <span className="text-[11px] text-white/60">Pronto per l&apos;invio</span>
                 )}
               </div>
 

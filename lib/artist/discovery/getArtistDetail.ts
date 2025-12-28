@@ -7,6 +7,48 @@ import { computeArtistRank } from "@/lib/tekkin/computeArtistRank";
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function clampScoreValue(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function parseOverallScore(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return clampScoreValue(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return clampScoreValue(parsed);
+    }
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getStr(record: Record<string, unknown> | null, key: string): string | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function getBool(record: Record<string, unknown> | null, key: string): boolean | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function getStringArray(record: Record<string, unknown> | null, key: string): string[] {
+  if (!record) return [];
+  const value = record[key];
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string" && value.trim()) return [value];
+  return [];
+}
+
 export type ArtistDetailResponse = {
   artist: {
     id: string;
@@ -33,6 +75,8 @@ export type ArtistDetailResponse = {
     album_type: string | null;
   }[];
   error: string | null;
+  artist_slug: string | null;
+  profile_user_id: string | null;
 };
 
 export async function getArtistDetail(artistId: string): Promise<ArtistDetailResponse> {
@@ -43,6 +87,8 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank: null,
       releases: [],
       error: "ID artista non valido",
+      artist_slug: null,
+      profile_user_id: null,
     };
   }
 
@@ -80,10 +126,12 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         rank: null,
         releases: [],
         error: "Errore caricando l'artista",
+        artist_slug: null,
+        profile_user_id: null,
       };
     }
 
-    let profileData: any = data;
+    let profileData: Record<string, unknown> | null = isRecord(data) ? data : null;
 
     if (!profileData) {
       const { data: artistRow, error: artistErr } = await supabase
@@ -135,29 +183,51 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         rank: null,
         releases: [],
         error: "Artista non trovato",
+        artist_slug: null,
+        profile_user_id: null,
       };
     }
 
-    const profileId = profileData.id;
-    const profileUserId = profileData.user_id ?? profileId;
+    const profileId = getStr(profileData, "id");
+    if (!profileId) {
+      return {
+        artist: null,
+        metrics: null,
+        rank: null,
+        releases: [],
+        error: "Artista non trovato",
+        artist_slug: null,
+        profile_user_id: null,
+      };
+    }
+    const profileUserId = getStr(profileData, "user_id") ?? profileId;
+
+    let artistSlug: string | null = null;
+    const { data: slugRow, error: slugError } = await supabase
+      .from("artists")
+      .select("slug")
+      .or(`id.eq.${profileId},user_id.eq.${profileUserId}`)
+      .maybeSingle();
+
+    if (slugError) {
+      console.error("[getArtistDetail] artist slug error:", slugError);
+    } else if (slugRow?.slug) {
+      artistSlug = slugRow.slug;
+    }
 
     const artist = {
-      id: profileData.id,
-      artist_name: profileData.artist_name,
-      artist_photo_url: profileData.avatar_url ?? profileData.photo_url ?? null,
-      main_genres: Array.isArray(profileData.main_genres)
-        ? profileData.main_genres
-        : profileData.main_genres
-        ? [profileData.main_genres]
-        : [],
-      bio_short: profileData.bio_short,
-      city: profileData.city,
-      country: profileData.country,
-      open_to_collab: profileData.open_to_collab ?? false,
-      spotify_url: profileData.spotify_url ?? null,
-      instagram_username: profileData.instagram_username ?? null,
-      beatport_url: profileData.beatport_url ?? null,
-      presskit_link: profileData.presskit_link ?? null,
+      id: profileId,
+      artist_name: getStr(profileData, "artist_name"),
+      artist_photo_url: getStr(profileData, "avatar_url") ?? getStr(profileData, "photo_url") ?? null,
+      main_genres: getStringArray(profileData, "main_genres"),
+      bio_short: getStr(profileData, "bio_short"),
+      city: getStr(profileData, "city"),
+      country: getStr(profileData, "country"),
+      open_to_collab: getBool(profileData, "open_to_collab") ?? false,
+      spotify_url: getStr(profileData, "spotify_url"),
+      instagram_username: getStr(profileData, "instagram_username"),
+      beatport_url: getStr(profileData, "beatport_url"),
+      presskit_link: getStr(profileData, "presskit_link"),
     };
 
     // 2) metrics daily
@@ -199,7 +269,9 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     // 3) releases
     const { data: releasesRows, error: releasesErr } = await supabase
       .from("artist_spotify_releases")
-      .select(`id, title, release_date, cover_url, spotify_url, album_type, position`)
+      .select(
+        `id, title, release_date, cover_url, spotify_url, album_type, position, spotify_id`
+      )
       .eq("artist_id", profileId)
       .order("position", { ascending: true });
 
@@ -208,14 +280,21 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     }
 
     const releases =
-      releasesRows?.map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        release_date: r.release_date,
-        cover_url: r.cover_url,
-        spotify_url: r.spotify_url,
-        album_type: r.album_type,
-      })) ?? [];
+      releasesRows?.flatMap((row) => {
+        const r = isRecord(row) ? row : null;
+        if (!r) return [];
+        return [
+          {
+            id: getStr(r, "id") ?? "",
+            title: getStr(r, "title") ?? "",
+            release_date: getStr(r, "release_date"),
+            cover_url: getStr(r, "cover_url"),
+            spotify_url: getStr(r, "spotify_url"),
+            album_type: getStr(r, "album_type"),
+            spotify_id: getStr(r, "spotify_id"),
+          },
+        ];
+      }) ?? [];
 
     const total_releases = releasesRows?.length ?? 0;
 
@@ -224,14 +303,20 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     cutoff.setFullYear(now.getFullYear() - 1);
 
     const releases_last_12m =
-      releasesRows?.filter((r: any) => {
-        if (!r.release_date) return false;
-        const d = new Date(r.release_date as string);
+      releasesRows?.filter((row) => {
+        const record = isRecord(row) ? row : null;
+        const releaseDate = getStr(record, "release_date");
+        if (!releaseDate) return false;
+        const d = new Date(releaseDate);
         return d >= cutoff;
       }).length ?? 0;
 
-    // 4) analyzed versions
+    // 4) analyzed versions + analyzer scores
     let analyzed_versions = 0;
+    let analysisScoreAverage: number | null = null;
+    let analysisScoreBest: number | null = null;
+    let analysisScoreLatest: number | null = null;
+    let analysisScoreCount = 0;
 
     const { data: projectIdRows, error: projectIdErr } = await supabase
       .from("projects")
@@ -241,7 +326,10 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     if (projectIdErr) {
       console.error("[getArtistDetail] project ids error:", projectIdErr);
     } else {
-      const projectIds = projectIdRows?.map((row: any) => row.id) ?? [];
+      const projectIds =
+        projectIdRows
+          ?.map((row) => (isRecord(row) ? getStr(row, "id") : null))
+          .filter((id): id is string => Boolean(id)) ?? [];
 
       if (projectIds.length > 0) {
         const { data: versionsRows, error: versionsErr } = await supabase
@@ -255,6 +343,30 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         } else {
           analyzed_versions = versionsRows?.length ?? 0;
         }
+
+        const { data: analysisRows, error: analysisErr } = await supabase
+          .from("project_versions")
+          .select("overall_score, created_at")
+          .in("project_id", projectIds)
+          .not("overall_score", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(200);
+
+        if (analysisErr) {
+          console.error("[getArtistDetail] analysis score error:", analysisErr);
+        } else {
+          const normalizedScores = (analysisRows ?? [])
+            .map((row) => (isRecord(row) ? parseOverallScore(row.overall_score) : null))
+            .filter((score): score is number => Number.isFinite(score));
+
+          if (normalizedScores.length > 0) {
+            analysisScoreCount = normalizedScores.length;
+            analysisScoreLatest = normalizedScores[0];
+            analysisScoreBest = Math.max(...normalizedScores);
+            const sum = normalizedScores.reduce((acc, score) => acc + score, 0);
+            analysisScoreAverage = Math.round(sum / normalizedScores.length);
+          }
+        }
       }
     }
 
@@ -265,7 +377,8 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       spotify_followers !== null ||
       spotify_popularity !== null ||
       total_releases > 0 ||
-      analyzed_versions > 0;
+      analyzed_versions > 0 ||
+      analysisScoreCount > 0;
 
     if (hasAnyMetrics) {
       metrics = {
@@ -276,6 +389,10 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         total_releases,
         releases_last_12m,
         analyzed_versions,
+        analysis_score_average: analysisScoreAverage,
+        analysis_score_best: analysisScoreBest,
+        analysis_score_latest: analysisScoreLatest,
+        analysis_score_count: analysisScoreCount,
         collected_at,
       };
     }
@@ -288,6 +405,8 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank,
       releases,
       error: null,
+      artist_slug: artistSlug,
+      profile_user_id: typeof profileUserId === "string" ? profileUserId : null,
     };
   } catch (err) {
     console.error("[getArtistDetail] unexpected error:", err);
@@ -297,6 +416,8 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       rank: null,
       releases: [],
       error: "Errore interno del server",
+      artist_slug: null,
+      profile_user_id: null,
     };
   }
 }

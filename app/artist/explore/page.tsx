@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 export default function ArtistExplorePage() {
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-tekkin-bg p-6 space-y-4">
@@ -17,10 +19,12 @@ export default function ArtistExplorePage() {
         <div className="rounded-xl border border-tekkin-border bg-tekkin-panel p-4 space-y-2">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full overflow-hidden bg-black border border-tekkin-border">
-              <img
+              <Image
                 src="https://ui-avatars.com/api/?name=Artist+A&background=000&color=fff"
                 alt="Artist A"
-                className="w-full h-full object-cover"
+                width={40}
+                height={40}
+                className="h-full w-full object-cover"
               />
             </div>
             <div>
@@ -37,10 +41,12 @@ export default function ArtistExplorePage() {
         <div className="rounded-xl border border-tekkin-border bg-tekkin-panel p-4 space-y-2">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full overflow-hidden bg-black border border-tekkin-border">
-              <img
+              <Image
                 src="https://ui-avatars.com/api/?name=Artist+B&background=000&color=fff"
                 alt="Artist B"
-                className="w-full h-full object-cover"
+                width={40}
+                height={40}
+                className="h-full w-full object-cover"
               />
             </div>
             <div>
@@ -57,10 +63,12 @@ export default function ArtistExplorePage() {
         <div className="rounded-xl border border-tekkin-border bg-tekkin-panel p-4 space-y-2">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-full overflow-hidden bg-black border border-tekkin-border">
-              <img
+              <Image
                 src="https://ui-avatars.com/api/?name=Artist+C&background=000&color=fff"
                 alt="Artist C"
-                className="w-full h-full object-cover"
+                width={40}
+                height={40}
+                className="h-full w-full object-cover"
               />
             </div>
             <div>

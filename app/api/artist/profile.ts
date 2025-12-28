@@ -114,9 +114,9 @@ export async function upsertArtist(
  * Va eseguita lato server (service role) subito dopo la sign up.
  */
 export async function syncArtistTablesFromMetadata(opts: {
-  supabase?: AdminSupabaseClient;
   userId: string;
   metadata: ArtistSignupMetadata;
+  supabase?: AdminSupabaseClient;
 }) {
   const supabase = opts.supabase || getSupabaseAdmin();
 
@@ -126,6 +126,17 @@ export async function syncArtistTablesFromMetadata(opts: {
     profilePayload
   );
   if (profileErr) throw profileErr;
+
+  const { userId } = opts;
+  await supabase.from("artist_access").upsert(
+    {
+      user_id: userId,
+      plan: "free",
+      access_status: "inactive",
+      source: "none",
+    },
+    { onConflict: "user_id" }
+  );
 
   const shouldCreateArtist =
     sanitize(opts.metadata.spotify_id) ||

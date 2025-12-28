@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import TekkinShell from "@/app/artist/components/TekkinShell";
+import TekkinShell from "@/components/artist-shell/TekkinShell";
 import { MessagesPanel } from "./components/MessagesPanel";
 
 type MessagesPageProps = {

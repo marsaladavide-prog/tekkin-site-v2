@@ -1,0 +1,11 @@
+{
+  "analyzer_version": "v3",
+  "built_at": "2025-12-26T21:07:06.722260Z",
+  "genres": [
+    {
+      "profile_key": "tech_house",
+      "tracks_count": 81,
+      "failed_count": 0
+    }
+  ]
+}

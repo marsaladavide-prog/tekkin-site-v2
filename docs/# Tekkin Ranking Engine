@@ -1,0 +1,242 @@
+# Tekkin Billboard Ranking Engine – Schema v1
+
+## Visione
+Tekkin espone classifiche pubbliche (billboard) visibili a tutti:
+- `/charts` e sottopagine sono pubbliche
+- i visitatori possono ascoltare solo tracce pubbliche
+- gli abbonati accedono a `/projects` per caricare, analizzare, entrare in classifica e condividere
+
+Le classifiche sono stabili, versionate e condivisibili.
+
+---
+
+## Unità di ranking
+- Il ranking è per **project**
+- Viene sempre utilizzata **l’ultima project_version attiva**
+- Ogni entry in classifica punta a:
+  - `project_id`
+  - `latest_version_id`
+
+Non vengono mai classificate versioni vecchie.
+
+---
+
+## Stati di visibilità
+Ogni `latest_version_id` può essere:
+
+- `public`
+  - entra nelle classifiche
+  - visibile nelle chart
+  - ascoltabile
+  - condivisibile
+
+- `private_with_secret_link`
+  - NON entra nelle classifiche
+  - NON visibile nelle chart
+  - accessibile solo tramite link segreto
+
+Stop. Nessun altro stato.
+
+---
+
+## Metriche richieste (per latest_version)
+Per ogni `latest_version_id` pubblica:
+- `analyzer_score_0_100`
+- `likes_total`
+- `plays_total`
+- `signal_downloads_total`
+- `release_date`
+
+---
+
+## Rank Profiles
+I ranking sono divisi per profili:
+
+- `global` → Top 100 generale
+- `quality` → Top 10 Tekkin Quality
+- `genre_<key>` → playlist per genere (step successivo)
+
+Ogni profilo ha **versioni di configurazione**.
+
+---
+
+## Tekkin Global Score v1 – modalità B (logaritmica)
+
+### Normalizzazione
+Per likes, plays e downloads:
+
+norm(x, ref) = clamp(
+100 * ln(1 + x) / ln(1 + ref),
+0,
+100
+)
+
+diff
+Copia codice
+
+### Variabili
+- A = clamp(analyzer_score, 0..100)
+- L = norm(likes_total, likes_ref)
+- P = norm(plays_total, plays_ref)
+- D = norm(signal_downloads_total, downloads_ref)
+
+### Formula
+score_0_100 =
+0.55 * A +
+0.20 * L +
+0.15 * P +
+0.10 * D
+
+shell
+Copia codice
+
+### Valore pubblico UI
+score_public = round(score_0_100 * public_multiplier)
+
+yaml
+Copia codice
+
+Default `public_multiplier = 5` → range 0–500.
+
+---
+
+## Tekkin Quality Score v1
+Classifica puramente tecnica.
+
+score_0_100 = A
+score_public = round(A * public_multiplier)
+
+yaml
+Copia codice
+
+Nessun engagement, nessuna freshness.
+
+---
+
+## Snapshot ranking
+Le classifiche non sono calcolate live.
+
+- Snapshot settimanali per ogni profilo
+- Salvano:
+  - posizione
+  - punteggio
+  - versione della config usata
+
+Gli snapshot permettono:
+- stabilità
+- frecce ↑ ↓ (confronto con settimana precedente)
+- condivisione affidabile
+
+---
+
+## Tabelle minime (concettuali)
+
+### track_metrics_total
+Metriche aggregate per `latest_version_id`.
+
+- latest_version_id
+- project_id
+- artist_id
+- analyzer_score_0_100
+- likes_total
+- plays_total
+- signal_downloads_total
+- is_public
+- release_date
+
+---
+
+### rank_profiles
+- key
+- name
+- is_active
+
+---
+
+### rank_profile_versions
+- profile_key
+- version
+- config (jsonb)
+- is_published
+
+Esempio config:
+```json
+{
+  "normalization": "log",
+  "refs": {
+    "likes": 200,
+    "plays": 3000,
+    "downloads": 30
+  },
+  "weights": {
+    "analyzer": 0.55,
+    "likes": 0.20,
+    "plays": 0.15,
+    "downloads": 0.10
+  },
+  "public_multiplier": 5
+}
+rank_snapshots
+profile_key
+
+profile_version_id
+
+period_start
+
+period_end
+
+rank_position
+
+project_id
+
+latest_version_id
+
+score_0_100
+
+score_public
+
+track_shares
+Per le tracce private con link segreto.
+
+latest_version_id
+
+token
+
+created_at
+
+revoked_at
+
+Flusso operativo
+L’artista analizza una versione.
+
+La versione diventa latest_version_id.
+
+Backend aggiorna track_metrics_total.
+
+Cron settimanale genera rank_snapshots.
+
+/charts legge solo snapshot e dati pubblici.
+
+UI Mapping
+/charts
+
+Top 100 generale (scroll interno)
+
+Colonna destra: Top 10 Tekkin Quality
+
+/share/<token>
+
+Pagina read-only per tracce private condivise
+
+Nota strategica
+Questa struttura permette:
+
+tuning dei ranking senza deploy
+
+storico coerente
+
+credibilità da “billboard”
+
+evoluzione futura (rank artisti, spotlight, label interest)
+
+Questo documento è la base ufficiale del sistema ranking Tekkin.

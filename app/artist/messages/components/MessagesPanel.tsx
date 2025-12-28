@@ -6,6 +6,7 @@ import type {
   ArtistMessageThread,
   PeerProfile,
 } from "@/types/messages";
+import Image from "next/image";
 
 type MessagesPanelProps = {
   otherUserId: string;
@@ -131,10 +132,13 @@ export function MessagesPanel({ otherUserId }: MessagesPanelProps) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           {peer?.avatar_url ? (
-            <img
+            <Image
               src={peer.avatar_url}
               alt={peer.artist_name ?? "Artist"}
-              className="w-9 h-9 rounded-full object-cover border border-tekkin-border"
+              width={48}
+              height={48}
+              className="h-12 w-12 rounded-full border border-white/20 object-cover"
+              unoptimized
             />
           ) : (
             <div className="w-9 h-9 rounded-full border border-tekkin-border flex items-center justify-center text-xs font-mono text-tekkin-muted">

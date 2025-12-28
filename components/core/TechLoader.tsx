@@ -1,20 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
 
-export default function TechLoader() {
-  const texts = [
-    "INITIALIZING TEKKIN ANALYZER_",
-    "SYNCING LOW END_",
-    "BREAKING DOWN FREQUENCIES_",
-    "CALIBRATING GROOVE_",
-    "LOCKING RMS_",
-  ];
+const TEXTS = [
+  "INITIALIZING TEKKIN ANALYZER_",
+  "SYNCING LOW END_",
+  "BREAKING DOWN FREQUENCIES_",
+  "CALIBRATING GROOVE_",
+  "LOCKING RMS_",
+];
 
+export default function TechLoader() {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setIndex((prev) => (prev + 1) % texts.length);
+      setIndex((prev) => (prev + 1) % TEXTS.length);
     }, 1200);
     return () => clearInterval(interval);
   }, []);
@@ -27,7 +27,7 @@ export default function TechLoader() {
     </div>
 
     <p className="text-sm sm:text-base text-[#9ef3f3] uppercase animate-pulse select-none">
-      {texts[index]}
+      {TEXTS[index]}
     </p>
   </div>
 );

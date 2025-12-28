@@ -1,24 +1,29 @@
-import { ArtistProfileHeader } from "@/app/artist/components/ArtistProfileHeader";
-import { ReleasesHighlights } from "@/app/artist/components/ReleasesHighlights";
-import { TekkinRankSection } from "@/app/artist/components/TekkinRankSection";
-import {
-  getArtistDetail,
-  type ArtistDetailResponse,
-} from "@/lib/artist/discovery/getArtistDetail";
+import { redirect } from "next/navigation";
+
+import { ArtistProfileHeader } from "@/components/artist/ArtistProfileHeader";
+import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
+import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
+import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
+
+import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
-import { EditArtistProfileButton } from "../components/EditArtistProfileButton";
+
+export const dynamic = "force-dynamic";
 
 type Props = {
+ // Next.js 15 App Router types: params è un Promise
   params: Promise<{ artistId: string }>;
 };
 
-export default async function ArtistDiscoveryPage({ params }: Props) {
-  const { artistId } = await params;
+export default async function Page({ params }: Props) {
+  const { artistId: rawArtistId } = await params;
+  const artistId = (rawArtistId ?? "").trim(); 
+  if (!artistId) {
+    redirect("/charts");
+  }
 
   const detail = await getArtistDetail(artistId);
-
   const fetchError = detail.error ?? null;
-
   if (fetchError) {
     return (
       <main className="flex-1 min-h-screen flex items-center justify-center bg-tekkin-bg">
@@ -93,7 +98,7 @@ export default async function ArtistDiscoveryPage({ params }: Props) {
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-8 md:px-10">
       <div className="w-full max-w-5xl mx-auto space-y-8">
         <ArtistProfileHeader
-          artistId={artistId}
+          artistId={artist.id}
           artistName={artist.artist_name || "Artista Tekkin"}
           mainGenreLabel={mainGenreLabel}
           locationLabel={locationLabel}

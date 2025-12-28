@@ -1,12 +1,23 @@
+//C:\Users\marsa\Desktop\tekkin-site-v2\app\artist\projects\[id]\page.tsx
+
 "use client";
 
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { useParams, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { createClient } from "@/utils/supabase/client";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import { TEKKIN_MIX_TYPES, type TekkinMixType, type TekkinGenreId, getTekkinGenreLabel } from "@/lib/constants/genres";
-import type { AnalyzerMetricsFields, AnalyzerRunResponse, AnalyzerResult, FixSuggestion, ReferenceAi, AnalyzerAiAction, AnalyzerAiCoach, AnalyzerAiMeta } from "@/types/analyzer";
+import { uploadProjectCover, MAX_COVER_SIZE_BYTES } from "@/lib/projects/uploadCover";
+import type {
+  AnalyzerMetricsFields,
+  AnalyzerRunResponse,
+  AnalyzerResult,
+  ReferenceAi,
+  AnalyzerAiAction,
+  AnalyzerAiMeta,
+} from "@/types/analyzer";
 import type { WaveformBands } from "@/types/analyzer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 
@@ -28,7 +39,7 @@ type ProjectVersionRow = AnalyzerMetricsFields & {
   // IMPORTANT: nel tuo DB audio_url contiene la path storage nel bucket tracks
 audio_url: string | null;   // può essere URL http firmato (se usato) oppure null
 audio_path: string | null;  // path nel bucket tracks
-
+  analyzer_key?: string | null;
 
 
   analyzer_json?: AnalyzerResult | null;
@@ -37,6 +48,7 @@ audio_path: string | null;  // path nel bucket tracks
   analyzer_ai_summary?: string | null;
   analyzer_ai_actions?: AnalyzerAiAction[] | null;
   analyzer_ai_meta?: AnalyzerAiMeta | null;
+  analyzed_at?: string | null;
 
   waveform_peaks?: number[] | null;
   waveform_duration?: number | null;
@@ -92,7 +104,13 @@ function guessContentType(file: File) {
 async function buildSignedUrlFromStoragePath(path: string) {
   const supabase = createClient();
   const { data, error } = await supabase.storage.from("tracks").createSignedUrl(path, 60 * 30);
-  if (error || !data?.signedUrl) throw new Error("Signed URL non disponibile");
+
+  if (error || !data?.signedUrl) {
+    const msg = String((error as any)?.message ?? "");
+    if (msg.toLowerCase().includes("object not found")) return null;
+    throw new Error("Signed URL non disponibile");
+  }
+
   return data.signedUrl;
 }
 
@@ -119,8 +137,12 @@ export default function ProjectDetailPage() {
   const [analyzerStatus, setAnalyzerStatus] = useState<AnalyzerStatus>("idle");
 
   const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
-  const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<Record<string, FixSuggestion[] | null>>({});
-  const [aiByVersion, setAiByVersion] = useState<Record<string, AnalyzerAiCoach | null>>({});
+  const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<ProjectVersionRow | null>(null);
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
+  const [deleteVersionError, setDeleteVersionError] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
 
   const loadProject = useCallback(async () => {
     if (!projectId) return;
@@ -130,6 +152,13 @@ export default function ProjectDetailPage() {
       setErrorMsg(null);
 
       const supabase = createClient();
+
+      const url = new URL(window.location.href);
+      const pageProjectId = url.pathname.split("/").pop() ?? null;
+      console.log("[loadProject] pageProjectId:", pageProjectId);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log("[loadProject] session user id:", sessionData?.session?.user?.id ?? null);
 
       const { data, error } = await supabase
         .from("projects")
@@ -148,16 +177,37 @@ export default function ProjectDetailPage() {
           )
         `
         )
-        .eq("id", projectId)
-        .single();
+        .eq("id", pageProjectId)
+        .maybeSingle();
 
       if (error || !data) {
-        console.error("loadProject error:", error);
+        const errObj = error
+          ? {
+              name: (error as any).name,
+              message: (error as any).message,
+              code: (error as any).code,
+              details: (error as any).details,
+              hint: (error as any).hint,
+              status: (error as any).status,
+            }
+          : null;
+
+        console.error(
+          "[loadProject] failed pageProjectId=" +
+            String(pageProjectId) +
+            " hasError=" +
+            String(Boolean(error)) +
+            " dataIsNull=" +
+            String(data == null)
+        );
+        console.error("[loadProject] error=" + JSON.stringify(errObj));
+        console.error("[loadProject] data=" + JSON.stringify(data));
         setProject(null);
         setLoading(false);
         setErrorMsg("Project non trovato o errore nel caricamento.");
         return;
       }
+
 
       const p = data as unknown as ProjectRow;
       p.project_versions = Array.isArray(p.project_versions) ? p.project_versions : [];
@@ -179,7 +229,8 @@ export default function ProjectDetailPage() {
     void loadProject();
   }, [loadProject]);
 
-  const versions = project?.project_versions ?? [];
+  const projectVersions = project?.project_versions;
+  const versions = useMemo(() => projectVersions ?? [], [projectVersions]);
   const latestVersion = versions[0] ?? null;
 
   const selectedVersion = useMemo(() => {
@@ -190,6 +241,7 @@ export default function ProjectDetailPage() {
     }
     return latestVersion;
   }, [versions, latestVersion, initialVersionId]);
+  const selectedVersionId = selectedVersion?.id ?? null;
 
   const profileLabel = getTekkinGenreLabel(project?.genre ?? null) ?? "Minimal / Deep Tech";
 
@@ -210,7 +262,9 @@ export default function ProjectDetailPage() {
     }
 
     // 2) altrimenti firmo una path: preferisco audio_path, fallback audio_url (legacy path)
-    const path = rawPath || rawUrl;
+    // 2) altrimenti firmo SOLO audio_path
+const path = rawPath;
+
     if (!path) {
       setAudioPreviewByVersionId((prev) => ({ ...prev, [v.id]: null }));
       return null;
@@ -229,11 +283,135 @@ export default function ProjectDetailPage() {
   [audioPreviewByVersionId]
 );
 
+  const handleSelectVersion = useCallback(
+    (v: ProjectVersionRow) => {
+      // cambiamo versione "selezionata" via URL (così resta shareable)
+      const url = new URL(window.location.href);
+      url.searchParams.set("version_id", v.id);
+      window.history.replaceState({}, "", url.toString());
+      // trigger preview url load
+      void ensurePreviewUrl(v);
+      // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
+      setProject((prev) => (prev ? { ...prev } : prev));
+    },
+    [ensurePreviewUrl]
+  );
+
+  const handleDeleteClick = useCallback((event: React.MouseEvent<HTMLSpanElement>, v: ProjectVersionRow) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDeleteVersionError(null);
+    setConfirmDeleteVersion(v);
+  }, []);
+
+  const handleDeleteKeyDown = useCallback((event: React.KeyboardEvent<HTMLSpanElement>, v: ProjectVersionRow) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      setDeleteVersionError(null);
+      setConfirmDeleteVersion(v);
+    }
+  }, []);
+
+  const versionRows = useMemo(
+    () =>
+      versions.map((v) => {
+        const isSel = v.id === selectedVersionId;
+        const versionLabel = v.version_name ?? "Versione";
+        const isAnalyzed = Boolean(v.analyzer_json) || v.lufs != null;
+
+        return (
+          <div key={v.id} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => handleSelectVersion(v)}
+              className={[
+                "w-full text-left rounded-2xl border px-4 py-3 transition",
+                isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm text-white truncate">{versionLabel}</div>
+                  <div className="mt-1 text-[11px] text-white/55">
+                    {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} 嫉 {new Date(v.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-[11px] text-white/60">
+                    {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
+                    {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                  </div>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Elimina versione ${versionLabel}`}
+                    onClick={(event) => handleDeleteClick(event, v)}
+                    onKeyDown={(event) => handleDeleteKeyDown(event, v)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </span>
+                </div>
+              </div>
+            </button>
+            {isAnalyzed && (
+              <div className="flex justify-end">
+                <Link
+                  href={`/artist/analyzer/${v.id}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold text-cyan-300 transition hover:border-cyan-400/60 hover:bg-cyan-400/20"
+                >
+                  Analyzer Report
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+      }),
+    [handleDeleteClick, handleDeleteKeyDown, handleSelectVersion, selectedVersionId, versions]
+  );
+
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
   };
+
+  const openCoverPicker = useCallback(() => {
+    coverInputRef.current?.click();
+  }, []);
+
+  const handleCoverInputChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFile = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!selectedFile || !projectId) return;
+
+      if (!selectedFile.type.startsWith("image/")) {
+        setCoverError("Seleziona un'immagine valida.");
+        return;
+      }
+
+      if (selectedFile.size > MAX_COVER_SIZE_BYTES) {
+        setCoverError("L'immagine supera il limite di 5 MB.");
+        return;
+      }
+
+      setCoverError(null);
+      setCoverUploading(true);
+
+      try {
+        const { coverUrl } = await uploadProjectCover(projectId, selectedFile);
+        setProject((prev) => (prev ? { ...prev, cover_url: coverUrl } : prev));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Errore caricamento cover.";
+        setCoverError(msg);
+      } finally {
+        setCoverUploading(false);
+      }
+    },
+    [projectId]
+  );
 
   const handleUploadVersion = async (e: FormEvent) => {
     e.preventDefault();
@@ -319,10 +497,10 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleAnalyzeVersion = async (versionId: string) => {
-    setErrorMsg(null);
-    setAnalyzingVersionId(versionId);
-    setAnalyzerStatus("starting");
+    const handleAnalyzeVersion = async (versionId: string) => {
+      setErrorMsg(null);
+      setAnalyzingVersionId(versionId);
+      setAnalyzerStatus("starting");
 
     try {
       const res = await fetch("/api/projects/run-analyzer", {
@@ -338,26 +516,60 @@ export default function ProjectDetailPage() {
       }
 
       setAnalyzerStatus("analyzing");
-      const runData = (await res.json().catch(() => null)) as AnalyzerRunResponse | null;
-
-      setFixSuggestionsByVersion((prev) => ({
-        ...prev,
-        [versionId]: runData?.analyzer_result?.fix_suggestions ?? null,
-      }));
+      const _runData = (await res.json().catch(() => null)) as AnalyzerRunResponse | null;
+      void _runData;
 
       setAnalyzerStatus("saving");
       await loadProject();
 
       setAnalyzerStatus("done");
       window.setTimeout(() => setAnalyzerStatus("idle"), 1200);
-    } catch (err) {
-      console.error("Analyze version error:", err);
-      setErrorMsg("Errore durante l'analisi della versione.");
-      setAnalyzerStatus("error");
-    } finally {
-      setAnalyzingVersionId(null);
-    }
-  };
+      } catch (err) {
+        console.error("Analyze version error:", err);
+        setErrorMsg("Errore durante l'analisi della versione.");
+        setAnalyzerStatus("error");
+      } finally {
+        setAnalyzingVersionId(null);
+      }
+    };
+
+    const handleDeleteVersion = useCallback(
+      async (version: ProjectVersionRow) => {
+        if (!version?.id) return;
+
+        setDeleteVersionError(null);
+        setDeletingVersionId(version.id);
+
+        try {
+          const res = await fetch("/api/projects/delete-version", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ version_id: version.id }),
+          });
+
+          const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+          if (!res.ok) throw new Error(payload?.error ?? "Impossibile eliminare la versione.");
+
+          if (typeof window !== "undefined") {
+            const url = new URL(window.location.href);
+            if (url.searchParams.get("version_id") === version.id) {
+              url.searchParams.delete("version_id");
+              window.history.replaceState({}, "", url.toString());
+            }
+          }
+
+          await loadProject();
+          setConfirmDeleteVersion(null);
+        } catch (err) {
+          console.error("Delete version error:", err);
+          const msg = err instanceof Error ? err.message : "Errore eliminando la versione.";
+          setDeleteVersionError(msg);
+        } finally {
+          setDeletingVersionId(null);
+        }
+      },
+      [loadProject]
+    );
 
   const previewAudioUrl = useMemo(() => {
     if (!selectedVersion) return null;
@@ -370,9 +582,9 @@ export default function ProjectDetailPage() {
   }, [selectedVersion, ensurePreviewUrl]);
 
   const isActive = useMemo(() => {
-    if (!selectedVersion || !previewAudioUrl) return false;
-    return player.versionId === selectedVersion.id && player.audioUrl === previewAudioUrl;
-  }, [player, selectedVersion, previewAudioUrl]);
+    if (!selectedVersion) return false;
+    return player.versionId === selectedVersion.id;
+  }, [player.versionId, selectedVersion]);
 
   const progressRatio = useMemo(() => {
     if (!isActive) return 0;
@@ -388,6 +600,19 @@ export default function ProjectDetailPage() {
   }, [selectedVersion?.waveform_duration, isActive, player.duration]);
 
   const timeLabel = durationForLabel ? formatTime(durationForLabel) : "--:--";
+  const isAnalyzerBusy = analyzerStatus !== "idle";
+  const analyzerOverlayText =
+    analyzerStatus === "starting"
+      ? "Preparazione Tekkin Analyzer..."
+      : analyzerStatus === "analyzing"
+      ? "Analisi in corso..."
+      : analyzerStatus === "saving"
+      ? "Registrazione risultati..."
+      : analyzerStatus === "done"
+      ? "Analisi completata"
+      : analyzerStatus === "error"
+      ? "Errore nel Tekkin Analyzer"
+      : "Analisi in corso...";
 
   if (!projectId) {
     return (
@@ -398,7 +623,110 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="w-full max-w-5xl mx-auto py-8">
+    <>
+      {isAnalyzerBusy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90">
+          <div className="absolute inset-0 tekkin-grid pointer-events-none" />
+          <div className="relative z-10 flex flex-col items-center gap-4 rounded-2xl border border-white/10 bg-black/80 px-8 py-6 text-center shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+            <div className="glitch-icon mb-2" aria-hidden />
+            <p className="text-[10px] uppercase tracking-[0.5em] text-white/60">tekkin analyzer</p>
+            <p className="text-lg font-semibold text-white">{analyzerOverlayText}</p>
+          </div>
+          <style jsx>{`
+            .tekkin-grid {
+              background-image:
+                radial-gradient(circle at 25% 15%, transparent 0, rgba(255, 255, 255, 0.06) 40%, rgba(255, 255, 255, 0.02) 70%, transparent 80%),
+                linear-gradient(140deg, transparent 45%, rgba(255, 255, 255, 0.08) 49%, rgba(255, 255, 255, 0.08) 53%, transparent 60%),
+                repeating-linear-gradient(
+                  5deg,
+                  rgba(255, 255, 255, 0.03),
+                  rgba(255, 255, 255, 0.03) 2px,
+                  transparent 2px,
+                  transparent 9px,
+                  rgba(255, 255, 255, 0.05) 9px,
+                  rgba(255, 255, 255, 0.05) 10px,
+                  transparent 10px,
+                  transparent 18px
+                ),
+                linear-gradient(95deg, rgba(255, 255, 255, 0.02), transparent 65%, rgba(255, 255, 255, 0.02) 90%),
+                linear-gradient(10deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+              background-size: 180% 180%, 180% 180%, 120% 150%, 140% 90%, 160% 160%;
+              opacity: 0.45;
+              filter: blur(0.9px);
+              animation: tekkin-grid-wave 6s linear infinite, tekkin-grid-band 3.8s ease-in-out infinite alternate;
+            }
+            @keyframes tekkin-grid-wave {
+              0% {
+                background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+              }
+              40% {
+                background-position: -30px 20px, 15px -20px, 25px 5px, -15px 10px, 5px -15px;
+              }
+              80% {
+                background-position: 30px -15px, -25px 18px, -10px 30px, 20px -5px, -10px 8px;
+              }
+              100% {
+                background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+              }
+            }
+            @keyframes tekkin-grid-band {
+              0% {
+                transform: translateY(0) skewX(-2deg);
+                opacity: 0.3;
+              }
+              50% {
+                transform: translateY(-8px) skewX(3deg);
+                opacity: 0.6;
+              }
+              100% {
+                transform: translateY(4px) skewX(-1deg);
+                opacity: 0.4;
+              }
+            }
+            .glitch-icon {
+              width: 72px;
+              height: 72px;
+              border-radius: 18px;
+              background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.05) 70%, transparent 90%);
+              box-shadow: 0 25px 60px rgba(255, 255, 255, 0.06), inset 0 0 10px rgba(255, 255, 255, 0.15);
+              position: relative;
+            }
+            .glitch-icon::after,
+            .glitch-icon::before {
+              content: "";
+              position: absolute;
+              inset: 12%;
+              border-radius: 12px;
+              border: 1px solid rgba(255, 255, 255, 0.35);
+              mix-blend-mode: screen;
+              animation: tekkin-glitch 2.2s linear infinite;
+            }
+            .glitch-icon::after {
+              animation-delay: 0.2s;
+              opacity: 0.7;
+            }
+            .glitch-icon::before {
+              animation-delay: 0.5s;
+              opacity: 0.4;
+            }
+            @keyframes tekkin-glitch {
+              0% {
+                transform: translate(-6px, 0) skewX(-10deg);
+              }
+              35% {
+                transform: translate(6px, -5px) skewX(8deg);
+              }
+              65% {
+                transform: translate(-3px, 5px) skewX(-5deg);
+              }
+              100% {
+                transform: translate(-6px, 0) skewX(-10deg);
+              }
+            }
+          `}</style>
+        </div>
+      )}
+      <div className="w-full max-w-5xl mx-auto py-8">
       <Link href="/artist/projects" className="mb-4 inline-flex text-sm text-white/60 hover:text-white">
         ← Back to Projects
       </Link>
@@ -408,29 +736,73 @@ export default function ProjectDetailPage() {
 
       {!loading && project && (
         <>
-          <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-xl font-semibold text-white truncate">{project.title}</div>
-                <div className="mt-1 text-sm text-white/60">
-                  {profileLabel} · {versions.length} versione{versions.length === 1 ? "" : "i"}
+          <header className="mb-6 rounded-3xl border border-white/10 bg-black/60 p-0">
+            <div className="relative h-[360px] overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+              {project.cover_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={project.cover_url} alt={`${project.title} cover`} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-sm text-white/60">
+                  Copertura mancante
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-transparent to-black/80 p-8">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="text-2xl font-semibold text-white">{project.title}</div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.3em] text-white/70">
+                      <span>{profileLabel}</span>
+                      <span>{versions.length} versione{versions.length === 1 ? "" : "i"}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {latestVersion?.lufs != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          {latestVersion.lufs.toFixed(1)} LUFS integrati
+                        </span>
+                      )}
+                      {latestVersion?.overall_score != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          Tekkin {latestVersion.overall_score.toFixed(1)}
+                        </span>
+                      )}
+                      {latestVersion?.analyzer_bpm != null && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          BPM {Math.round(latestVersion.analyzer_bpm)}
+                        </span>
+                      )}
+                      {latestVersion?.analyzer_key && (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80">
+                          Key {latestVersion.analyzer_key}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-3">
+                    <div>
+                      <button
+                        type="button"
+                        onClick={openCoverPicker}
+                        disabled={coverUploading}
+                        className="rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-cyan-300 hover:text-white disabled:opacity-60"
+                      >
+                        {coverUploading ? "Uploading..." : project.cover_url ? "Cambia cover" : "Aggiungi cover"}
+                      </button>
+                      <p className="mt-2 text-[11px] text-white/50">PNG/JPG – max {MAX_COVER_SIZE_BYTES / (1024 * 1024)} MB</p>
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                {latestVersion?.lufs != null && (
-                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
-                    {latestVersion.lufs.toFixed(1)} LUFS
-                  </span>
-                )}
-                {latestVersion?.overall_score != null && (
-                  <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1 text-[11px] text-white/75">
-                    Tekkin {latestVersion.overall_score.toFixed(1)}
-                  </span>
-                )}
-              </div>
             </div>
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleCoverInputChange}
+            />
+            {coverError && <p className="px-8 pt-2 text-[11px] text-red-300">{coverError}</p>}
           </header>
+
 
           {/* Upload new version */}
           <section className="rounded-3xl border border-white/10 bg-black/55 p-5 mb-6">
@@ -527,12 +899,11 @@ export default function ProjectDetailPage() {
                     progressRatio={progressRatio}
                     isPlaying={isActive && player.isPlaying}
                     timeLabel={timeLabel}
-                    onTogglePlay={() => {
+                    onTogglePlay={async () => {
                       if (!previewAudioUrl) return;
 
                       if (isActive) {
-                        if (player.isPlaying) player.pause();
-                        else player.play();
+                        useTekkinPlayer.getState().toggle();
                         return;
                       }
 
@@ -578,42 +949,7 @@ export default function ProjectDetailPage() {
                 </div>
 
                 <div className="mt-3 grid gap-2">
-                  {versions.map((v) => {
-                    const isSel = v.id === selectedVersion.id;
-                    return (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => {
-                          // cambiamo versione "selezionata" via URL (così resta shareable)
-                          const url = new URL(window.location.href);
-                          url.searchParams.set("version_id", v.id);
-                          window.history.replaceState({}, "", url.toString());
-                          // trigger preview url load
-                          void ensurePreviewUrl(v);
-                          // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
-                          setProject((prev) => (prev ? { ...prev } : prev));
-                        }}
-                        className={[
-                          "w-full text-left rounded-2xl border px-4 py-3 transition",
-                          isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-sm text-white truncate">{v.version_name ?? "Versione"}</div>
-                            <div className="mt-1 text-[11px] text-white/55">
-                              {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] text-white/60">
-                            {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
-                            {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                  {versionRows}
                   {!versions.length && <div className="text-sm text-white/60">Nessuna versione.</div>}
                 </div>
               </div>
@@ -621,6 +957,40 @@ export default function ProjectDetailPage() {
           )}
         </>
       )}
+      {confirmDeleteVersion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[var(--sidebar-bg)] p-5 shadow-2xl">
+            <p className="text-sm font-semibold text-white">
+              Elimina {confirmDeleteVersion.version_name ?? "versione"}
+            </p>
+            <p className="mt-2 text-xs text-white/70">
+              L&apos;operazione rimuove definitivamente la versione e i file associati dal project.
+            </p>
+
+            {deleteVersionError && <p className="mt-2 text-xs text-red-300">{deleteVersionError}</p>}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteVersion(null)}
+                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-white/20 hover:text-white"
+                disabled={deletingVersionId === confirmDeleteVersion.id}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteVersion(confirmDeleteVersion)}
+                className="rounded-full bg-red-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                disabled={deletingVersionId === confirmDeleteVersion.id}
+              >
+                {deletingVersionId === confirmDeleteVersion.id ? "Eliminando..." : "Conferma"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  </>
   );
 }

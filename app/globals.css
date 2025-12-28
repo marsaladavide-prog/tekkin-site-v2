@@ -3,64 +3,66 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a0a;
-  --foreground: #e8e8e8;
-  --text-primary: #e8e8e8;
-  --text-muted: #9aa0a6;
-  --card: #111318;
-  --border: #1e1e1e;
-  --glass: rgba(255, 255, 255, 0.06);
+  --bg: #040308;
+  --panel: #0d0f13;
+  --panel-soft: #141721;
+  --border: rgba(255, 255, 255, 0.12);
+  --text: #f5f5f7;
+  --muted: #9aa0b0;
   --accent: #06b6d4;
-  --accent-2: #9b6dff;
-  --accent-glow: rgba(6, 182, 212, 0.3);
-  --bg-hero-1: #0a0a0a;
-  --bg-hero-2: #0f0f0f;
-  --scan-color: #22d3ee;
-  --scan-opacity: 0.4;
-  --sidebar-bg: #0f0f0f;
+  --accent-soft: rgba(6, 182, 212, 0.25);
+  --shadow-soft: 0 30px 70px rgba(0, 0, 0, 0.65);
+  --grid: rgba(255, 255, 255, 0.08);
 
-  /* light fallback */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --card: var(--panel);
+  --glass: rgba(255, 255, 255, 0.05);
+  --accent-glow: rgba(6, 182, 212, 0.25);
+  --sidebar-bg: #0f1115;
   --bg-color: #ffffff;
 }
 
 [data-theme="light"] {
-  --background: #ffffff;
-  --foreground: #171717;
-  --text-primary: #18181b;
-  --text-muted: #71717a;
-  --card: #ffffff;
-  --border: #e4e4e7;
-  --glass: rgba(0, 0, 0, 0.02);
-  --accent: #0ea5e9;
-  --accent-2: #8b5cf6;
-  --accent-glow: rgba(14, 165, 233, 0.15);
-  --bg-hero-1: #f8fafc;
-  --bg-hero-2: #eef2ff;
-  --scan-color: #06b6d4;
-  --scan-opacity: 0.8;
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --panel-soft: #f2f2f7;
+  --border: rgba(15, 23, 42, 0.15);
+  --text: #111827;
+  --muted: #4b5563;
+  --accent: #06b6d4;
+  --accent-soft: rgba(6, 182, 212, 0.15);
+  --shadow-soft: 0 30px 70px rgba(15, 23, 42, 0.35);
+  --grid: rgba(15, 23, 42, 0.08);
+  --background: var(--bg);
+  --foreground: var(--text);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --card: var(--panel);
+  --glass: rgba(15, 23, 42, 0.04);
+  --accent-glow: rgba(6, 182, 212, 0.15);
   --sidebar-bg: #f9fafb;
-
   --bg-color: #ffffff;
 }
 
 [data-theme="dark"] {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --text-primary: #e8e8e8;
-  --text-muted: #b3b3b3;
-  --card: #0f0f0f;
-  --border: #1e1e1e;
+  --bg: #040308;
+  --panel: #0d0f13;
+  --panel-soft: #141721;
+  --border: rgba(255, 255, 255, 0.12);
+  --text: #f5f5f7;
+  --muted: #9aa0b0;
+  --accent-glow: rgba(6, 182, 212, 0.25);
+  --sidebar-bg: #0f1115;
+  --background: var(--bg);
+  --foreground: var(--text);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --card: var(--panel);
   --glass: rgba(255, 255, 255, 0.05);
-  --accent: #06b6d4;
-  --accent-2: #9b6dff;
-  --accent-glow: rgba(6, 182, 212, 0.3);
-  --bg-hero-1: #0a0a0a;
-  --bg-hero-2: #0f0f0f;
-  --scan-color: #22d3ee;
-  --scan-opacity: 0.4;
-  --sidebar-bg: #0f0f0f;
-
-  --bg-color: #0a0a0a;
+  --bg-color: #040308;
 }
 
 @theme inline {
@@ -201,4 +203,41 @@ body {
   40% { transform: translate(-2px, -2px); }
   60% { transform: translate(3px, -1px); }
   80% { transform: translate(-3px, 1px); }
+}
+
+/* Tekkin range thumb */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
 }

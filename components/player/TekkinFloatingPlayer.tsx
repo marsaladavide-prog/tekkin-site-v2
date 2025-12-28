@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import Link from "next/link";
+import { useEffect, useRef, useCallback } from "react";
 import { Pause, Play, X } from "lucide-react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 
@@ -22,6 +23,7 @@ export function TekkinFloatingPlayer() {
   const playRequestId = useTekkinPlayer((s) => s.playRequestId);
   const volume = useTekkinPlayer((s) => s.volume);
   const isMuted = useTekkinPlayer((s) => s.isMuted);
+  const setIsPlaying = useTekkinPlayer((s) => s.setIsPlaying);
 
   const setAudioRef = useTekkinPlayer((s) => s.setAudioRef);
 
@@ -34,6 +36,7 @@ export function TekkinFloatingPlayer() {
   const seekToSeconds = useTekkinPlayer((s) => s.seekToSeconds);
   const setVolume = useTekkinPlayer((s) => s.setVolume);
   const toggleMute = useTekkinPlayer((s) => s.toggleMute);
+  const artistSlug = useTekkinPlayer((s) => s.artistSlug);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -41,91 +44,170 @@ export function TekkinFloatingPlayer() {
   useEffect(() => {
     setAudioRef(audioRef);
 
-    const st = useTekkinPlayer.getState();
     const a = audioRef.current;
     if (a) {
-      a.volume = st.volume;
-      a.muted = st.isMuted;
+      a.volume = volume;
+      a.muted = isMuted;
     }
-  }, [setAudioRef]);
+  }, [setAudioRef, volume, isMuted]);
 
-  // eventi audio -> store
+  // eventi audio -> store (durata, currentTime, stato play/pause, seek pending)
+  const handleTimeUpdate = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      const t = Number.isFinite(a.currentTime) ? a.currentTime : 0;
+      setCurrentTime(t);
+    }
+  }, [setCurrentTime]);
+
+  const handleLoadedMetadata = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+      if (d > 0) setDuration(d);
+      useTekkinPlayer.getState().applyPendingSeekIfPossible();
+    }
+  }, [setDuration]);
+
+  const handleEnded = useCallback(() => {
+    const a = audioRef.current;
+    setCurrentTime(a && Number.isFinite(a.duration) ? a.duration : 0);
+    setIsPlaying(false);
+  }, [setCurrentTime, setIsPlaying]);
+
+  const handleError = useCallback(() => {
+    const a = audioRef.current;
+    if (a && a.error) {
+      console.error("[player] audio error:", a.error);
+      setIsPlaying(false);
+    }
+  }, [setIsPlaying]);
+
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
 
-    const onTime = () => setCurrentTime(a.currentTime || 0);
+    a.addEventListener("timeupdate", handleTimeUpdate);
+    a.addEventListener("loadedmetadata", handleLoadedMetadata);
+    a.addEventListener("canplay", handleLoadedMetadata);
+    a.addEventListener("durationchange", handleLoadedMetadata);
+    a.addEventListener("ended", handleEnded);
+    a.addEventListener("error", handleError);
 
-    const onLoaded = () => {
-      setDuration(a.duration || 0);
-      useTekkinPlayer.getState().applyPendingSeekIfPossible();
+    return () => {
+      a.removeEventListener("timeupdate", handleTimeUpdate);
+      a.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      a.removeEventListener("canplay", handleLoadedMetadata);
+      a.removeEventListener("durationchange", handleLoadedMetadata);
+      a.removeEventListener("ended", handleEnded);
+      a.removeEventListener("error", handleError);
     };
+  }, [handleTimeUpdate, handleLoadedMetadata, handleEnded, handleError]);
 
-    const onCanPlay = () => {
-      useTekkinPlayer.getState().applyPendingSeekIfPossible();
-    };
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
 
-    const onDuration = () => setDuration(a.duration || 0);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
 
-    const onEnded = () => {
-      pause();
-      setCurrentTime(a.duration || 0);
-    };
-
-    a.addEventListener("timeupdate", onTime);
-    a.addEventListener("loadedmetadata", onLoaded);
-    a.addEventListener("canplay", onCanPlay);
-    a.addEventListener("durationchange", onDuration);
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
     a.addEventListener("ended", onEnded);
 
     return () => {
-      a.removeEventListener("timeupdate", onTime);
-      a.removeEventListener("loadedmetadata", onLoaded);
-      a.removeEventListener("canplay", onCanPlay);
-      a.removeEventListener("durationchange", onDuration);
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
       a.removeEventListener("ended", onEnded);
     };
-  }, [setCurrentTime, setDuration, pause]);
+  }, [setIsPlaying]);
 
-  // autoplay affidabile: quando cambia playRequestId, prova a playare davvero
+  const onTogglePlay = useCallback(() => {
+    const a = audioRef.current;
+    if (!a) return;
+
+    if (a.paused) {
+      // riprende usando la logica già prevista (playRequestId)
+      play();
+    } else {
+      pause();
+    }
+  }, [play, pause]);
+
+  // sync volume/mute sempre
+  useEffect(() => {
+    const a = audioRef.current;
+    if (a) {
+      a.volume = volume;
+      a.muted = isMuted;
+    }
+  }, [volume, isMuted]);
+
+  // driver progress robusto (evita timeupdate che a volte non aggiorna)
+  useEffect(() => {
+    if (!isOpen || !audioUrl) return;
+
+    let raf = 0;
+
+    const tick = () => {
+      const a = audioRef.current;
+      if (a) {
+        const t = Number.isFinite(a.currentTime) ? a.currentTime : 0;
+        setCurrentTime(t);
+
+        const d = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+        if (d > 0) setDuration(d);
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, [isOpen, audioUrl, setCurrentTime, setDuration]);
+
+  // driver di playback: playRequestId è il "trigger", audioUrl è la sorgente
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
-    if (!audioUrl || !isOpen) return;
 
-    // allinea sempre volume/mute
-    a.volume = volume;
-    a.muted = isMuted;
-
-    // aggiorna src solo se cambia davvero
-    if (a.src !== audioUrl) {
-      a.src = audioUrl;
-      // niente load forzato qui
+    if (!isOpen || !audioUrl) {
+      a.pause();
+      a.removeAttribute("src");
+      a.load();
+      useTekkinPlayer.setState({ isPlaying: false });
+      setCurrentTime(0);
+      return;
     }
 
-    if (!isPlaying) {
-      a.pause();
-      return;
+    const st = useTekkinPlayer.getState();
+
+    // reload SOLO se cambia versione
+    if (st.lastLoadedVersionId !== st.versionId) {
+      useTekkinPlayer.setState({
+        isPlaying: false,
+        lastLoadedVersionId: st.versionId,
+      });
+
+      setCurrentTime(0);
+      a.src = audioUrl;
+      a.currentTime = 0;
+      a.load();
     }
 
     const run = async () => {
       try {
         await a.play();
+        setIsPlaying(true);
         useTekkinPlayer.getState().applyPendingSeekIfPossible();
-      } catch {
-        // autoplay bloccato: ok
+      } catch (err) {
+        console.error("[player] play() failed:", err);
+        setIsPlaying(false);
       }
     };
 
     void run();
-  }, [playRequestId, audioUrl, isOpen, isPlaying, volume, isMuted]);
-
-  useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.volume = volume;
-    a.muted = isMuted;
-  }, [volume, isMuted]);
+  }, [playRequestId, audioUrl, isOpen, setCurrentTime, setDuration, setIsPlaying]);
 
   if (!isOpen || !audioUrl) return null;
 
@@ -136,11 +218,24 @@ export function TekkinFloatingPlayer() {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{title || "Preview"}</div>
-              <div className="truncate text-xs text-white/60">{subtitle}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {artistSlug ? (
+                  <Link
+                    href={`/@${artistSlug}`}
+                    className="truncate text-xs text-white/60 hover:text-white hover:underline"
+                  >
+                    {subtitle}
+                  </Link>
+                ) : (
+                  <span className="truncate text-xs text-white/60">{subtitle}</span>
+                )}
+              </div>
             </div>
 
             <button
-              onClick={close}
+              onClick={() => {
+                close();
+              }}
               className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10"
               aria-label="Close"
             >
@@ -150,7 +245,7 @@ export function TekkinFloatingPlayer() {
 
           <div className="mt-3 flex items-center gap-3">
             <button
-              onClick={() => (isPlaying ? pause() : play())}
+              onClick={onTogglePlay}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10"
               aria-label={isPlaying ? "Pause" : "Play"}
             >
@@ -158,40 +253,85 @@ export function TekkinFloatingPlayer() {
             </button>
 
             <div className="min-w-0 flex-1">
-              <input
-                type="range"
-                min={0}
-                max={Math.max(1, Math.floor(duration * 1000))}
-                value={Math.floor(currentTime * 1000)}
-                onChange={(e) => seekToSeconds(Number(e.target.value) / 1000)}
-                className="w-full"
-              />
-              <div className="mt-1 flex justify-between text-[11px] text-white/50">
-                <span>{fmt(currentTime)}</span>
-                <span>{fmt(duration)}</span>
-              </div>
+              {(() => {
+                const a = audioRef.current;
+
+                const dStore = Number.isFinite(duration) && duration > 0 ? duration : 0;
+                const dEl = a && Number.isFinite(a.duration) && a.duration > 0 ? a.duration : 0;
+                const d = dStore || dEl;
+
+                const tStore = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+                const tEl = a && Number.isFinite(a.currentTime) && a.currentTime >= 0 ? a.currentTime : 0;
+                const t = Math.min(tStore || tEl, d || (tStore || tEl));
+                const maxMs = Math.max(1, Math.floor(d * 1000));
+                const valMs = Math.max(0, Math.min(maxMs, Math.floor(t * 1000)));
+                const pct = maxMs > 0 ? (valMs / maxMs) * 100 : 0;
+                return (
+                  <>
+                    <input
+                      type="range"
+                      min={0}
+                      max={maxMs}
+                      value={valMs}
+                      onChange={(e) => seekToSeconds(Number(e.target.value) / 1000)}
+                      className="w-full h-2 appearance-none rounded-full bg-white/10"
+                      style={{
+                        background: `linear-gradient(to right, rgba(255,255,255,0.85) ${pct}%, rgba(255,255,255,0.12) ${pct}%)`,
+                      }}
+                    />
+                    <div className="mt-1 flex justify-between text-[11px] text-white/50">
+                      <span>{fmt(t)}</span>
+                      <span>{fmt(d)}</span>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-                className="w-24"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                {/* Barra principale minimal */}
+                <div className="relative h-1.5 w-24 rounded-full bg-white/20 overflow-hidden">
+                  <div 
+                    className="absolute left-0 top-0 h-full bg-gradient-to-r from-cyan-400 to-cyan-300 transition-all duration-200 ease-out"
+                    style={{ width: `${volume * 100}%` }}
+                  />
+                </div>
+                
+                {/* Thumb minimal circolare - centrato correttamente */}
+                <div 
+                  className="absolute -top-1.5 h-4 w-4 bg-cyan-400 rounded-full border border-white/50 shadow-lg transition-all duration-150 hover:scale-110 cursor-pointer"
+                  style={{ 
+                    left: `max(0px, min(calc(${volume * 100}% - 8px), 80px))`,
+                    boxShadow: '0 0 8px rgba(34, 211, 238, 0.6)'
+                  }}
+                />
+                
+                {/* Input invisibile per funzionalità */}
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={volume}
+                  onChange={(e) => setVolume(Number(e.target.value))}
+                  className="absolute inset-0 w-full h-4 opacity-0 cursor-pointer"
+                />
+              </div>
+              
               <button
                 type="button"
                 onClick={toggleMute}
-                className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] text-white/80 hover:bg-white/10"
+                className="flex items-center justify-center w-8 h-8 rounded-full border border-white/20 bg-white/5 text-white/80 hover:bg-white/10 hover:border-cyan-400/30 transition-all duration-200"
+                title={isMuted ? "Riattiva audio" : "Disattiva audio"}
               >
-                {isMuted ? "Muted" : "Sound"}
+                <span className="text-sm">
+                  {isMuted ? "🔇" : volume === 0 ? "🔊" : "🔊"}
+                </span>
               </button>
             </div>
 
-            <audio ref={audioRef} preload="metadata" />
+            <audio ref={audioRef} preload="metadata" crossOrigin="anonymous" playsInline />
           </div>
         </div>
       </div>

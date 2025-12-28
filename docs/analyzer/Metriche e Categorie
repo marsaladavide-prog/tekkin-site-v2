@@ -1,0 +1,207 @@
+Loudness e dinamica
+
+Integrated LUFS
+Loudness medio percepito dell’intera traccia.
+Per Tekkin: indica se la traccia compete davvero col genere o se è schiacciata e affaticante.
+
+Momentary LUFS
+Loudness istantaneo nel tempo.
+Per Tekkin: mostra se drop e momenti chiave spingono oppure risultano vuoti.
+
+Short-term LUFS
+Loudness medio su finestre brevi.
+Per Tekkin: misura la potenza reale e la coerenza tra le sezioni.
+
+LRA (Loudness Range)
+Range dinamico globale.
+Per Tekkin: dice se la traccia è viva o troppo compressa, oppure incoerente.
+
+Sample Peak dB
+Picco digitale massimo.
+Per Tekkin: controllo tecnico di clipping e headroom prima del master.
+
+True Peak
+Picco inter-sample percepito.
+Per Tekkin: sicurezza per streaming e conversioni (quando sarà introdotto).
+
+Timbro e spettro
+
+Bands Norm (sub → air)
+Energia normalizzata per bande di frequenza.
+Per Tekkin: base del Tonal Balance, guida pratica per EQ e bilanciamento col genere.
+
+Bands Percentiles (reference)
+Range target delle bande del genere.
+Per Tekkin: mostra se sei dentro o fuori dallo standard del tuo stile.
+
+Spectral Centroid
+Indice di brillantezza media.
+Per Tekkin: segnala mix chiusi o troppo aggressivi sulle alte.
+
+Spectral Rolloff
+Estensione percepita dell’hi-end.
+Per Tekkin: indica aria, rumore o mancanza di top-end.
+
+Spectral Bandwidth
+Ampiezza della distribuzione spettrale.
+Per Tekkin: suono concentrato vs dispersivo o impastato.
+
+Spectral Flatness
+Rapporto tra tono e rumore.
+Per Tekkin: rileva noise, distorsione e pulizia timbrica.
+
+Zero Crossing Rate
+Velocità di attraversamento dello zero.
+Per Tekkin: indicatore di harshness e contenuto rumoroso.
+
+Spectrum (curva frequenze)
+Risposta in frequenza completa.
+Per Tekkin: confronto visivo immediato con il genere, guida macro EQ.
+
+Stereo
+
+Stereo Width (globale)
+Ampiezza stereo media.
+Per Tekkin: equilibrio tra larghezza, focus e sicurezza in mono.
+
+Sound Field (polar)
+Distribuzione stereo nel tempo.
+Per Tekkin: capisci se la traccia è centro-dominante o realmente spaziale.
+
+Stereo Correlation
+Coerenza tra canali L e R.
+Per Tekkin: rileva rischi mono o stereo artificiale.
+
+Stereo Width per banda
+Ampiezza stereo divisa per frequenze.
+Per Tekkin: sub controllato, alte aperte, club-safe.
+
+Transienti
+
+Crest Factor dB
+Differenza tra picchi e livello medio.
+Per Tekkin: misura il punch reale e la compressione eccessiva.
+
+Transient Strength
+Forza dei transienti.
+Per Tekkin: dice se kick e percussioni bucano il mix.
+
+Transient Density
+Numero di transienti nel tempo.
+Per Tekkin: indica quanto la traccia è densa o “busy”.
+
+Log Attack Time
+Velocità di attacco su scala stabile.
+Per Tekkin: distingue transienti molli da quelli incisivi.
+
+Ritmo
+
+BPM
+Velocità della traccia.
+Per Tekkin: coerenza col genere e con i reference model.
+
+Rhythm Descriptors
+Stabilità e regolarità del groove.
+Per Tekkin: segnala beat instabili e drop poco solidi.
+
+Danceability
+Indice di ballabilità stimata.
+Per Tekkin: indicatore informativo sul groove, non verità assoluta.
+
+Timbro avanzato (backend)
+
+MFCC
+Firma timbrica compatta.
+Per Tekkin: base per tracce simili, clustering e recommendation.
+
+Extra spectral
+
+Spectral Contrast
+Contrasto tra picchi e valli spettrali.
+Per Tekkin: separazione timbrica vs impasto rumoroso.
+
+HFC (High Frequency Content)
+Energia pesata sulle alte.
+Per Tekkin: rileva harshness, fischi e hi-hat aggressivi.
+
+Spectral Peaks / Peaks Energy
+Picchi dominanti dello spettro e loro energia.
+Per Tekkin: distingue suono tonale controllato da rumore o distorsione.
+
+attualmente ho:
+
+
+Loudness: integrated, LRA, sample peak, true peak, percentili, sezioni intro/drop/break/outro
+
+Timbro: bands_norm_percentiles, spectrum view, spectral stats
+
+Stereo: width globale, width_by_band, correlation + summary
+
+Transients: crest, strength, density, log_attack_time
+
+Rhythm: bpm, key, relative_key, beat_times view, danceability, descriptors
+
+Extra: mfcc mean, hfc, spectral peaks
+
+cose che calcoleremo:
+1) StereoCorrelation
+
+Hai già correlation(view) len: 512 e stereo.summary con:
+
+correlation_avg
+
+correlation_min
+
+correlation_p05
+
+Quindi: Sì, StereoCorrelation c’è già (come array e come summary).
+Manca solo decidere se vuoi anche:
+
+percentili correlation nel reference model (p10, p50, p90) per confronto UI
+
+2) StereoWidth per banda con percentili reference
+
+Hai già in V3:
+
+width_by_band calcolato (sub..air)
+
+Nel reference: non posso confermare al 100% cosa c’è dentro i tuoi JSON attuali, ma tu avevi già scritto che in V2 esisteva qualcosa tipo referenceModel.stereo_percentiles.width_by_band.
+
+Quindi:
+
+Width per banda: sì, ce l’hai
+
+Percentili reference: li puoi avere se li generi nel reference builder V3 (se già esistono nei modelli V2, li puoi portare pari pari)
+
+3) Transienti avanzati
+
+Adesso hai:
+
+crest_factor_db
+
+transient_strength
+
+transient_density
+
+log_attack_time
+
+Questa base è già buona per V3.
+“Transienti avanzati” tipo noise proxy durante gli attacchi non ce li hai ancora.
+
+Quindi: No, non ci sono (a parte quelli base).
+
+4) Loudness per sezione (intro/drop/break)
+
+Dal tuo summary:
+
+section.intro/drop/break/outro con mean/min/max short-term + seconds
+
+Quindi: Sì, ce l’hai già.
+
+5) Percentili di loudness
+
+Dal tuo summary:
+
+momentary.percentiles p10/p50/p90
+
+short_term.percentiles p10/p50/p90

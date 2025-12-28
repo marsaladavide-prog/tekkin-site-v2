@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedSupabase } from "@/app/api/projects/helpers";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 const MAX_COVER_SIZE_BYTES = 5 * 1024 * 1024;
+const COVER_BUCKET_NAME = "project_covers";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export const runtime = "nodejs";
 
@@ -80,6 +84,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+      console.error("[upload-cover] missing storage config");
+      return NextResponse.json(
+        { error: "Impossibile risalire alla configurazione dello storage" },
+        { status: 500 }
+      );
+    }
+
+    const storageClient = createSupabaseClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const originalName = file.name || `cover-${Date.now()}`;
@@ -91,13 +105,11 @@ export async function POST(req: NextRequest) {
       .replace(/[^a-z0-9]/gi, "")
       .toLowerCase()
       .slice(0, 8);
-    const uniqueId = globalThis.crypto?.randomUUID
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const filePath = `covers/${projectId}/${uniqueId}.${safeExt || "jpg"}`;
+    const safeUserId = user.id;
+    const filePath = `covers/${safeUserId}/${projectId}/cover.${safeExt || "jpg"}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("tracks")
+    const { error: uploadError } = await storageClient.storage
+      .from(COVER_BUCKET_NAME)
       .upload(filePath, buffer, {
         contentType: file.type || "image/jpeg",
         upsert: true,
@@ -111,8 +123,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { data: publicData } = supabase.storage
-      .from("tracks")
+    const { data: publicData } = storageClient.storage
+      .from(COVER_BUCKET_NAME)
       .getPublicUrl(filePath);
     const coverUrl = publicData?.publicUrl ?? null;
 
@@ -125,9 +137,9 @@ export async function POST(req: NextRequest) {
 
     const { data: updatedProject, error: updateError } = await supabase
       .from("projects")
-      .update({ cover_url: coverUrl })
+      .update({ cover_url: coverUrl, cover_path: filePath })
       .eq("id", projectId)
-      .select("cover_url")
+      .select("cover_url, cover_path")
       .maybeSingle();
 
     if (updateError) {

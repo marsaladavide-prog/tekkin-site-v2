@@ -435,8 +435,20 @@ export async function POST(request: Request) {
               );
             }
 
+            const { error: cleanupError } = await adminSupabase
+              .from("artist_spotify_releases")
+              .delete()
+              .eq("artist_id", profileArtistId);
+
+            if (cleanupError) {
+              console.error(
+                "[scan-artist] failed to clear spotify releases",
+                cleanupError
+              );
+            }
+
             if (spotifyReleases.length > 0) {
-              const releasesPayload = spotifyReleases.map((r, idx) => ({
+              const releasesPayload = spotifyReleases.map((r) => ({
                 artist_id: profileArtistId,
                 spotify_id: r.id,
                 title: r.title,
@@ -444,7 +456,6 @@ export async function POST(request: Request) {
                 cover_url: r.coverUrl ?? null,
                 spotify_url: r.spotifyUrl ?? null,
                 album_type: r.albumType ?? null,
-                position: idx,
               }));
 
               console.log(
