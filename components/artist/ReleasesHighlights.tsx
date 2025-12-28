@@ -65,20 +65,34 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
     return match ? match[1] : null;
   }
 
+  function buildSpotifyEmbedUrl(rel: SpotifyRelease, albumId: string | null) {
+    const trimmed = rel.spotifyUrl?.trim();
+    if (trimmed?.startsWith("https://open.spotify.com/embed/")) {
+      return trimmed;
+    }
+    if (albumId) {
+      return `https://open.spotify.com/embed/album/${albumId}`;
+    }
+    return null;
+  }
+
   async function handlePlayClick(rel: SpotifyRelease) {
     console.log("[ReleasesHighlights] play requested", rel);
     setPlayError(null);
     const albumIdToUse = rel.spotifyId ?? extractSpotifyAlbumId(rel.spotifyUrl) ?? null;
     if (!albumIdToUse) return;
 
-    const spotifyUrl = rel.spotifyUrl;
     if (Object.prototype.hasOwnProperty.call(previewCacheRef.current, rel.id)) {
       const cached = previewCacheRef.current[rel.id];
       if (cached) {
         startPlayback(cached, rel);
       } else {
         setPlayError("Anteprima non disponibile per questa release.");
-        setEmbedAlbumId(albumIdToUse);
+        const embedUrlCandidate = buildSpotifyEmbedUrl(rel, albumIdToUse);
+        if (embedUrlCandidate) {
+          setEmbedUrl(embedUrlCandidate);
+          setOpen(true);
+        }
       }
       return;
     }
@@ -97,8 +111,9 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
       } else {
         setPlayError(null);
 
-        if (rel.spotifyUrl) {
-          setEmbedUrl(rel.spotifyUrl); // è GIÀ embed
+        const embedUrlCandidate = buildSpotifyEmbedUrl(rel, albumIdToUse);
+        if (embedUrlCandidate) {
+          setEmbedUrl(embedUrlCandidate);
           setOpen(true);
         } else {
           setPlayError("Anteprima non disponibile per questa release.");
@@ -120,7 +135,6 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
       audioUrl: previewUrl,
       coverUrl: rel.coverUrl,
     });
-    setEmbedAlbumId(null);
   }
 
   return (

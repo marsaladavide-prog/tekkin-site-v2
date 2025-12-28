@@ -112,8 +112,3 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
   );
 }
 
-// Inserisci questi log nel punto del file dove hai accesso a queste variabili (tipicamente in una pagina o componente che mostra l'artista pubblico):
-console.log("[public-artist] artistRow", artistRow);
-console.log("[public-artist] projectOwnerId", projectOwnerId);
-console.log("[public-artist] projectIds", projectIds);
-console.log("[public-artist] tracks len", tracks?.length ?? 0);

@@ -45,14 +45,9 @@ type VersionRow = {
   project_id: string;
   audio_path: string | null;
   audio_url: string | null;
-  genre: string | null;
   overall_score: number | null;
-  mix_score: number | null;
-  master_score: number | null;
-  bass_energy: number | null;
-  has_vocals: boolean | null;
   bpm: number | null;
-  projects: { id: string; user_id: string }[];
+  projects: { id: string; user_id: string }[] | null;
 };
 
 async function main() {

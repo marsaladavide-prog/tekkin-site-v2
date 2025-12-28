@@ -114,7 +114,7 @@ export default function PricingClient() {
   }
 
   useEffect(() => {
-    const redeemQ = searchParams.get("redeem");
+    const redeemQ = searchParams?.get("redeem");
     if (!redeemQ) return;
 
     // precompila campo e tenta redeem una sola volta

@@ -1204,8 +1204,8 @@ function SpectrumCompareCard({
 
   const formatRange = (range: PercentileRange | null | undefined, unit: (v: number) => string) => {
     if (!range) return "n/a";
-    const low = range.p10 ?? range.p25 ?? null;
-    const high = range.p90 ?? range.p75 ?? null;
+    const low = range.p10 ?? range.p50 ?? null;
+    const high = range.p90 ?? range.p50 ?? null;
     if (low == null || high == null) return "n/a";
     return `${unit(low)} - ${unit(high)}`;
   };

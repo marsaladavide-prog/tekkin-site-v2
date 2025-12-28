@@ -9,8 +9,10 @@ import type {
 import { computeMixScores } from "@/lib/analyzer/computeMixScores";
 import type {
   TekkinVersionRankComponent,
+  TekkinVersionRankComponentKey,
   TekkinVersionRankDetails,
   TekkinVersionRankPenalty,
+  TekkinVersionRankPrecision,
 } from "@/lib/analyzer/tekkinRankTypes";
 
 const BAND_KEYS: Array<keyof Bands> = [
@@ -35,8 +37,8 @@ interface RangeStats {
 function getRangeStats(range: PercentileRange | null | undefined): RangeStats | null {
   if (!range) return null;
 
-  const low = range.p10 ?? range.p25 ?? range.p50 ?? range.p75 ?? range.p90 ?? null;
-  const high = range.p90 ?? range.p75 ?? range.p50 ?? range.p25 ?? range.p10 ?? null;
+  const low = range.p10 ?? range.p50 ?? range.p90 ?? null;
+  const high = range.p90 ?? range.p50 ?? range.p10 ?? null;
   const mid = range.p50 ?? (low != null && high != null ? (low + high) / 2 : low ?? high ?? null);
 
   if (mid == null || Number.isNaN(mid)) return null;
@@ -81,10 +83,8 @@ function computeNormalizedDiff(
 
 function getRangeBounds(range: PercentileRange | null | undefined) {
   if (!range) return { min: null, max: null };
-  const min =
-    range.p10 ?? range.p25 ?? range.p50 ?? range.p75 ?? range.p90 ?? null;
-  const max =
-    range.p90 ?? range.p75 ?? range.p50 ?? range.p25 ?? range.p10 ?? null;
+  const min = range.p10 ?? range.p50 ?? range.p90 ?? null;
+  const max = range.p90 ?? range.p50 ?? range.p10 ?? null;
   return { min, max };
 }
 

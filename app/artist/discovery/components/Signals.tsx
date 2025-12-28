@@ -209,7 +209,7 @@ export function Signals() {
   }, []);
 
   const handleSendMessage = useCallback(
-    async (item: DiscoveryInboxItem, role: "received" | "sent") => {
+    async (item: DiscoveryInboxItem | DiscoveryOutboxItem, role: "received" | "sent") => {
       const key = `${role}-${item.request_id}`;
       const text = (messageInputs[key] ?? "").trim();
       if (!text) {
@@ -225,7 +225,10 @@ export function Signals() {
           body: JSON.stringify({
             request_id: item.request_id,
             message: text,
-            receiver_id: role === "received" ? item.sender_id : item.receiver_id,
+            receiver_id:
+              role === "received"
+                ? item.sender_id
+                : (item as DiscoveryOutboxItem).receiver_id,
           }),
         });
         if (!res.ok) {
