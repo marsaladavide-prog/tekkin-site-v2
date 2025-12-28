@@ -13,8 +13,8 @@ type ChartsSplitBoardProps = {
 };
 
 export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSplitBoardProps) {
-  const safeGlobal = Array.isArray(globalItems) ? globalItems : [];
-  const safeQuality = Array.isArray(qualityItems) ? qualityItems : [];
+  const safeGlobal = useMemo(() => (Array.isArray(globalItems) ? globalItems : []), [globalItems]);
+  const safeQuality = useMemo(() => (Array.isArray(qualityItems) ? qualityItems : []), [qualityItems]);
 
   console.log("[charts] sample item", safeGlobal?.[0]);
 

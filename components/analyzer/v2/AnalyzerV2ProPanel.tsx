@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import type { AnalyzerCompareModel, Bands, PercentileRange } from "@/lib/analyzer/v2/types";
 import { LoudnessMeterCard } from "./cards/LoudnessMeterCard";
 import { RhythmCard } from "./cards/RhythmCard";
@@ -694,7 +694,7 @@ function SoundFieldCard({
       d += ` L ${q.x.toFixed(2)} ${q.y.toFixed(2)}`;
     }
     return d;
-  }, [points]);
+  }, [points, cx, cy, rMax]);
 
   const refBandPath = useMemo(() => {
     const sf = referenceSoundField;
@@ -727,7 +727,7 @@ function SoundFieldCard({
     const inner = buildPath(p10);
     if (!outer || !inner) return null;
     return `${outer} ${inner}`;
-  }, [referenceSoundField]);
+  }, [referenceSoundField, cx, cy, rMax]);
 
   const widthVal =
     typeof stereoWidth === "number" && Number.isFinite(stereoWidth) ? clamp01(stereoWidth) : null;
@@ -1044,7 +1044,7 @@ function SpectrumCompareCard({
   height?: number;
 }) {
   const H = height ?? 180;
-  const pad = { l: 44, r: 10, t: 16, b: 26 };
+  const pad = useMemo(() => ({ l: 44, r: 10, t: 16, b: 26 }), []);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [svgWidth, setSvgWidth] = React.useState(820);
@@ -1087,7 +1087,7 @@ function SpectrumCompareCard({
     return out;
   }, [track, reference]);
 
-  function avgInRange(key: "t" | "r" | "d", hzMin: number, hzMax: number) {
+  const avgInRange = useCallback((key: "t" | "r" | "d", hzMin: number, hzMax: number) => {
     let sum = 0;
     let n = 0;
     for (const p of data) {
@@ -1100,7 +1100,7 @@ function SpectrumCompareCard({
       }
     }
     return n ? sum / n : null;
-  }
+  }, [data]);
 
   const summary = useMemo(() => {
     if (!hasRef || !hasTrack) return null;
@@ -1110,7 +1110,7 @@ function SpectrumCompareCard({
     const high = avgInRange("d", 6000, 12000);
 
     return { sub, lowmid, high };
-  }, [data, hasRef, hasTrack]);
+  }, [avgInRange, hasRef, hasTrack]);
 
   const domain = useMemo(() => {
     if (deltaMode) {
@@ -1142,19 +1142,19 @@ function SpectrumCompareCard({
     return { min, max, isDelta: false };
   }, [data, deltaMode]);
 
-  const xFromHz = (hz: number) => {
+  const xFromHz = useCallback((hz: number) => {
     const lo = Math.log10(20);
     const hi = Math.log10(20000);
     const v = clamp01((Math.log10(Math.max(20, Math.min(20000, hz))) - lo) / (hi - lo));
     return pad.l + v * (svgWidth - pad.l - pad.r);
-  };
+  }, [pad, svgWidth]);
 
-  const yFromVal = (v: number) => {
+  const yFromVal = useCallback((v: number) => {
     const t = clamp01((v - domain.min) / (domain.max - domain.min));
     return pad.t + (1 - t) * (H - pad.t - pad.b);
-  };
+  }, [H, domain.max, domain.min, pad]);
 
-  function smoothPath(points: { x: number; y: number }[]) {
+  const smoothPath = useCallback((points: { x: number; y: number }[]) => {
     if (points.length < 2) return "";
     let d = `M ${points[0].x} ${points[0].y}`;
     for (let i = 0; i < points.length - 1; i++) {
@@ -1164,18 +1164,18 @@ function SpectrumCompareCard({
       d += ` Q ${midX} ${p0.y}, ${p1.x} ${p1.y}`;
     }
     return d;
-  }
+  }, []);
 
-  const pathFrom = (key: "t" | "r" | "d") => {
+  const pathFrom = useCallback((key: "t" | "r" | "d") => {
     const pts = data
       .filter((p) => typeof (p as any)[key] === "number")
       .map((p) => ({ x: xFromHz(p.hz), y: yFromVal((p as any)[key] as number) }));
     return smoothPath(pts);
-  };
+  }, [data, smoothPath, xFromHz, yFromVal]);
 
-  const tPath = useMemo(() => (deltaMode ? "" : pathFrom("t")), [data, deltaMode, domain.min, domain.max, svgWidth]);
-  const rPath = useMemo(() => (deltaMode ? "" : pathFrom("r")), [data, deltaMode, domain.min, domain.max, svgWidth]);
-  const dPath = useMemo(() => (deltaMode ? pathFrom("d") : ""), [data, deltaMode, domain.min, domain.max, svgWidth]);
+  const tPath = useMemo(() => (deltaMode ? "" : pathFrom("t")), [deltaMode, pathFrom]);
+  const rPath = useMemo(() => (deltaMode ? "" : pathFrom("r")), [deltaMode, pathFrom]);
+  const dPath = useMemo(() => (deltaMode ? pathFrom("d") : ""), [deltaMode, pathFrom]);
 
   const yTicks = useMemo(() => {
     const top = domain.max;

@@ -224,7 +224,8 @@ export default function ProjectDetailPage() {
     void loadProject();
   }, [loadProject]);
 
-  const versions = project?.project_versions ?? [];
+  const projectVersions = project?.project_versions;
+  const versions = useMemo(() => projectVersions ?? [], [projectVersions]);
   const latestVersion = versions[0] ?? null;
 
   const selectedVersion = useMemo(() => {
