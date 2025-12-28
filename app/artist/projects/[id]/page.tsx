@@ -236,6 +236,7 @@ export default function ProjectDetailPage() {
     }
     return latestVersion;
   }, [versions, latestVersion, initialVersionId]);
+  const selectedVersionId = selectedVersion?.id ?? null;
 
   const profileLabel = getTekkinGenreLabel(project?.genre ?? null) ?? "Minimal / Deep Tech";
 
@@ -276,6 +277,94 @@ const path = rawPath;
   },
   [audioPreviewByVersionId]
 );
+
+  const handleSelectVersion = useCallback(
+    (v: ProjectVersionRow) => {
+      // cambiamo versione "selezionata" via URL (così resta shareable)
+      const url = new URL(window.location.href);
+      url.searchParams.set("version_id", v.id);
+      window.history.replaceState({}, "", url.toString());
+      // trigger preview url load
+      void ensurePreviewUrl(v);
+      // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
+      setProject((prev) => (prev ? { ...prev } : prev));
+    },
+    [ensurePreviewUrl]
+  );
+
+  const handleDeleteClick = useCallback((event: React.MouseEvent<HTMLSpanElement>, v: ProjectVersionRow) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDeleteVersionError(null);
+    setConfirmDeleteVersion(v);
+  }, []);
+
+  const handleDeleteKeyDown = useCallback((event: React.KeyboardEvent<HTMLSpanElement>, v: ProjectVersionRow) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      setDeleteVersionError(null);
+      setConfirmDeleteVersion(v);
+    }
+  }, []);
+
+  const versionRows = useMemo(
+    () =>
+      versions.map((v) => {
+        const isSel = v.id === selectedVersionId;
+        const versionLabel = v.version_name ?? "Versione";
+        const isAnalyzed = Boolean(v.analyzer_json) || v.lufs != null;
+
+        return (
+          <div key={v.id} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => handleSelectVersion(v)}
+              className={[
+                "w-full text-left rounded-2xl border px-4 py-3 transition",
+                isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm text-white truncate">{versionLabel}</div>
+                  <div className="mt-1 text-[11px] text-white/55">
+                    {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} 嫉 {new Date(v.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-[11px] text-white/60">
+                    {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
+                    {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
+                  </div>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Elimina versione ${versionLabel}`}
+                    onClick={(event) => handleDeleteClick(event, v)}
+                    onKeyDown={(event) => handleDeleteKeyDown(event, v)}
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </span>
+                </div>
+              </div>
+            </button>
+            {isAnalyzed && (
+              <div className="flex justify-end">
+                <Link
+                  href={`/artist/analyzer/${v.id}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold text-cyan-300 transition hover:border-cyan-400/60 hover:bg-cyan-400/20"
+                >
+                  Analyzer Report
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+      }),
+    [handleDeleteClick, handleDeleteKeyDown, handleSelectVersion, selectedVersionId, versions]
+  );
 
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -859,81 +948,7 @@ const path = rawPath;
                 </div>
 
                 <div className="mt-3 grid gap-2">
-                  {versions.map((v) => {
-                    const isSel = v.id === selectedVersion.id;
-                    const versionLabel = v.version_name ?? "Versione";
-                    const isAnalyzed = Boolean(v.analyzer_json) || v.lufs != null;
-
-                    return (
-                      <div key={v.id} className="space-y-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // cambiamo versione "selezionata" via URL (così resta shareable)
-                            const url = new URL(window.location.href);
-                            url.searchParams.set("version_id", v.id);
-                            window.history.replaceState({}, "", url.toString());
-                            // trigger preview url load
-                            void ensurePreviewUrl(v);
-                            // forza re-render con loadProject light: qui basta setProject con copia (ma keep simple)
-                            setProject((prev) => (prev ? { ...prev } : prev));
-                          }}
-                          className={[
-                            "w-full text-left rounded-2xl border px-4 py-3 transition",
-                            isSel ? "border-cyan-400/50 bg-cyan-400/10" : "border-white/10 bg-black/30 hover:bg-white/5",
-                          ].join(" ")}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="text-sm text-white truncate">{versionLabel}</div>
-                              <div className="mt-1 text-[11px] text-white/55">
-                                {v.mix_type ? MIX_TYPE_LABELS[v.mix_type] : "MIX"} · {new Date(v.created_at).toLocaleString()}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex items-center gap-2 text-[11px] text-white/60">
-                                {v.lufs != null ? <span>{v.lufs.toFixed(1)} LUFS</span> : null}
-                                {v.overall_score != null ? <span>Tekkin {v.overall_score.toFixed(1)}</span> : null}
-                              </div>
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                aria-label={`Elimina versione ${versionLabel}`}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setDeleteVersionError(null);
-                                  setConfirmDeleteVersion(v);
-                                }}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    setDeleteVersionError(null);
-                                    setConfirmDeleteVersion(v);
-                                  }
-                                }}
-                                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-white/60 transition hover:border-red-400 hover:text-red-300 hover:bg-red-400/10"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </span>
-                            </div>
-                          </div>
-                        </button>
-                        {isAnalyzed && (
-  <div className="flex justify-end">
-    <Link
-      href={`/artist/analyzer/${v.id}`}
-      className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold text-cyan-300 transition hover:border-cyan-400/60 hover:bg-cyan-400/20"
-    >
-      Analyzer Report
-    </Link>
-  </div>
-)}
-
-                      </div>
-                    );
-                  })}
+                  {versionRows}
                   {!versions.length && <div className="text-sm text-white/60">Nessuna versione.</div>}
                 </div>
               </div>

@@ -40,13 +40,21 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
     });
   }, [safeQuality, likesMap]);
 
-  const globalTracks = mergedGlobal
-    .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
-    .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track));
+  const globalTracks = useMemo(
+    () =>
+      mergedGlobal
+        .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
+        .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track)),
+    [mergedGlobal]
+  );
 
-  const qualityTracks = mergedQuality
-    .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
-    .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track));
+  const qualityTracks = useMemo(
+    () =>
+      mergedQuality
+        .map((entry) => ({ entry, track: mapChartsAnyToTrackItem(entry) }))
+        .filter((pair): pair is { entry: ChartSnapshotEntry; track: TrackItem } => Boolean(pair.track)),
+    [mergedQuality]
+  );
 
   const handlePlay = useCallback(
     (track: TrackItem, entry?: ChartSnapshotEntry | null) => {
@@ -100,6 +108,42 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
     }));
   }, []);
 
+  const globalRows = useMemo(
+    () =>
+      globalTracks.map(({ entry, track }, idx) => {
+        const v = likesMap[track.versionId];
+        const merged = v
+          ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
+          : track;
+        return {
+          key: `global-${track.versionId}-${entry.rank_position ?? idx}`,
+          item: merged,
+          entry,
+          indexLabel: idx + 1,
+          onPlay: () => handlePlay(merged, entry),
+        };
+      }),
+    [globalTracks, handlePlay, likesMap]
+  );
+
+  const qualityRows = useMemo(
+    () =>
+      qualityTracks.map(({ entry, track }, idx) => {
+        const v = likesMap[track.versionId];
+        const merged = v
+          ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
+          : track;
+        return {
+          key: `quality-${track.versionId}-${entry.rank_position ?? idx}`,
+          item: merged,
+          entry,
+          indexLabel: idx + 1,
+          onPlay: () => handlePlay(merged, entry),
+        };
+      }),
+    [handlePlay, likesMap, qualityTracks]
+  );
+
   return (
     <section className="w-full">
       <div className="grid gap-10 lg:grid-cols-4">
@@ -117,26 +161,17 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
           </div>
           <div className="mt-4 max-h-[520px] overflow-y-auto">
             <div className="flex flex-col gap-2">
-              {globalTracks.map(({ entry, track }, idx) => {
-                const v = likesMap[track.versionId];
-                // D) Merge prima del render TrackRow
-                const merged = v
-                  ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
-                  : track;
-
-                return (
+              {globalRows.map((row) => (
                 <TrackRow
-                  key={`global-${track.versionId}-${entry.rank_position ?? idx}`}
-                  item={merged}
-                  indexLabel={idx + 1}
+                  key={row.key}
+                  item={row.item}
+                  indexLabel={row.indexLabel}
                   variant="row"
                   showMetrics
-                  onPlay={() => handlePlay(merged, entry)}
-                  // E) Passa onToggleLike senza wrapper inutile
+                  onPlay={row.onPlay}
                   onToggleLike={handleToggleLike}
                 />
-              );
-              })}
+              ))}
             </div>
           </div>
         </div>
@@ -148,24 +183,17 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
             </p>
           </div>
           <div className="mt-4 flex flex-col gap-2">
-            {qualityTracks.map(({ entry, track }, idx) => {
-              const v = likesMap[track.versionId];
-              const merged = v
-                ? { ...track, likesCount: v.likesCount ?? track.likesCount, likedByMe: v.likedByMe ?? track.likedByMe }
-                : track;
-
-              return (
-                <TrackRow
-                  key={`quality-${track.versionId}-${entry.rank_position ?? idx}`}
-                  item={merged}
-                  indexLabel={idx + 1}
-                  variant="row"
-                  showMetrics
-                  onPlay={() => handlePlay(merged, entry)}
-                  onToggleLike={handleToggleLike}
-                />
-              );
-            })}
+            {qualityRows.map((row) => (
+              <TrackRow
+                key={row.key}
+                item={row.item}
+                indexLabel={row.indexLabel}
+                variant="row"
+                showMetrics
+                onPlay={row.onPlay}
+                onToggleLike={handleToggleLike}
+              />
+            ))}
           </div>
         </div>
       </div>
