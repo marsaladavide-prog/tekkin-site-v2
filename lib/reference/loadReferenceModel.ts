@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export async function loadReferenceModel(profileKey: string): Promise<any | null> {
+export async function loadReferenceModel(profileKey: string): Promise<unknown | null> {
   if (!profileKey || !profileKey.trim()) return null;
 
   const clean = profileKey.trim();

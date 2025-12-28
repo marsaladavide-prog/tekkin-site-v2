@@ -48,6 +48,19 @@ function n(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getNum(record: Record<string, unknown>, key: string): number | null {
+  return n(record[key]);
+}
+
+function getStr(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
@@ -95,6 +108,7 @@ export function toAnalyzerPreviewData(args: {
   trendSeries?: number[];
 }): AnalyzerPreviewData {
   const { analyzer, reference } = args;
+  const analyzerRecord = isRecord(analyzer) ? analyzer : {};
 
   const bpm = n(analyzer.bpm) ?? 0;
   const key = safeKeyLabel(analyzer.key);
@@ -102,10 +116,14 @@ export function toAnalyzerPreviewData(args: {
   const overall = n(analyzer.overall_score) ?? 0;
 
   // Stereo width: in AnalyzerResult spesso è un oggetto; nel tuo log è un numero 0..1.
-  const stereoRaw =
-    n((analyzer as any).stereo_width) ??
-    n((analyzer as any).stereo_width?.mean) ??
-    n((analyzer as any).stereo_width?.value);
+  const stereoRaw = (() => {
+    const direct = getNum(analyzerRecord, "stereo_width");
+    if (direct != null) return direct;
+    const stereoObj = analyzerRecord.stereo_width;
+    if (!isRecord(stereoObj)) return null;
+    return getNum(stereoObj, "mean") ?? getNum(stereoObj, "value");
+  })();
+
   const stereoPct = stereoRaw == null ? 0 : stereoRaw <= 1.2 ? clamp(stereoRaw * 100, 0, 100) : clamp(stereoRaw, 0, 100);
 
   const bands = getBandsNorm(analyzer);
@@ -197,9 +215,15 @@ export function toAnalyzerPreviewData(args: {
 
   // Per ora: quality = overall_score (proxy). Quando vuoi, lo sostituiamo con quality_score vero.
   const quality = clamp(Math.round(overall), 0, 100);
-
-  const matchPercent =
-    n((analyzer as any).model_match_percent) ?? n((analyzer as any).reference_ai?.model_match?.match_percent) ?? null;
+  const matchPercent = (() => {
+    const direct = getNum(analyzerRecord, "model_match_percent");
+    if (direct != null) return direct;
+    const referenceAi = analyzerRecord.reference_ai;
+    if (!isRecord(referenceAi)) return null;
+    const modelMatch = referenceAi.model_match;
+    if (!isRecord(modelMatch)) return null;
+    return getNum(modelMatch, "match_percent");
+  })();
   const bestMatch = matchPercent == null ? "-" : `${clamp(Math.round(matchPercent), 0, 100)}%`;
 
   const series =
@@ -228,7 +252,7 @@ export function toAnalyzerPreviewData(args: {
     artistName: args.artistName,
     coverUrl: args.coverUrl ?? null,
     readyLevel: args.readyLevel ?? "pro",
-    profileKey: (analyzer as any).profile_key ?? analyzer.analysis_scope ?? reference.profile_key,
+    profileKey: getStr(analyzerRecord, "profile_key") ?? analyzer.analysis_scope ?? reference.profile_key,
     referenceModel: reference.profile_key,
     metrics: {
       overallScore: quality,

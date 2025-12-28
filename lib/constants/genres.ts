@@ -27,13 +27,17 @@ export const TEKKIN_GENRES: TekkinGenreOption[] = TEKKIN_GENRE_IDS.map(
   })
 );
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function formatGenreLabel(value: unknown) {
   // Defensive: callers might pass objects (eg. TekkinGenreOption) or non-strings.
   const raw =
     typeof value === "string"
       ? value
-      : value && typeof value === "object" && "id" in value
-        ? String((value as any).id)
+      : isRecord(value) && "id" in value
+        ? String(value.id)
         : value == null
           ? ""
           : String(value);
@@ -50,8 +54,8 @@ export function getTekkinGenreLabel(input?: unknown): string | null {
   const id =
     typeof input === "string"
       ? input
-      : input && typeof input === "object" && "id" in input
-        ? String((input as any).id)
+      : isRecord(input) && "id" in input
+        ? String(input.id)
         : String(input);
 
   if (!id) return null;

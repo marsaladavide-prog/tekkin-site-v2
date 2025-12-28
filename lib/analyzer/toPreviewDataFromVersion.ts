@@ -17,6 +17,9 @@ export type ProjectVersionForAnalyzer = {
   lufs?: number | null;
   overall_score?: number | null;
 
+  analyzer_bpm?: number | null;
+  analyzer_key?: string | null;
+  analyzer_json?: unknown | null;
   analyzer_profile_key?: string | null;
   reference_model_key?: string | null;
 
@@ -74,28 +77,26 @@ function safeText(v: unknown, fallback: string) {
   return typeof v === "string" && v.trim() ? v : fallback;
 }
 
-function pick(obj: any, paths: string[]) {
-  for (const p of paths) {
-    const v = p.split(".").reduce((acc, k) => acc?.[k], obj);
-    if (v !== undefined && v !== null) return v;
-  }
-  return null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
-function pickNumber(version: any, keys: string[]): number | null {
-  for (const k of keys) {
-    const v = k.split(".").reduce((acc, part) => acc?.[part], version);
-    if (typeof v === "number" && Number.isFinite(v)) return v;
-  }
-  return null;
+function getRecord(record: Record<string, unknown> | null, key: string): Record<string, unknown> | null {
+  if (!record) return null;
+  const value = record[key];
+  return isRecord(value) ? value : null;
 }
 
-function pickString(version: any, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = k.split(".").reduce((acc, part) => acc?.[part], version);
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return null;
+function getNum(record: Record<string, unknown> | null, key: string): number | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getStr(record: Record<string, unknown> | null, key: string): string | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 export function toPreviewDataFromVersion(args: {
@@ -104,33 +105,33 @@ export function toPreviewDataFromVersion(args: {
 }): AnalyzerPreviewData {
   const { version, reference } = args;
 
-  const availability = getAnalyzerAvailability(version as any);
+  const availability = getAnalyzerAvailability(version);
   const readyLevel: AnalyzerPreviewData["readyLevel"] = availability.readyLevel;
 
-  const v: any = version;
+  const versionRecord = isRecord(version) ? version : {};
+  const analyzerJson = getRecord(versionRecord, "analyzer_json");
 
   const profileKey =
-    v.analyzer_profile_key ??
-    v.analyzer_json?.profile_key ??
+    version.analyzer_profile_key ??
+    getStr(analyzerJson, "profile_key") ??
     "unknown";
 
   const referenceModel = null;
 
   const bpm = Math.round(
-    (typeof v.analyzer_bpm === "number" ? v.analyzer_bpm : v.analyzer_json?.bpm) ?? 0
+    (version.analyzer_bpm ?? getNum(analyzerJson, "bpm") ?? 0)
   );
 
   const key =
-    (typeof v.analyzer_key === "string" ? v.analyzer_key : v.analyzer_json?.key) ?? "-";
+    (version.analyzer_key ?? getStr(analyzerJson, "key")) ?? "-";
 
   const lufs = Number(
     (
-      (typeof v.lufs === "number" ? v.lufs : v.analyzer_json?.loudness_stats?.integrated_lufs) ??
-      0
+      (typeof version.lufs === "number"
+        ? version.lufs
+        : getNum(getRecord(analyzerJson, "loudness_stats"), "integrated_lufs")) ?? 0
     ).toFixed(1)
   );
-
-  const lufsRounded = Number(lufs.toFixed(1));
 
   const overall = clamp(Math.round(version.overall_score ?? 0), 0, 100);
   const quality = overall;

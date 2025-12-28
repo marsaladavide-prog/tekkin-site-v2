@@ -14,6 +14,7 @@ import type {
   TekkinVersionRankPenalty,
   TekkinVersionRankPrecision,
 } from "@/lib/analyzer/tekkinRankTypes";
+import type { BandsNorm } from "@/lib/reference/types";
 
 const BAND_KEYS: Array<keyof Bands> = [
   "sub",
@@ -337,11 +338,6 @@ function formatLufs(value: number | null | undefined) {
   return `${value.toFixed(1)} LUFS`;
 }
 
-function formatDbValue(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
-  return `${value.toFixed(1)} dB`;
-}
-
 function formatLu(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
   return `${value.toFixed(1)} LU`;
@@ -516,7 +512,7 @@ export function calculateTekkinVersionRankFromModel(model: AnalyzerCompareModel)
     spectralFlatness: model.spectral?.spectral_flatness ?? null,
     zeroCrossingRate: model.spectral?.zero_crossing_rate ?? null,
     stereoWidth: model.stereoWidth ?? null,
-    bandsNorm: (model.bandsNorm ?? {}) as any,
+    bandsNorm: (model.bandsNorm ?? {}) as BandsNorm,
     modelMatchPercent: null,
   });
 

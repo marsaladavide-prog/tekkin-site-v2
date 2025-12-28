@@ -23,6 +23,32 @@ function parseOverallScore(value: unknown): number | null {
   return null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getStr(record: Record<string, unknown> | null, key: string): string | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function getBool(record: Record<string, unknown> | null, key: string): boolean | null {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function getStringArray(record: Record<string, unknown> | null, key: string): string[] {
+  if (!record) return [];
+  const value = record[key];
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string" && value.trim()) return [value];
+  return [];
+}
+
 export type ArtistDetailResponse = {
   artist: {
     id: string;
@@ -105,7 +131,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       };
     }
 
-    let profileData: any = data;
+    let profileData: Record<string, unknown> | null = isRecord(data) ? data : null;
 
     if (!profileData) {
       const { data: artistRow, error: artistErr } = await supabase
@@ -162,8 +188,19 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       };
     }
 
-    const profileId = profileData.id;
-    const profileUserId = profileData.user_id ?? profileId;
+    const profileId = getStr(profileData, "id");
+    if (!profileId) {
+      return {
+        artist: null,
+        metrics: null,
+        rank: null,
+        releases: [],
+        error: "Artista non trovato",
+        artist_slug: null,
+        profile_user_id: null,
+      };
+    }
+    const profileUserId = getStr(profileData, "user_id") ?? profileId;
 
     let artistSlug: string | null = null;
     const { data: slugRow, error: slugError } = await supabase
@@ -179,22 +216,18 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     }
 
     const artist = {
-      id: profileData.id,
-      artist_name: profileData.artist_name,
-      artist_photo_url: profileData.avatar_url ?? profileData.photo_url ?? null,
-      main_genres: Array.isArray(profileData.main_genres)
-        ? profileData.main_genres
-        : profileData.main_genres
-        ? [profileData.main_genres]
-        : [],
-      bio_short: profileData.bio_short,
-      city: profileData.city,
-      country: profileData.country,
-      open_to_collab: profileData.open_to_collab ?? false,
-      spotify_url: profileData.spotify_url ?? null,
-      instagram_username: profileData.instagram_username ?? null,
-      beatport_url: profileData.beatport_url ?? null,
-      presskit_link: profileData.presskit_link ?? null,
+      id: profileId,
+      artist_name: getStr(profileData, "artist_name"),
+      artist_photo_url: getStr(profileData, "avatar_url") ?? getStr(profileData, "photo_url") ?? null,
+      main_genres: getStringArray(profileData, "main_genres"),
+      bio_short: getStr(profileData, "bio_short"),
+      city: getStr(profileData, "city"),
+      country: getStr(profileData, "country"),
+      open_to_collab: getBool(profileData, "open_to_collab") ?? false,
+      spotify_url: getStr(profileData, "spotify_url"),
+      instagram_username: getStr(profileData, "instagram_username"),
+      beatport_url: getStr(profileData, "beatport_url"),
+      presskit_link: getStr(profileData, "presskit_link"),
     };
 
     // 2) metrics daily
@@ -247,15 +280,18 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     }
 
     const releases =
-      releasesRows?.map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        release_date: r.release_date,
-        cover_url: r.cover_url,
-        spotify_url: r.spotify_url,
-        album_type: r.album_type,
-        spotify_id: r.spotify_id ?? null,
-      })) ?? [];
+      releasesRows
+        ?.map((row) => (isRecord(row) ? row : null))
+        .filter((row): row is Record<string, unknown> => Boolean(row))
+        .map((r) => ({
+          id: getStr(r, "id") ?? "",
+          title: getStr(r, "title") ?? "",
+          release_date: getStr(r, "release_date"),
+          cover_url: getStr(r, "cover_url"),
+          spotify_url: getStr(r, "spotify_url"),
+          album_type: getStr(r, "album_type"),
+          spotify_id: getStr(r, "spotify_id"),
+        })) ?? [];
 
     const total_releases = releasesRows?.length ?? 0;
 
@@ -264,9 +300,11 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     cutoff.setFullYear(now.getFullYear() - 1);
 
     const releases_last_12m =
-      releasesRows?.filter((r: any) => {
-        if (!r.release_date) return false;
-        const d = new Date(r.release_date as string);
+      releasesRows?.filter((row) => {
+        const record = isRecord(row) ? row : null;
+        const releaseDate = getStr(record, "release_date");
+        if (!releaseDate) return false;
+        const d = new Date(releaseDate);
         return d >= cutoff;
       }).length ?? 0;
 
@@ -285,7 +323,10 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     if (projectIdErr) {
       console.error("[getArtistDetail] project ids error:", projectIdErr);
     } else {
-      const projectIds = projectIdRows?.map((row: any) => row.id) ?? [];
+      const projectIds =
+        projectIdRows
+          ?.map((row) => (isRecord(row) ? getStr(row, "id") : null))
+          .filter((id): id is string => Boolean(id)) ?? [];
 
       if (projectIds.length > 0) {
         const { data: versionsRows, error: versionsErr } = await supabase
@@ -312,7 +353,7 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
           console.error("[getArtistDetail] analysis score error:", analysisErr);
         } else {
           const normalizedScores = (analysisRows ?? [])
-            .map((row: any) => parseOverallScore(row.overall_score))
+            .map((row) => (isRecord(row) ? parseOverallScore(row.overall_score) : null))
             .filter((score): score is number => Number.isFinite(score));
 
           if (normalizedScores.length > 0) {

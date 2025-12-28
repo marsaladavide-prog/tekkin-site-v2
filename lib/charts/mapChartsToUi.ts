@@ -34,13 +34,18 @@ export type ChartUiModel = {
   qualityTop10: ChartSnapshotEntry[];
 };
 
-function mapEntryToHighlight(entry: ChartSnapshotEntry) {
-  return {
-    rank: entry.rank_position,
-    title: entry.track_title ?? "Untitled",
-    artist: entry.artist_name ?? "Unknown Artist",
-    score: entry.score_public ?? null,
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getNum(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function getStr(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function buildTopArtists(
@@ -89,12 +94,12 @@ function buildTopArtists(
     const profile = registeredMap.get(key);
     if (!profile) continue;
 
-    const avatarFromRows = (globalRows.find(
+    const matchedRow = globalRows.find(
       (row) => (row.artist_id ?? "").toString().trim() === key
-    ) as any)?.__artist_avatar_url;
-    const slugFromRows = (globalRows.find(
-      (row) => (row.artist_id ?? "").toString().trim() === key
-    ) as any)?.artist_slug;
+    );
+    const rowRecord = isRecord(matchedRow) ? matchedRow : null;
+    const avatarFromRows = rowRecord ? getStr(rowRecord, "__artist_avatar_url") : null;
+    const slugFromRows = rowRecord ? getStr(rowRecord, "artist_slug") : null;
 
     const displayName =
       profile.artist_name?.trim() || profile.artist_name || "Tekkin Artist";
@@ -179,21 +184,27 @@ export function mapChartsToUi(
     .filter((row) => row.profile_key === "global")
     .sort((a, b) => a.rank_position - b.rank_position)
     .slice(0, 100)
-    .map((r) => ({
-      ...r,
-      likes: (r as any).likes ?? 0,
-      liked: Boolean((r as any).liked),
-    }));
+    .map((r) => {
+      const record = isRecord(r) ? r : {};
+      return {
+        ...r,
+        likes: getNum(record, "likes") ?? 0,
+        liked: Boolean(record.liked),
+      };
+    });
 
   const qualityTop10 = safeRows
     .filter((row) => row.profile_key === "quality")
     .sort((a, b) => a.rank_position - b.rank_position)
     .slice(0, 10)
-    .map((r) => ({
-      ...r,
-      likes: (r as any).likes ?? 0,
-      liked: Boolean((r as any).liked),
-    }));
+    .map((r) => {
+      const record = isRecord(r) ? r : {};
+      return {
+        ...r,
+        likes: getNum(record, "likes") ?? 0,
+        liked: Boolean(record.liked),
+      };
+    });
 
   return {
     periodStart: period?.period_start ?? null,

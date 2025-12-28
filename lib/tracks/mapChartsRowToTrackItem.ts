@@ -1,26 +1,31 @@
 import type { TrackItem, TrackVisibility } from "@/lib/tracks/types";
 
-export function mapChartsAnyToTrackItem(x: any): TrackItem | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function mapChartsAnyToTrackItem(x: unknown): TrackItem | null {
+  const record = isRecord(x) ? x : {};
   const versionId =
-    typeof x?.version_id === "string"
-      ? x.version_id
-      : typeof x?.versionId === "string"
-      ? x.versionId
+    typeof record.version_id === "string"
+      ? record.version_id
+      : typeof record.versionId === "string"
+      ? record.versionId
       : null;
 
   const audioUrl =
-    typeof x?.audio_url === "string"
-      ? x.audio_url
-      : typeof x?.audioUrl === "string"
-      ? x.audioUrl
+    typeof record.audio_url === "string"
+      ? record.audio_url
+      : typeof record.audioUrl === "string"
+      ? record.audioUrl
       : null;
 
   if (!versionId || !audioUrl) return null;
 
   const visibility: TrackVisibility =
-    x?.visibility === "public"
+    record.visibility === "public"
       ? "public"
-      : x?.visibility === "private_with_secret_link"
+      : record.visibility === "private_with_secret_link"
       ? "private_with_secret_link"
       : "private";
 
@@ -29,71 +34,71 @@ export function mapChartsAnyToTrackItem(x: any): TrackItem | null {
     audioUrl,
 
     title:
-      typeof x?.track_title === "string" && x.track_title.trim()
-        ? x.track_title
-        : typeof x?.title === "string" && x.title.trim()
-        ? x.title
+      typeof record.track_title === "string" && record.track_title.trim()
+        ? record.track_title
+        : typeof record.title === "string" && record.title.trim()
+        ? record.title
         : "Untitled",
 
     artistName:
-      typeof x?.artist_name === "string"
-        ? x.artist_name
-        : typeof x?.artistName === "string"
-        ? x.artistName
+      typeof record.artist_name === "string"
+        ? record.artist_name
+        : typeof record.artistName === "string"
+        ? record.artistName
         : null,
 
     coverUrl:
-      typeof x?.cover_url === "string"
-        ? x.cover_url
-        : typeof x?.coverUrl === "string"
-        ? x.coverUrl
+      typeof record.cover_url === "string"
+        ? record.cover_url
+        : typeof record.coverUrl === "string"
+        ? record.coverUrl
         : null,
     artistId:
-      typeof x?.artist_id === "string"
-        ? x.artist_id
-        : typeof x?.artistId === "string"
-        ? x.artistId
+      typeof record.artist_id === "string"
+        ? record.artist_id
+        : typeof record.artistId === "string"
+        ? record.artistId
         : null,
 
     artistSlug:
-      typeof x?.artist_slug === "string"
-        ? x.artist_slug
-        : typeof x?.artistSlug === "string"
-        ? x.artistSlug
+      typeof record.artist_slug === "string"
+        ? record.artist_slug
+        : typeof record.artistSlug === "string"
+        ? record.artistSlug
         : null,
 
     mixType:
-      x?.mix_type === "premaster" || x?.mix_type === "master"
-        ? x.mix_type
-        : x?.mixType === "premaster" || x?.mixType === "master"
-        ? x.mixType
+      record.mix_type === "premaster" || record.mix_type === "master"
+        ? record.mix_type
+        : record.mixType === "premaster" || record.mixType === "master"
+        ? record.mixType
         : null,
 
     scorePublic:
-      typeof x?.score_public === "number"
-        ? x.score_public
-        : typeof x?.scorePublic === "number"
-        ? x.scorePublic
+      typeof record.score_public === "number"
+        ? record.score_public
+        : typeof record.scorePublic === "number"
+        ? record.scorePublic
         : null,
 
-    plays: typeof x?.plays === "number" ? x.plays : null,
+    plays: typeof record.plays === "number" ? record.plays : null,
 
     visibility,
 
     likesCount:
-      typeof x?.likes_count === "number"
-        ? x.likes_count
-        : typeof x?.likesCount === "number"
-        ? x.likesCount
-        : typeof x?.likes === "number"
-        ? x.likes
+      typeof record.likes_count === "number"
+        ? record.likes_count
+        : typeof record.likesCount === "number"
+        ? record.likesCount
+        : typeof record.likes === "number"
+        ? record.likes
         : 0,
 
     likedByMe:
-      typeof x?.liked_by_me === "boolean"
-        ? x.liked_by_me
-        : typeof x?.likedByMe === "boolean"
-        ? x.likedByMe
-        : Boolean(x?.liked),
+      typeof record.liked_by_me === "boolean"
+        ? record.liked_by_me
+        : typeof record.likedByMe === "boolean"
+        ? record.likedByMe
+        : Boolean(record.liked),
   };
 }
