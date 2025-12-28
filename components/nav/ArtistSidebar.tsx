@@ -4,10 +4,15 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Activity,
   BarChart3,
+  Bot,
   Cpu,
   Layers,
+  LogOut,
   Moon,
+  Newspaper,
+  Package,
   Radar,
   Search,
   Settings,
@@ -16,6 +21,7 @@ import {
   User,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import SoftButton from "@/components/ui/SoftButton";
@@ -23,33 +29,30 @@ import SidebarNavItem from "@/components/ui/SidebarNavItem";
 import { useTheme } from "@/app/artist/hooks/useTheme";
 import { useArtistRank } from "@/components/artist/hooks/useArtistRank";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
+import { createClient } from "@/utils/supabase/client";
 
 type NavGroup = {
   label: string;
   icon: LucideIcon;
-  items: Array<{ label: string; href: string; icon: LucideIcon }>;
+  items: Array<{
+    label: string;
+    href: string;
+    icon: LucideIcon;
+    rightSlot?: ReactNode;
+  }>;
 };
 
-const navGroups: NavGroup[] = [
-  {
-    label: "Artist",
-    icon: User,
-    items: [
-      { label: "Projects", href: "/artist/projects", icon: Layers },
-      { label: "Signals", href: "/artist/signals", icon: Signal },
-    ],
-  },
-  {
-    label: "Discovery",
-    icon: Radar,
-    items: [
-      { label: "Circuit", href: "/discovery", icon: Cpu },
-      { label: "Scanner", href: "/artist/discovery/scanner", icon: Search },
-    ],
-  },
-];
+const soonBadge = (
+  <span className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[8px] uppercase tracking-[0.2em] text-white/45">
+    Coming soon
+  </span>
+);
 
-const soloLinks = [{ label: "Charts", href: "/charts", icon: BarChart3 }];
+const soloLinks: NavGroup["items"] = [
+  { label: "Analyzer 3.6", href: "/analyzer", icon: Activity },
+  { label: "Sample Pack", href: "/sample-pack", icon: Package, rightSlot: soonBadge },
+  { label: "News & Tips", href: "/news-tips", icon: Newspaper, rightSlot: soonBadge },
+];
 
 export default function ArtistSidebar() {
   const pathname = usePathname() ?? "";
@@ -57,10 +60,24 @@ export default function ArtistSidebar() {
   const { theme, toggleTheme } = useTheme();
   const { data } = useArtistRank();
   const [profileOpen, setProfileOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const supabase = createClient();
 
   const artist = data?.artist;
   const artistName = artist?.artist_name?.trim() || "Artist";
   const artistPhoto = artist?.artist_photo_url ?? null;
+  const artistSlug =
+    typeof artist?.artist_slug === "string" && artist.artist_slug.trim().length > 0
+      ? artist.artist_slug.trim()
+      : null;
+  const fallbackHandle = artistName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  const profileHandle = artistSlug || (fallbackHandle ? fallbackHandle : null);
+  const profileHref = profileHandle ? `/@${profileHandle}` : "/artist/settings/profile";
   const tekkinScore =
     typeof data?.rank?.tekkin_score === "number"
       ? Math.round(data.rank.tekkin_score)
@@ -81,8 +98,42 @@ export default function ArtistSidebar() {
     router.push("/artist/projects?new=1");
   };
 
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error("Sidebar logout error:", error);
+      setIsLoggingOut(false);
+      return;
+    }
+    router.push("/login");
+  };
+
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
+
+  const navGroups: NavGroup[] = [
+    {
+      label: "Artist",
+      icon: User,
+      items: [
+        { label: "Profile", href: profileHref, icon: User },
+        { label: "Projects", href: "/artist/projects", icon: Layers },
+        { label: "Signals", href: "/artist/signals", icon: Signal },
+        { label: "Agent", href: "/artist/agent", icon: Bot, rightSlot: soonBadge },
+      ],
+    },
+    {
+      label: "Discovery",
+      icon: Radar,
+      items: [
+        { label: "Charts", href: "/charts", icon: BarChart3 },
+        { label: "Circuit", href: "/discovery", icon: Cpu },
+        { label: "Scanner", href: "/artist/discovery/scanner", icon: Search },
+      ],
+    },
+  ];
 
   return (
     <aside className="sticky top-0 h-screen w-64 shrink-0 border-r border-[var(--border)] bg-[var(--sidebar-bg)]">
@@ -129,6 +180,7 @@ export default function ArtistSidebar() {
                           href={item.href}
                           label={item.label}
                           icon={item.icon}
+                          rightSlot={item.rightSlot}
                           nested
                           active={isActive(item.href)}
                         />
@@ -145,6 +197,7 @@ export default function ArtistSidebar() {
                     href={item.href}
                     label={item.label}
                     icon={item.icon}
+                    rightSlot={item.rightSlot}
                     active={isActive(item.href)}
                   />
                 ))}
@@ -240,6 +293,15 @@ export default function ArtistSidebar() {
                           <Moon className="h-4 w-4 text-slate-400" />
                         )}
                         Tema {theme === "dark" ? "Scuro" : "Chiaro"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        disabled={isLoggingOut}
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/5 hover:text-white disabled:opacity-60"
+                      >
+                        <LogOut className="h-4 w-4 text-white/70" />
+                        {isLoggingOut ? "Logout..." : "Logout"}
                       </button>
                     </div>
                   </div>

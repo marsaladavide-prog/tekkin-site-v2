@@ -1,3 +1,5 @@
+import type { TekkinVersionRankDetails } from "@/lib/analyzer/tekkinRankTypes";
+
 export type Bands = {
   sub?: number;
   low?: number;
@@ -175,6 +177,9 @@ export type AnalyzerCompareModel = {
   referenceSpectralPercentiles?: ReferenceSpectralPercentiles | null;
   referenceSoundField?: ReferenceSoundField | null;
   referenceSoundFieldXY?: { x: number; y: number }[] | null;
+  suggestedReferenceKey?: string | null;
+  suggestedReferenceMatch?: number | null;
+  suggestedReferenceDelta?: number | null;
 
   // spectrum overlay
   spectrumTrack: SpectrumPoint[] | null;
@@ -202,4 +207,6 @@ export type AnalyzerCompareModel = {
 
   // extra
   extra?: Extra | null;
+
+  tekkinRank?: TekkinVersionRankDetails | null;
 };

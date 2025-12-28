@@ -49,7 +49,7 @@ export default async function ArtistLayout({ children }: { children: ReactNode }
       <ArtistSidebar />
 
       <main className="relative flex-1 overflow-y-auto">
-        <AppShell className="bg-transparent" innerClassName="gap-6 px-6 py-8" maxWidth="full" fullHeight>
+        <AppShell className="bg-transparent" innerClassName="gap-6 px-0 py-8" maxWidth="full" fullHeight>
           {isActive ? (
             children
           ) : (

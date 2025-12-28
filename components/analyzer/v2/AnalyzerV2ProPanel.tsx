@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import type { AnalyzerCompareModel, Bands } from "@/lib/analyzer/v2/types";
+import type { AnalyzerCompareModel, Bands, PercentileRange } from "@/lib/analyzer/v2/types";
 import { LoudnessMeterCard } from "./cards/LoudnessMeterCard";
-
 import { RhythmCard } from "./cards/RhythmCard";
+import { TekkinRankExplanationCard } from "./cards/TekkinRankCard";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import {
@@ -330,6 +330,8 @@ function AnalyzerHero({
   };
   lastAnalyzedAt?: string | null;
 }) {
+  const tekkinScoreValue = model.tekkinRank?.score ?? model.overallScore ?? null;
+  const tekkinPrecisionBonus = model.tekkinRank?.precisionBonus ?? 0;
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -351,8 +353,11 @@ function AnalyzerHero({
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm text-white/80">
-            Tekkin <span className="font-semibold text-white">{fmt0(model.overallScore ?? null)}</span>
+            Tekkin <span className="font-semibold text-white">{fmt0(tekkinScoreValue)}</span>
           </div>
+          {tekkinPrecisionBonus > 0 ? (
+            <div className="text-[10px] text-emerald-300">Precision +{tekkinPrecisionBonus.toFixed(1)}</div>
+          ) : null}
           <button
             type="button"
             onClick={onPlay}
@@ -877,11 +882,154 @@ function SoundFieldCard({
   );
 }
 
+type BandRange = {
+  low: number | null;
+  high: number | null;
+  label: "10-90" | "25-75" | "n/a";
+  refLooksNorm: boolean;
+};
+
+function resolveBandRange(
+  referencePercentiles: BandsPercentiles | null | undefined,
+  key: keyof Bands
+): BandRange {
+  const p = referencePercentiles?.[key];
+  const low = p?.p10 ?? p?.p25 ?? null;
+  const high = p?.p90 ?? p?.p75 ?? null;
+  const label =
+    p?.p10 != null && p?.p90 != null ? "10-90" : p?.p25 != null && p?.p75 != null ? "25-75" : "n/a";
+  const refLooksNorm =
+    typeof low === "number" &&
+    typeof high === "number" &&
+    low >= 0 &&
+    high <= 1.2;
+  return { low, high, label, refLooksNorm };
+}
+
+function resolveBandStatus(
+  range: BandRange,
+  tNorm: number | null,
+  tPct: number | null
+) {
+  if (range.low == null || range.high == null) {
+    return { status: "unknown" as const, range };
+  }
+  const tVal = range.refLooksNorm ? tNorm : tPct;
+  if (tVal == null || !Number.isFinite(tVal)) {
+    return { status: "unknown" as const, range };
+  }
+  const lower = Math.min(range.low, range.high);
+  const upper = Math.max(range.low, range.high);
+  if (tVal < lower) return { status: "low" as const, range };
+  if (tVal > upper) return { status: "high" as const, range };
+  return { status: "ok" as const, range };
+}
+
+function TonalSnapshotCompact({
+  trackBands,
+  referencePercentiles,
+}: {
+  trackBands?: Bands | null;
+  referencePercentiles?: BandsPercentiles | null;
+}) {
+  const trackPct = useMemo(() => bandsToPct(trackBands), [trackBands]);
+  const hasTrack = !!trackBands && sumBands(trackBands) > 0;
+  const hasPerc = !!referencePercentiles;
+
+  const bandData = BAND_ORDER.map((key) => {
+    const tNorm = (trackBands as any)?.[key] ?? null;
+    const tPctVal = hasTrack ? (trackPct as any)?.[key] : null;
+    const range = resolveBandRange(referencePercentiles ?? null, key);
+    const status = hasPerc ? resolveBandStatus(range, tNorm, tPctVal) : { status: "unknown" as const, range };
+    return {
+      key,
+      label: BAND_LABELS.it[key],
+      status: status.status,
+      rangeLabel: range.label,
+    };
+  });
+
+  const known = bandData.filter((b) => b.status !== "unknown").length;
+  const okCount = bandData.filter((b) => b.status === "ok").length;
+  const overallScore = known ? Math.round((okCount / known) * 100) : null;
+
+  const chipTone = (status: string) => {
+    if (status === "ok") return "bg-emerald-400/70";
+    if (status === "low") return "bg-sky-400/70";
+    if (status === "high") return "bg-amber-400/70";
+    return "bg-white/10";
+  };
+
+  const statusLabel = (status: string) => {
+    if (status === "ok") return "OK";
+    if (status === "low") return "LOW";
+    if (status === "high") return "HIGH";
+    return "n/a";
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-white/55">Fit tonale</div>
+            <div className="mt-1 text-lg font-semibold text-white">
+              {overallScore == null ? "n/a" : `${overallScore}%`}
+            </div>
+            <div className="mt-1 text-[11px] text-white/50">
+              In target: {known ? `${okCount}/${known}` : "n/a"}
+            </div>
+          </div>
+          <div className="flex-1">
+            <div className="relative h-2 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-emerald-400/80"
+                style={{ width: `${overallScore ?? 0}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {bandData.map((b) => (
+          <div key={b.key} className="flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-2 py-1">
+            <span className={`h-2 w-2 rounded-full ${chipTone(b.status)}`} />
+            <span className="text-[10px] font-semibold text-white/70">{b.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+        <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.2em] text-white/60">
+          Dettagli
+        </summary>
+        {!hasPerc ? (
+          <div className="mt-2 text-[10px] text-white/45">Reference percentili non disponibili.</div>
+        ) : null}
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-white/60">
+          {bandData.map((b) => (
+            <div key={b.key} className="flex items-center justify-between gap-2">
+              <span className="text-white/70">{b.label}</span>
+              <span className="text-white/50">
+                {statusLabel(b.status)} {b.rangeLabel !== "n/a" ? `(${b.rangeLabel})` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] text-white/45">Range riferimento: p10/p90.</div>
+      </details>
+    </div>
+  );
+}
+
 
 function SpectrumCompareCard({
   track,
   reference,
   referenceName,
+  spectral,
+  referenceSpectralPercentiles,
   refState,
   embedded,
   height,
@@ -889,6 +1037,8 @@ function SpectrumCompareCard({
   track?: SpectrumPoint[] | null;
   reference?: SpectrumPoint[] | null;
   referenceName?: string | null;
+  spectral?: AnalyzerCompareModel["spectral"] | null;
+  referenceSpectralPercentiles?: AnalyzerCompareModel["referenceSpectralPercentiles"] | null;
   refState: RefState;
   embedded?: boolean;
   height?: number;
@@ -1041,34 +1191,110 @@ function SpectrumCompareCard({
 
   const zeroY = domain.isDelta ? yFromVal(0) : null;
 
+  const formatHz = (value: number | null | undefined) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+    if (value >= 1000) return `${(value / 1000).toFixed(2)} kHz`;
+    return `${value.toFixed(0)} Hz`;
+  };
+
+  const formatNum = (value: number | null | undefined) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+    return value.toFixed(3);
+  };
+
+  const formatRange = (range: PercentileRange | null | undefined, unit: (v: number) => string) => {
+    if (!range) return "n/a";
+    const low = range.p10 ?? range.p25 ?? null;
+    const high = range.p90 ?? range.p75 ?? null;
+    if (low == null || high == null) return "n/a";
+    return `${unit(low)} - ${unit(high)}`;
+  };
+
+  const spectrumMetrics = [
+    {
+      key: "centroid",
+      label: "Centroid",
+      desc: "Brillantezza media",
+      value: spectral?.spectral_centroid_hz ?? null,
+      range: referenceSpectralPercentiles?.spectral_centroid_hz ?? null,
+      format: formatHz,
+    },
+    {
+      key: "bandwidth",
+      label: "Bandwidth",
+      desc: "Larghezza spettrale",
+      value: spectral?.spectral_bandwidth_hz ?? null,
+      range: referenceSpectralPercentiles?.spectral_bandwidth_hz ?? null,
+      format: formatHz,
+    },
+    {
+      key: "rolloff",
+      label: "Rolloff",
+      desc: "Taglio alte frequenze",
+      value: spectral?.spectral_rolloff_hz ?? null,
+      range: referenceSpectralPercentiles?.spectral_rolloff_hz ?? null,
+      format: formatHz,
+    },
+    {
+      key: "flatness",
+      label: "Flatness",
+      desc: "Rumorosita del timbro",
+      value: spectral?.spectral_flatness ?? null,
+      range: referenceSpectralPercentiles?.spectral_flatness ?? null,
+      format: formatNum,
+    },
+    {
+      key: "zcr",
+      label: "ZCR",
+      desc: "Densita transienti",
+      value: spectral?.zero_crossing_rate ?? null,
+      range: referenceSpectralPercentiles?.zero_crossing_rate ?? null,
+      format: formatNum,
+    },
+  ];
+
   const content = (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-emerald-200">
-            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> Traccia
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-blue-200">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-400" /> Reference
-          </span>
-          {deltaMode ? (
-            <span className="text-[11px] text-white/50">Mostrando Traccia - Reference</span>
-          ) : null}
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+        <div className="space-y-1">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-emerald-200">
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> Traccia
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/25 bg-white/5 px-2 py-0.5 text-[11px] text-blue-200">
+              <span className="inline-block h-2 w-2 rounded-full bg-blue-400" /> Reference
+            </span>
+            {deltaMode ? (
+              <span className="text-[11px] text-white/50">Vista differenza</span>
+            ) : null}
+          </div>
+          <div className="text-[11px] text-white/50">
+            Verde sopra blu = piu energia della traccia. Verde sotto blu = meno energia.
+          </div>
         </div>
 
-        {summary && (
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.sub == null ? "border-white/10 text-white/60" : summary.sub >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
-              Sub {summary.sub == null ? "n/a" : `${summary.sub >= 0 ? "+" : ""}${summary.sub.toFixed(1)} dB`}
-            </span>
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.lowmid == null ? "border-white/10 text-white/60" : summary.lowmid >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
-              LowMid {summary.lowmid == null ? "n/a" : `${summary.lowmid >= 0 ? "+" : ""}${summary.lowmid.toFixed(1)} dB`}
-            </span>
-            <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.high == null ? "border-white/10 text-white/60" : summary.high >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
-              High {summary.high == null ? "n/a" : `${summary.high >= 0 ? "+" : ""}${summary.high.toFixed(1)} dB`}
-            </span>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {summary && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.sub == null ? "border-white/10 text-white/60" : summary.sub >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
+                Sub {summary.sub == null ? "n/a" : `${summary.sub >= 0 ? "+" : ""}${summary.sub.toFixed(1)} dB`}
+              </span>
+              <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.lowmid == null ? "border-white/10 text-white/60" : summary.lowmid >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
+                LowMid {summary.lowmid == null ? "n/a" : `${summary.lowmid >= 0 ? "+" : ""}${summary.lowmid.toFixed(1)} dB`}
+              </span>
+              <span className={`rounded-full border bg-black/20 px-2 py-1 ${summary.high == null ? "border-white/10 text-white/60" : summary.high >= 0 ? "border-emerald-400/25 text-emerald-200" : "border-rose-400/25 text-rose-200"}`}>
+                High {summary.high == null ? "n/a" : `${summary.high >= 0 ? "+" : ""}${summary.high.toFixed(1)} dB`}
+              </span>
+            </div>
+          )}
+          <button
+            type="button"
+            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/70 hover:bg-white/10"
+            onClick={() => setDeltaMode((prev) => !prev)}
+          >
+            {deltaMode ? "Vista overlay" : "Vista differenza"}
+          </button>
+        </div>
       </div>
 
       <div ref={containerRef} className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3 relative w-full">
@@ -1129,6 +1355,19 @@ function SpectrumCompareCard({
             ? "Asse Y in dB: differenza Traccia - Reference (0 dB = uguale)."
             : "Asse Y in dB (range auto)."}
         </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-3">
+        {spectrumMetrics.map((metric) => (
+          <div key={metric.key} className="rounded-lg border border-white/10 bg-black/20 p-2">
+            <div className="text-[11px] font-semibold text-white/80">{metric.label}</div>
+            <div className="text-[10px] text-white/50">{metric.desc}</div>
+            <div className="mt-1 text-[12px] text-white">{metric.format(metric.value)}</div>
+            <div className="text-[10px] text-white/45">
+              Ref: {formatRange(metric.range, metric.format)}
+            </div>
+          </div>
+        ))}
       </div>
     </>
   );
@@ -1686,79 +1925,6 @@ function OverviewStrip({ model }: { model: AnalyzerCompareModel }) {
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function FocusMap({ model }: { model: AnalyzerCompareModel }) {
-  const score = (value: number) => Math.max(0, Math.min(1, value));
-
-  const loud = (() => {
-    const v = model.loudness?.integrated_lufs ?? null;
-    const ref = model.referenceFeaturesPercentiles?.lufs ?? null;
-    if (v == null) return 0.35;
-    if (ref?.p10 != null && ref?.p90 != null) return score(v < ref.p10 || v > ref.p90 ? 1 : 0.4);
-    return 0.5;
-  })();
-
-  const timbre = (() => {
-    const hasBands = !!(model.bandsNorm && sumBands(model.bandsNorm) > 0);
-    const hasSpectral = !!model.spectral;
-    return score(hasBands && hasSpectral ? 0.35 : 0.65);
-  })();
-
-  const stereo = (() => {
-    const width = typeof model.stereoWidth === "number" ? model.stereoWidth : null;
-    const ref = model.referenceStereoPercentiles?.stereoWidth ?? null;
-    if (width == null) return 0.4;
-    if (ref?.p10 != null && ref?.p90 != null) return score(width < ref.p10 || width > ref.p90 ? 1 : 0.4);
-    return 0.5;
-  })();
-
-  const transients = (() => {
-    const t = model.transients;
-    if (!t) return 0.5;
-    const strength = typeof t.strength === "number" ? t.strength : null;
-    return score(strength != null && strength > 0 ? 0.4 : 0.7);
-  })();
-
-  const rhythm = (() => {
-    const hasRhythm = !!model.rhythm;
-    return score(hasRhythm ? 0.4 : 0.7);
-  })();
-
-  const extra = (() => {
-    const hasExtra = !!model.extra?.mfcc_mean || typeof model.extra?.spectral_peaks_count === "number";
-    return score(hasExtra ? 0.45 : 0.7);
-  })();
-
-  const rows = [
-    { key: "loud", label: "Loudness", value: loud },
-    { key: "timbre", label: "Timbre", value: timbre },
-    { key: "stereo", label: "Stereo", value: stereo },
-    { key: "transients", label: "Transients", value: transients },
-    { key: "rhythm", label: "Rhythm", value: rhythm },
-    { key: "extra", label: "Extra", value: extra },
-  ];
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-      <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Focus map</div>
-      <div className="mt-2 grid grid-cols-1 gap-2">
-        {rows.map((r) => (
-          <div key={r.key} className="flex items-center gap-3">
-            <div className="w-20 text-[11px] text-white/60">{r.label}</div>
-            <div className="flex-1 h-2 rounded-full bg-white/5">
-              <div
-                className={`h-full rounded-full ${r.value >= 0.75 ? "bg-rose-400/80" : r.value >= 0.5 ? "bg-amber-300/80" : "bg-emerald-400/70"}`}
-                style={{ width: `${r.value * 100}%` }}
-              />
-            </div>
-            <div className="w-12 text-right text-[10px] text-white/50">{Math.round(r.value * 100)}%</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 text-[11px] text-white/45">Barre piu alte = priorita di lavoro consigliata.</div>
     </div>
   );
 }
@@ -2600,7 +2766,9 @@ export default function AnalyzerV2ProPanel({
   };
 
   const handlePlay = onPlay ?? handleTogglePlay;
-  const [activeTab, setActiveTab] = useState<"overview" | "loudness" | "timbre" | "stereo" | "transients" | "rhythm" | "extra">("overview");
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "tonal" | "loudness" | "spectral" | "stereo" | "transients" | "rhythm" | "extra"
+  >("overview");
 
 
   const live = useMemo(
@@ -2704,7 +2872,7 @@ const merged: AnalyzerCompareModel = useMemo(() => {
 
   return (
     <div className="min-h-screen bg-black">
-      <div className="mx-auto w-full max-w-6xl px-6 pb-20 pt-8">
+      <div className="w-full max-w-[1400px] px-0 pb-20 pt-8 lg:px-2 xl:px-4">
         <AnalyzerHero
           model={merged}
           onPlay={handlePlay}
@@ -2730,11 +2898,12 @@ const merged: AnalyzerCompareModel = useMemo(() => {
         <div className="mt-5 flex flex-wrap items-center gap-2">
           {[
             { key: "overview", label: "Overview" },
+            { key: "tonal", label: "Tonal balance" },
             { key: "loudness", label: "Loudness" },
-            { key: "timbre", label: "Timbre" },
-            { key: "stereo", label: "Stereo" },
+            { key: "spectral", label: "Spettro" },
             { key: "transients", label: "Transients" },
             { key: "rhythm", label: "Rhythm" },
+            { key: "stereo", label: "Stereo" },
             { key: "extra", label: "Extra" },
           ].map((tab) => (
             <button
@@ -2757,9 +2926,20 @@ const merged: AnalyzerCompareModel = useMemo(() => {
             <div className="space-y-4">
               <OverviewStrip model={merged} />
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <Card title="Focus map" subtitle="Dove intervenire prima" className="h-full">
-                  <FocusMap model={merged} />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                <TekkinRankExplanationCard
+                  rank={merged.tekkinRank ?? null}
+                  referenceName={merged.referenceName}
+                  suggestedReferenceKey={merged.suggestedReferenceKey ?? null}
+                  suggestedReferenceMatch={merged.suggestedReferenceMatch ?? null}
+                  suggestedReferenceDelta={merged.suggestedReferenceDelta ?? null}
+                />
+
+                <Card title="Tonal overview" subtitle="Bilanciamento bande (reference)" className="h-full">
+                  <TonalSnapshotCompact
+                    trackBands={merged.bandsNorm as any}
+                    referencePercentiles={(merged as any).referenceBandsPercentiles ?? null}
+                  />
                 </Card>
 
                 <Card title="Stereo snapshot" subtitle="Correlation + field" className="h-full">
@@ -2804,8 +2984,42 @@ const merged: AnalyzerCompareModel = useMemo(() => {
             />
           ) : null}
 
-          {activeTab === "timbre" ? (
-            <TimbreCard model={merged} tonalRefState={tonalRefState} spectrumRefState={spectrumRefState} />
+          {activeTab === "tonal" ? (
+            <Card
+              title="Tonal balance"
+              subtitle="Sub, bassi, mid, presence, alti, air"
+              right={<SourcePills state={tonalRefState} />}
+              className="h-full"
+            >
+              <HorizontalTonalBalance
+                trackBands={merged.bandsNorm as any}
+                referenceBands={merged.referenceBandsNorm as any}
+                referenceName={merged.referenceName}
+                referencePercentiles={(merged as any).referenceBandsPercentiles ?? null}
+                lang={(merged as any).lang === "en" ? "en" : "it"}
+                refState={tonalRefState}
+                embedded
+              />
+            </Card>
+          ) : null}
+
+          {activeTab === "spectral" ? (
+            <Card
+              title="Spettro"
+              subtitle="Confronto traccia vs reference"
+              right={<SourcePills state={spectrumRefState} />}
+              className="h-full"
+            >
+              <SpectrumCompareCard
+                track={merged.spectrumTrack ?? null}
+                reference={merged.spectrumRef ?? null}
+                referenceName={merged.referenceName}
+                spectral={merged.spectral ?? null}
+                referenceSpectralPercentiles={merged.referenceSpectralPercentiles ?? null}
+                refState={spectrumRefState}
+                embedded
+              />
+            </Card>
           ) : null}
 
           {activeTab === "stereo" ? (

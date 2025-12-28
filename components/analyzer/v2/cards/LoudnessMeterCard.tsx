@@ -28,6 +28,12 @@ function fmtLufs(value: number | null | undefined) {
   return `${value.toFixed(1)} LUFS`;
 }
 
+function sanitizeLufsValue(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < -200) return null;
+  return value;
+}
+
 function formatRange(range?: { p10?: number | null; p90?: number | null } | null) {
   if (!range || (range.p10 == null && range.p90 == null)) return "n/a";
   return `${range.p10 != null ? range.p10.toFixed(1) : "n/a"} / ${range.p90 != null ? range.p90.toFixed(1) : "n/a"}`;
@@ -146,7 +152,7 @@ export function LoudnessMeterCard({
   const [showDetails, setShowDetails] = useState(false);
   const [timelineMode, setTimelineMode] = useState<"momentary" | "short">("momentary");
 
-  const integrated = loudness?.integrated_lufs ?? null;
+  const integrated = sanitizeLufsValue(loudness?.integrated_lufs ?? null);
   const lra = loudness?.lra ?? null;
   const truePeak = typeof loudness?.true_peak_db === "number" ? loudness?.true_peak_db : null;
   const samplePeak = typeof loudness?.sample_peak_db === "number" ? loudness?.sample_peak_db : null;
@@ -189,8 +195,10 @@ export function LoudnessMeterCard({
   const momentaryTicks = useMemo(() => downsample(momentary, 96), [momentary]);
   const shortTermTicks = useMemo(() => downsample(shortTerm, 96), [shortTerm]);
   const timelinePoints = timelineMode === "momentary" ? momentaryTicks : shortTermTicks;
-  const latestMomentary = momentary && momentary.length ? momentary[momentary.length - 1] : null;
-  const latestShort = shortTerm && shortTerm.length ? shortTerm[shortTerm.length - 1] : null;
+  const latestMomentary = sanitizeLufsValue(
+    momentary && momentary.length ? momentary[momentary.length - 1] : null
+  );
+  const latestShort = sanitizeLufsValue(shortTerm && shortTerm.length ? shortTerm[shortTerm.length - 1] : null);
   const momentaryRange = loudness?.momentary_percentiles ?? null;
   const shortRange = loudness?.short_term_percentiles ?? null;
 

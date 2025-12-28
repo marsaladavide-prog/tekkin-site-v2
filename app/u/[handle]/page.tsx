@@ -9,6 +9,7 @@ import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditA
 import PublicTracksGallery from "@/components/artist/PublicTracksGallery";
 
 import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
+import { toSpotifyEmbedUrl } from "@/utils/spotify";
 import type { Artist, ArtistRankView } from "@/types/tekkinRank";
 import type { TrackItem } from "@/lib/tracks/types";
 
@@ -111,6 +112,7 @@ export default async function PublicArtistPage({ params }: Props) {
     artist_genre: mainGenreLabel,
     artist_link_source: undefined,
     spotify_url: artist.spotify_url ?? null,
+
     beatport_url: artist.beatport_url ?? null,
   };
 
@@ -123,7 +125,7 @@ export default async function PublicArtistPage({ params }: Props) {
     title: rel.title,
     releaseDate: rel.release_date ?? "",
     coverUrl: rel.cover_url,
-    spotifyUrl: rel.spotify_url,
+    spotifyUrl: toSpotifyEmbedUrl(rel.spotify_url) ?? null,
     albumType: rel.album_type,
   }));
 
@@ -221,7 +223,7 @@ const items: TrackItem[] = (tracks ?? []).map((v: any) => {
           mainGenreLabel={mainGenreLabel}
           locationLabel={locationLabel}
           avatarUrl={artist.artist_photo_url}
-          spotifyUrl={artist.spotify_url ?? null}
+          spotifyUrl={toSpotifyEmbedUrl(artist.spotify_url) ?? null}
           beatportUrl={artist.beatport_url ?? null}
           instagramUrl={instagramUrl}
           presskitUrl={artist.presskit_link ?? null}

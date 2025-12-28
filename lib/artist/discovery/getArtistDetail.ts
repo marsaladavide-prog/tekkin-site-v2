@@ -7,6 +7,22 @@ import { computeArtistRank } from "@/lib/tekkin/computeArtistRank";
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function clampScoreValue(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value)));
+}
+
+function parseOverallScore(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return clampScoreValue(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return clampScoreValue(parsed);
+    }
+  }
+  return null;
+}
+
 export type ArtistDetailResponse = {
   artist: {
     id: string;
@@ -254,8 +270,12 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         return d >= cutoff;
       }).length ?? 0;
 
-    // 4) analyzed versions
+    // 4) analyzed versions + analyzer scores
     let analyzed_versions = 0;
+    let analysisScoreAverage: number | null = null;
+    let analysisScoreBest: number | null = null;
+    let analysisScoreLatest: number | null = null;
+    let analysisScoreCount = 0;
 
     const { data: projectIdRows, error: projectIdErr } = await supabase
       .from("projects")
@@ -279,6 +299,30 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         } else {
           analyzed_versions = versionsRows?.length ?? 0;
         }
+
+        const { data: analysisRows, error: analysisErr } = await supabase
+          .from("project_versions")
+          .select("overall_score, created_at")
+          .in("project_id", projectIds)
+          .not("overall_score", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(200);
+
+        if (analysisErr) {
+          console.error("[getArtistDetail] analysis score error:", analysisErr);
+        } else {
+          const normalizedScores = (analysisRows ?? [])
+            .map((row: any) => parseOverallScore(row.overall_score))
+            .filter((score): score is number => Number.isFinite(score));
+
+          if (normalizedScores.length > 0) {
+            analysisScoreCount = normalizedScores.length;
+            analysisScoreLatest = normalizedScores[0];
+            analysisScoreBest = Math.max(...normalizedScores);
+            const sum = normalizedScores.reduce((acc, score) => acc + score, 0);
+            analysisScoreAverage = Math.round(sum / normalizedScores.length);
+          }
+        }
       }
     }
 
@@ -289,7 +333,8 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
       spotify_followers !== null ||
       spotify_popularity !== null ||
       total_releases > 0 ||
-      analyzed_versions > 0;
+      analyzed_versions > 0 ||
+      analysisScoreCount > 0;
 
     if (hasAnyMetrics) {
       metrics = {
@@ -300,6 +345,10 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
         total_releases,
         releases_last_12m,
         analyzed_versions,
+        analysis_score_average: analysisScoreAverage,
+        analysis_score_best: analysisScoreBest,
+        analysis_score_latest: analysisScoreLatest,
+        analysis_score_count: analysisScoreCount,
         collected_at,
       };
     }

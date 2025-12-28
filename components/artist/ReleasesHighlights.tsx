@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
+import SpotifyEmbedModal from "@/components/SpotifyEmbedModal";
 
 type SpotifyRelease = {
   id: string;
@@ -22,7 +23,8 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
   const previewCacheRef = useRef<Record<string, string | null>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
-  const [embedAlbumId, setEmbedAlbumId] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!playError) return undefined;
@@ -93,8 +95,14 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
       if (previewUrl) {
         startPlayback(previewUrl, rel, payload?.trackName ?? null);
       } else {
-        setPlayError(payload?.error ?? "Anteprima non disponibile per questa release.");
-        setEmbedAlbumId(albumIdToUse);
+        setPlayError(null);
+
+        if (rel.spotifyUrl) {
+          setEmbedUrl(rel.spotifyUrl); // è GIÀ embed
+          setOpen(true);
+        } else {
+          setPlayError("Anteprima non disponibile per questa release.");
+        }
       }
     } catch (err) {
       console.error("[ReleasesHighlights] preview error", err);
@@ -117,6 +125,13 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
 
   return (
     <section className="mb-6">
+      <SpotifyEmbedModal
+        open={open}
+        onClose={() => setOpen(false)}
+        embedUrl={embedUrl}
+        title="Spotify"
+      />
+
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">
           Main Releases & Highlights
@@ -266,31 +281,6 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
           </div>
         </div>
       </div>
-      {embedAlbumId ? (
-        <div
-          className="fixed inset-0 z-[899] flex items-center justify-center bg-black/70"
-          onClick={() => setEmbedAlbumId(null)}
-        >
-          <div
-            className="relative mx-4 w-full max-w-3xl rounded-3xl border border-white/10 bg-black/90 p-6 shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setEmbedAlbumId(null)}
-              className="absolute right-4 top-4 rounded-full border border-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-white"
-            >
-              Chiudi
-            </button>
-          <iframe
-            title="Spotify preview"
-            src={`https://open.spotify.com/embed/album/${embedAlbumId}`}
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            className="h-[420px] w-full rounded-2xl border border-white/10"
-          />
-        </div>
-      </div>
-    ) : null}
     </section>
   );
 }

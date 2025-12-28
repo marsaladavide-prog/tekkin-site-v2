@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createClient as createSupabaseAdmin } from "@supabase/supabase-js";
 import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult";
+import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
+import { calculateTekkinVersionRankFromModel } from "@/lib/analyzer/tekkinVersionRank";
+import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
 
 export const runtime = "nodejs";
 
@@ -56,7 +59,7 @@ const { data: version, error: versionError } = await supabase
     // 2) Recupero progetto per profileKey/mode
     const { data: project, error: projectError } = await supabase
       .from("projects")
-      .select("id, genre")
+      .select("id, genre, title")
       .eq("id", version.project_id)
       .maybeSingle();
 
@@ -285,6 +288,28 @@ console.log("[run-analyzer] update payload preview ->", {
   analyzer_key: (updatePayload as any).analyzer_key ?? null,
   arrays_blob_path: (updatePayload as any).arrays_blob_path ?? null,
 });
+
+    try {
+      const referenceModel = await loadReferenceModel(profileKey);
+      const versionForModel = {
+        ...updatePayload,
+        id: version.id,
+        project_id: version.project_id,
+        project: { id: project.id, title: project.title ?? "Untitled project" },
+        version_name: version.version_name,
+        mix_type: version.mix_type,
+        analyzer_arrays: null,
+        analyzer_profile_key: profileKey,
+        reference_model_key: profileKey,
+      };
+
+      const model = mapVersionToAnalyzerCompareModel(versionForModel, referenceModel);
+      const tekkinVersionRank = calculateTekkinVersionRankFromModel(model);
+      updatePayload.overall_score = tekkinVersionRank.score;
+      console.log("[run-analyzer] tekkin rank ->", tekkinVersionRank.score);
+    } catch (rankErr) {
+      console.warn("[run-analyzer] tekkin rank calcolo fallito", rankErr);
+    }
 
     if (DEBUG_WAVEFORM_PIPELINE) {
       const bands = (updatePayload as any)?.waveform_bands;

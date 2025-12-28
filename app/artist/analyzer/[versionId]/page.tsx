@@ -7,6 +7,10 @@ import { createClient } from "@/utils/supabase/server";
 import TekkinAnalyzerPageClient from "@/components/analyzer/TekkinAnalyzerPageClient";
 import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersion";
 import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
+import { calculateTekkinVersionRankFromModel } from "@/lib/analyzer/tekkinVersionRank";
+import { computeModelMatch } from "@/lib/analyzer/modelMatch";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { AnalyzerPreviewData } from "@/lib/analyzer/previewAdapter";
 import type { AnalyzerCompareModel } from "@/lib/analyzer/v2/types";
 import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
@@ -215,6 +219,51 @@ export default async function Page({
     hasV2Model: !!v2Model,
     v2Keys: v2Model ? Object.keys(v2Model as any) : null,
   });
+
+  try {
+    v2Model.tekkinRank = calculateTekkinVersionRankFromModel(v2Model);
+  } catch (rankErr) {
+    console.warn("[ANALYZER PAGE] tekkin rank breakdown failed", rankErr);
+  }
+
+  try {
+    const metrics = {
+      bpm: v2Model.bpm,
+      integrated_lufs: v2Model.loudness?.integrated_lufs ?? null,
+      stereo_width: v2Model.stereoWidth ?? null,
+      spectral_centroid_hz: v2Model.spectral?.spectral_centroid_hz ?? null,
+      band_energy_norm: v2Model.bandsNorm ?? null,
+    };
+
+    const currentMatch = referenceModel ? computeModelMatch(metrics, referenceModel) : null;
+    const currentMatchRatio = currentMatch?.matchRatio ?? 0;
+
+    const modelsDir = path.join(process.cwd(), "reference_models_v3");
+    const files = await fs.readdir(modelsDir);
+    const profileKeys = files
+      .filter((name) => name.endsWith(".json") && name !== "index.json")
+      .map((name) => name.replace(/\.json$/, ""));
+
+    let best: { key: string; matchRatio: number } | null = null;
+
+    for (const key of profileKeys) {
+      const model = await loadReferenceModel(key);
+      if (!model) continue;
+      const match = computeModelMatch(metrics, model);
+      if (!match) continue;
+      if (!best || match.matchRatio > best.matchRatio) {
+        best = { key, matchRatio: match.matchRatio };
+      }
+    }
+
+    if (best && best.key !== v2Model.referenceName && best.matchRatio - currentMatchRatio >= 0.08) {
+      v2Model.suggestedReferenceKey = best.key;
+      v2Model.suggestedReferenceMatch = best.matchRatio;
+      v2Model.suggestedReferenceDelta = best.matchRatio - currentMatchRatio;
+    }
+  } catch (matchErr) {
+    console.warn("[ANALYZER PAGE] suggested reference calc failed", matchErr);
+  }
 
   // AUDIO URL RESOLUTION
   let resolvedAudioUrl: string | null = row.audio_url ?? null;

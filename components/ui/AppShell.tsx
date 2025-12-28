@@ -23,13 +23,16 @@ export default function AppShell({
     .filter(Boolean)
     .join(" ");
 
-  const widthClass = maxWidth === "full" ? "max-w-full" : "max-w-6xl";
+  const widthClass = maxWidth === "full" ? "w-full" : "max-w-6xl";
+  const paddingClasses = maxWidth === "full" ? "px-0 py-10" : "px-4 py-10 sm:px-6 lg:px-8";
 
   return (
     <div className={outerClasses}>
       <div
         className={[
-          "mx-auto flex w-full flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8",
+          "flex w-full flex-col gap-8",
+          paddingClasses,
+          maxWidth !== "full" ? "mx-auto" : "",
           widthClass,
           innerClassName,
         ]

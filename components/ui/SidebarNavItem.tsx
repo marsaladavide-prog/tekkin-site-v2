@@ -39,8 +39,18 @@ return (
     ].filter(Boolean).join(" ")}
     aria-current={active ? "page" : undefined}
   >
-    <Icon className={["h-5 w-5 shrink-0 transition", active ? "text-white" : "text-white/70"].join(" ")} aria-hidden />
-    <span className="min-w-0 flex-1 truncate">{label}</span>
+    <Icon
+      className={["h-5 w-5 shrink-0 transition", active ? "text-white" : "text-white/70"].join(" ")}
+      aria-hidden
+    />
+    <span
+      className={[
+        "min-w-0 flex-1",
+        rightSlot ? "leading-tight" : "truncate",
+      ].join(" ")}
+    >
+      {label}
+    </span>
     {rightSlot ? <span className="shrink-0">{rightSlot}</span> : null}
   </Link>
 );

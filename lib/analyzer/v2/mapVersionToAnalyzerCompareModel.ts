@@ -405,22 +405,35 @@ export function mapVersionToAnalyzerCompareModel(version: any, referenceModel?: 
   const referenceBandsNormFinal = referenceBandsNorm ?? referenceBandsFromModel;
 
 const spectralSrc = (arrays?.spectral && typeof arrays.spectral === "object") ? arrays.spectral : analyzer?.spectral;
+const spectralFromVersion = {
+  spectral_centroid_hz: pickNum(version, ["analyzer_spectral_centroid_hz"]) ?? null,
+  spectral_rolloff_hz: pickNum(version, ["analyzer_spectral_rolloff_hz"]) ?? null,
+  spectral_bandwidth_hz: pickNum(version, ["analyzer_spectral_bandwidth_hz"]) ?? null,
+  spectral_flatness: pickNum(version, ["analyzer_spectral_flatness"]) ?? null,
+  zero_crossing_rate:
+    pickNum(version, ["analyzer_zero_crossing_rate", "analyzer_spectral_zcr"]) ?? null,
+};
 
 const spectral: Spectral = {
   spectral_flatness:
     pickNum(spectralSrc, ["spectral_flatness", "flatness"]) ??
+    spectralFromVersion.spectral_flatness ??
     null,
   zero_crossing_rate:
     pickNum(spectralSrc, ["zero_crossing_rate", "zcr"]) ??
+    spectralFromVersion.zero_crossing_rate ??
     null,
   spectral_rolloff_hz:
     pickNum(spectralSrc, ["spectral_rolloff_hz", "rolloff_hz", "rolloffHz"]) ??
+    spectralFromVersion.spectral_rolloff_hz ??
     null,
   spectral_centroid_hz:
     pickNum(spectralSrc, ["spectral_centroid_hz", "centroid_hz", "centroidHz"]) ??
+    spectralFromVersion.spectral_centroid_hz ??
     null,
   spectral_bandwidth_hz:
     pickNum(spectralSrc, ["spectral_bandwidth_hz", "bandwidth_hz", "bandwidthHz"]) ??
+    spectralFromVersion.spectral_bandwidth_hz ??
     null,
 };
 

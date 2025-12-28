@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type ArtistProfileHeaderProps = {
@@ -31,6 +32,8 @@ export function ArtistProfileHeader({
   onSendMessage,
 }: ArtistProfileHeaderProps) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
+
   const geo = [mainGenreLabel, locationLabel].filter(Boolean).join(" · ");
 
   const handleSendMessage = () => {
@@ -40,6 +43,13 @@ export function ArtistProfileHeader({
     }
     router.push(`/artist/messages?with=${artistId}`);
   };
+
+  const iframeSrc = useMemo(() => {
+    const s = (spotifyUrl ?? "").trim();
+    // sicurezza: accetta solo embed
+    if (!s.startsWith("https://open.spotify.com/embed/")) return null;
+    return s;
+  }, [spotifyUrl]);
 
   return (
     <header className="text-center mb-5">
@@ -224,6 +234,40 @@ export function ArtistProfileHeader({
           )}
         </div>
       </div>
+
+      {open && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-3xl rounded-2xl overflow-hidden border border-white/10 bg-black">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <div className="text-sm text-white/80">Spotify</div>
+              <button
+                onClick={() => setOpen(false)}
+                className="text-xs text-white/60 hover:text-white"
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div className="bg-white">
+              {iframeSrc ? (
+                <iframe
+                  key={iframeSrc}
+                  src={iframeSrc}
+                  width="100%"
+                  height="480"
+                  frameBorder="0"
+                  loading="lazy"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                />
+              ) : (
+                <div className="h-[480px] flex items-center justify-center text-sm text-black/60">
+                  Anteprima non disponibile per questo link Spotify.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { calculateArtistRankFromMetrics } from "@/lib/tekkinRank/calcArtistRank";
+import { computeArtistRank } from "@/lib/tekkin/computeArtistRank";
 
 import { Artist, ArtistMetrics, ArtistRankView } from "@/types/tekkinRank";
 
@@ -74,6 +74,10 @@ export function useArtistRank() {
           (meta.avatar_url as string) ||
           null;
         const metaGenre = (meta.artist_genre as string) || null;
+        const metaSlug =
+          (meta.artist_slug as string) ||
+          (meta.slug as string) ||
+          null;
 
         const metaSpotifyFromLink =
           typeof meta.artist_link_source === "string" &&
@@ -85,7 +89,7 @@ export function useArtistRank() {
         const { data: artistRow, error: _artistErr } = await supabase
           .from("artists")
           .select(
-            "id,user_id,artist_name,artist_photo_url,avatar_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
+            "id,user_id,slug,artist_name,artist_photo_url,avatar_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
           )
           .eq("user_id", user.id)
           .maybeSingle();
@@ -143,6 +147,12 @@ export function useArtistRank() {
         const artistProfile: Artist = {
           id: artistRow?.id || user.id,
           user_id: artistRow?.user_id,
+          artist_slug:
+            artistRow?.slug ||
+            metaSlug ||
+            (localProfile.artist_slug as string | undefined) ||
+            (localProfile.slug as string | undefined) ||
+            null,
 
           artist_name:
             artistRow?.artist_name ||
@@ -270,19 +280,21 @@ export function useArtistRank() {
             toNumber(localProfile.analyzed_versions) ??
             toNumber(meta.analyzed_versions) ??
             0,
+          analysis_score_average: null,
+          analysis_score_best: null,
+          analysis_score_latest: null,
+          analysis_score_count: 0,
           collected_at: new Date().toISOString(),
         };
 
         console.log("tekkin_artist_profile local:", localProfile);
         console.log("metricsFromProfile:", metricsFromProfile);
 
-if (isMounted) {
-  const calculatedRank = calculateArtistRankFromMetrics(
-    metricsFromProfile
-  );
+        if (isMounted) {
+          const calculatedRank = computeArtistRank(metricsFromProfile);
 
-  setData({
-    artist: artistProfile,
+          setData({
+            artist: artistProfile,
     rank: calculatedRank,
     metrics: metricsFromProfile,
   });

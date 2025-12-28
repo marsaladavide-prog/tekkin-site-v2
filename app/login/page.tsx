@@ -2,13 +2,28 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import LoginForm from "./LoginForm";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ next?: string; redeem?: string }>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const next = sp.next;
+  const redeem = sp.redeem;
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (user) redirect("/artist");
+  if (user) {
+    const target = next
+      ? redeem
+        ? `${next}?redeem=${encodeURIComponent(redeem)}`
+        : next
+      : "/artist";
+    redirect(target);
+  }
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black px-4">

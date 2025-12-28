@@ -71,6 +71,14 @@ export function TekkinRankSection({
       })
     : null;
 
+  const analysisRuns = metrics?.analysis_score_count ?? 0;
+  const analysisHint =
+    analysisRuns > 0
+      ? analysisRuns === 1
+        ? "1 versione analizzata"
+        : `${analysisRuns} versioni analizzate`
+      : "Tekkin Analyzer";
+
   return (
     <section
       className={cn(
@@ -116,7 +124,7 @@ export function TekkinRankSection({
         </div>
 
         {/* Breakdown compatto */}
-        <div className="grid w-full grid-cols-2 gap-3 text-xs md:max-w-md md:grid-cols-4">
+        <div className="grid w-full grid-cols-2 gap-3 text-xs md:max-w-xl md:grid-cols-5">
           {/* Growth */}
           <MiniStatCard
             label="Growth"
@@ -157,6 +165,15 @@ export function TekkinRankSection({
             hint="versioni analizzate"
             score={rank.activity_score}
             max={15}
+          />
+
+          {/* Analyzer */}
+          <MiniStatCard
+            label="Analyzer"
+            value={rank.analysis_score}
+            hint={analysisHint}
+            score={rank.analysis_score}
+            max={100}
           />
         </div>
       </div>

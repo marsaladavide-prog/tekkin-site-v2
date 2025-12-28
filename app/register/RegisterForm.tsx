@@ -2,13 +2,21 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
 export default function RegisterForm() {
+  const sp = useSearchParams() ?? new URLSearchParams();
+  const next = sp.get("next") ?? "/pricing";
+  const redeemFromUrl = sp.get("redeem") ?? "";
+
   const [artistName, setArtistName] = useState("");
   const [email, setEmail] = useState("");
+  const [inviteCode, setInviteCode] = useState(redeemFromUrl);
+
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [signupComplete, setSignupComplete] = useState(false);
@@ -44,7 +52,11 @@ export default function RegisterForm() {
 
     try {
       const supabase = createClient();
-      const redirectTo = `${window.location.origin}/auth/callback`;
+
+      const code = inviteCode.trim().toUpperCase();
+      const redirectTo = code
+        ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}&redeem=${encodeURIComponent(code)}`
+        : `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
       const { data, error } = await supabase.auth.signUp({
         email: mail,
@@ -68,6 +80,11 @@ export default function RegisterForm() {
       setLoading(false);
     }
   }
+
+  const loginHref =
+    next || inviteCode
+      ? `/login?next=${encodeURIComponent(next)}&redeem=${encodeURIComponent(inviteCode.trim().toUpperCase())}`
+      : "/login";
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black px-4">
@@ -102,7 +119,7 @@ export default function RegisterForm() {
                   attivare il tuo account Tekkin Artist.
                 </p>
                 <p className="mt-2 text-[11px] text-emerald-100/70">
-                  Dopo il click verrai portato direttamente alla tua dashboard Artist.
+                  Dopo il click verrai portato alla pagina pricing. Se hai inserito un codice, verrà applicato automaticamente.
                 </p>
               </div>
 
@@ -127,7 +144,7 @@ export default function RegisterForm() {
                 <input
                   type="text"
                   value={artistName}
-                  onChange={(e) => setArtistName(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setArtistName(e.target.value)}
                   placeholder="Es. Davide Marsala"
                   className="w-full rounded-lg border border-[var(--border)] bg-black/60 px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/60 outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/70"
                 />
@@ -140,8 +157,21 @@ export default function RegisterForm() {
                 <input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                   placeholder="tuo@email.com"
+                  className="w-full rounded-lg border border-[var(--border)] bg-black/60 px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/60 outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/70"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-[var(--text-muted)]">
+                  Codice invito (opzionale)
+                </label>
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInviteCode(e.target.value)}
+                  placeholder="Es. FRIENDS"
                   className="w-full rounded-lg border border-[var(--border)] bg-black/60 px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/60 outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/70"
                 />
               </div>
@@ -154,7 +184,7 @@ export default function RegisterForm() {
                   <input
                     type="password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                     placeholder="Minimo 6 caratteri"
                     className="w-full rounded-lg border border-[var(--border)] bg-black/60 px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/60 outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/70"
                   />
@@ -166,7 +196,7 @@ export default function RegisterForm() {
                   <input
                     type="password"
                     value={passwordConfirm}
-                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPasswordConfirm(e.target.value)}
                     className="w-full rounded-lg border border-[var(--border)] bg-black/60 px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/60 outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/70"
                   />
                 </div>
@@ -188,10 +218,7 @@ export default function RegisterForm() {
 
               <div className="mt-4 flex items-center justify-between text-xs text-[var(--text-muted)]">
                 <span>Hai già un account</span>
-                <Link
-                  href="/login"
-                  className="font-medium text-[var(--accent)] hover:opacity-80"
-                >
+                <Link href={loginHref} className="font-medium text-[var(--accent)] hover:opacity-80">
                   Vai al login
                 </Link>
               </div>

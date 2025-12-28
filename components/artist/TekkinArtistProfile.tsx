@@ -19,6 +19,8 @@ export type TekkinArtistProfileProps = {
   };
   rank?: {
     overall?: number | null;
+    tekkin_score?: number | null;
+    level?: string | null;
   } | null;
 };
 
@@ -39,7 +41,7 @@ const TekkinArtistProfile: React.FC<TekkinArtistProfileProps> = ({
   } = artist;
 
   const genres = Array.isArray(main_genres) ? main_genres : [];
-  const tekkinRank = rank?.overall ?? null;
+  const tekkinRank = rank?.tekkin_score ?? rank?.overall ?? null;
 
   return (
     <section className="w-full overflow-hidden rounded-3xl border border-tekkin-border bg-tekkin-bg">
