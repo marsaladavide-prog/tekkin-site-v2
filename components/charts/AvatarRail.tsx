@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import SoftButton from "@/components/ui/SoftButton";
 
@@ -67,10 +68,12 @@ export default function AvatarRail({ title, subtitle, actionLabel, actionHref, i
             <div className="flex flex-col items-center gap-2 text-center">
               <div className={`relative h-16 w-16 overflow-hidden rounded-full bg-gradient-to-br ${color} to-[var(--panel)]`}>
                 {artist.avatarUrl ? (
-                  <img
+                  <Image
                     src={artist.avatarUrl}
                     alt={artist.name ?? "Tekkin artist"}
-                    className="h-full w-full object-cover"
+                    fill
+                    sizes="64px"
+                    className="object-cover"
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.3em] text-white">

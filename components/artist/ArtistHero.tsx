@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, type ElementType } from "react";
+import Image from "next/image";
 import { useArtistRank } from "./hooks/useArtistRank";
 
 type ArtistHeroProps = {
@@ -93,10 +94,13 @@ export function ArtistHero({ isDark, onToggleTheme }: ArtistHeroProps) {
         <div className="mt-6 flex flex-col items-center gap-4">
           <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border border-[#1f1f23] bg-[#0f0f10] text-2xl font-bold text-white shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
             {artistPhoto ? (
-              <img
+              <Image
                 src={artistPhoto}
                 alt={artistName}
+                width={96}
+                height={96}
                 className="h-full w-full object-cover"
+                priority
               />
             ) : (
               initials

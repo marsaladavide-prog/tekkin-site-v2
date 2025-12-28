@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import SpotifyEmbedModal from "@/components/SpotifyEmbedModal";
 
@@ -177,11 +178,13 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
                     >
                       <div className="relative rounded-xl overflow-hidden bg-black border border-[var(--border-color)]/90 shadow-md">
                         {rel.coverUrl ? (
-                          <div className="aspect-square overflow-hidden">
-                            <img
+                          <div className="relative aspect-square overflow-hidden">
+                            <Image
                               src={rel.coverUrl}
-                              alt={rel.title}
-                              className="h-full w-full object-cover"
+                              alt={rel.title ?? "Release"}
+                              fill
+                              sizes="150px"
+                              className="object-cover"
                             />
                           </div>
                         ) : (

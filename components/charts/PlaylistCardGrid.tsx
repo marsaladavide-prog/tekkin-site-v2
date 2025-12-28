@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { ReactNode } from "react";
 import SoftButton from "@/components/ui/SoftButton";
 
@@ -39,9 +40,15 @@ export default function PlaylistCardGrid(props: {
           {props.cards.map((c) => (
             <Link key={c.id} href={c.href} className="group">
               <div className="overflow-hidden rounded-2xl bg-black/15 ring-1 ring-white/10 transition group-hover:bg-black/25 group-hover:ring-white/15">
-                <div className="aspect-[16/9] bg-white/5">
+                <div className="relative aspect-[16/9] bg-white/5">
                   {c.image ? (
-                    <img src={c.image} alt={c.title} className="h-full w-full object-cover" loading="lazy" />
+                    <Image
+                      src={c.image}
+                      alt={c.title}
+                      fill
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      className="object-cover"
+                    />
                   ) : (
                     <div className="h-full w-full bg-[radial-gradient(600px_200px_at_50%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
                   )}

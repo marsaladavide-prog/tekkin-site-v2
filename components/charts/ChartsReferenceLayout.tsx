@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useMemo } from "react";
 import { Radio, Heart, ListMusic, Search, Settings2, Bell } from "lucide-react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
@@ -119,7 +120,13 @@ export default function ChartsReferenceLayout(props: {
                     >
                         <div className="h-[92px] w-[92px] overflow-hidden rounded-full bg-white/5 ring-1 ring-white/10 transition group-hover:ring-white/20">
                           {a.image ? (
-                            <img src={a.image} alt={a.name} className="h-full w-full object-cover" loading="lazy" />
+                            <Image
+                              src={a.image}
+                              alt={a.name}
+                              width={92}
+                              height={92}
+                              className="h-full w-full object-cover"
+                            />
                           ) : (
                             <AvatarFallback label="Artist" />
                           )}
@@ -153,13 +160,14 @@ export default function ChartsReferenceLayout(props: {
                           });
                         }}
                       >
-                        <div className="aspect-[4/3] overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10 transition group-hover:bg-white/[0.07] group-hover:ring-white/20">
+                        <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10 transition group-hover:bg-white/[0.07] group-hover:ring-white/20">
                           {r.cover_url ? (
-                            <img
+                            <Image
                               src={r.cover_url}
                               alt={r.track_title ?? "Tekkin track"}
-                              className="h-full w-full object-cover"
-                              loading="lazy"
+                              fill
+                              sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                              className="object-cover"
                             />
                           ) : (
                             <CoverFallback label="COVER" />
