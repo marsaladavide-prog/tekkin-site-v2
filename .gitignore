@@ -43,3 +43,5 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 references/
 *.rar
+build.log
+lint.log
