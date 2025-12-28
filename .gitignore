@@ -41,3 +41,9 @@ venv/
 # TypeScript build info
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+.tekkin-debug/
+eslint-report.json
+k_test_*
+lib/types/
+references/
+docs/Tekkin * Visione Prodotto.md
