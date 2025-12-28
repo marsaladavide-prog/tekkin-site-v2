@@ -2,6 +2,7 @@
   AnalyzerCompareModel,
   Bands,
   BandsPercentiles,
+  LevelMeter,
   SpectrumPoint,
   Spectral,
   Loudness,
@@ -21,7 +22,7 @@ function isString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function pick(obj: unknown, paths: string[]) {
+function pick(obj: unknown, paths: string[]): unknown {
   for (const p of paths) {
     let v: unknown = obj;
     for (const k of p.split(".")) {
@@ -362,19 +363,33 @@ function ensureNumArr(v: unknown): number[] {
   return v.filter(isNumber);
 }
 
+const LEVEL_LABELS = new Set<LevelMeter["label"]>(["L", "C", "R", "Ls", "Rs", "LFE"]);
+
+function isLevelLabel(v: unknown): v is LevelMeter["label"] {
+  return typeof v === "string" && LEVEL_LABELS.has(v as LevelMeter["label"]);
+}
+
 export function mapVersionToAnalyzerCompareModel(version: unknown, referenceModel?: unknown): AnalyzerCompareModel {
-  const versionRecord = isRecord(version) ? version : {};
-  const analyzerJson = versionRecord.analyzer_json;
-  const analyzer =
-    typeof analyzerJson === "string" ? safeJsonParse(analyzerJson) : analyzerJson;
-  const arrays = isRecord(versionRecord.analyzer_arrays) ? versionRecord.analyzer_arrays : null;
+  const versionRecord: Record<string, unknown> = isRecord(version)
+    ? version
+    : ({} as Record<string, unknown>);
+  const analyzer: Record<string, unknown> | null =
+    isRecord(versionRecord.analyzer_json)
+      ? (versionRecord.analyzer_json as Record<string, unknown>)
+      : null;
+  const arrays: Record<string, unknown> | null =
+    isRecord(pick(versionRecord, ["analyzer_arrays"]))
+      ? (pick(versionRecord, ["analyzer_arrays"]) as Record<string, unknown>)
+      : null;
 
   const trackBandsCandidate =
     versionRecord.analyzer_bands_norm ??
-    analyzer?.bands_norm ??
-    analyzer?.band_energy_norm ??
-    analyzer?.spectral?.band_norm ??
-    analyzer?.band_norm ??
+    pick(analyzer, [
+      "bands_norm",
+      "band_energy_norm",
+      "spectral.band_norm",
+      "band_norm",
+    ]) ??
     null;
 
   const referenceBandsCandidate =
@@ -383,8 +398,8 @@ export function mapVersionToAnalyzerCompareModel(version: unknown, referenceMode
     (isRecord(analyzer?.reference) ? analyzer.reference.bands_norm : null) ??
     null;
 
-  const momentaryLufs = ensureNumArr(arrays?.loudness_stats?.momentary_lufs);
-  const shortTermLufs = ensureNumArr(arrays?.loudness_stats?.short_term_lufs);
+  const momentaryLufs = ensureNumArr(pick(arrays, ["loudness_stats.momentary_lufs"]));
+  const shortTermLufs = ensureNumArr(pick(arrays, ["loudness_stats.short_term_lufs"]));
 
   const bandsNorm = sanitizeBands(trackBandsCandidate);
   const referenceBandsNorm = sanitizeBands(referenceBandsCandidate);
@@ -392,10 +407,18 @@ export function mapVersionToAnalyzerCompareModel(version: unknown, referenceMode
   const referenceRecord = isRecord(referenceModel) ? referenceModel : null;
   const refFeatures = referenceRecord?.features_percentiles ?? null;
   const refLoudness = referenceRecord?.loudness_percentiles ?? null;
-  const referenceLoudnessPercentiles = buildPercentileRange(refFeatures?.lufs ?? refLoudness?.integrated_lufs);
-  const referenceLraPercentiles = buildPercentileRange(refFeatures?.lra ?? refLoudness?.lra);
-  const referenceSamplePeakPercentiles = buildPercentileRange(refFeatures?.sample_peak_db ?? refLoudness?.sample_peak_db);
-  const referenceTruePeakPercentiles = buildPercentileRange(refFeatures?.true_peak_db ?? refLoudness?.true_peak_db);
+  const referenceLoudnessPercentiles = buildPercentileRange(
+    pick(referenceModel, ["features_percentiles.lufs", "loudness_percentiles.integrated_lufs"])
+  );
+  const referenceLraPercentiles = buildPercentileRange(
+    pick(referenceModel, ["features_percentiles.lra", "loudness_percentiles.lra"])
+  );
+  const referenceSamplePeakPercentiles = buildPercentileRange(
+    pick(referenceModel, ["features_percentiles.sample_peak_db", "loudness_percentiles.sample_peak_db"])
+  );
+  const referenceTruePeakPercentiles = buildPercentileRange(
+    pick(referenceModel, ["features_percentiles.true_peak_db", "loudness_percentiles.true_peak_db"])
+  );
   const referenceFeaturesPercentiles =
     referenceLoudnessPercentiles || referenceLraPercentiles || referenceSamplePeakPercentiles || referenceTruePeakPercentiles
       ? {
@@ -406,10 +429,13 @@ export function mapVersionToAnalyzerCompareModel(version: unknown, referenceMode
         }
       : null;
 
-  const referenceBandsFromModel = sanitizeBands(referenceRecord?.bands_norm ?? null);
+  const referenceBandsFromModel = sanitizeBands(pick(referenceModel, ["bands_norm"]));
   const referenceBandsNormFinal = referenceBandsNorm ?? referenceBandsFromModel;
 
-const spectralSrc = isRecord(arrays?.spectral) ? arrays.spectral : analyzer?.spectral;
+const spectralSrc =
+  pick(arrays, ["spectral"]) ??
+  pick(analyzer, ["spectral"]);
+
 const spectralFromVersion = {
   spectral_centroid_hz: pickNum(version, ["analyzer_spectral_centroid_hz"]) ?? null,
   spectral_rolloff_hz: pickNum(version, ["analyzer_spectral_rolloff_hz"]) ?? null,
@@ -474,36 +500,26 @@ const loudness: Loudness = {
 
 
   const bpm =
-    (typeof version?.analyzer_bpm === "number" ? version.analyzer_bpm : null) ??
-    pickNum(analyzer, ["bpm"]) ??
+    pickNum(versionRecord, ["analyzer_bpm"]) ??
+    pickNum(analyzer, ["bpm", "rhythm.bpm"]) ??
     null;
 
   const key =
-    (typeof version?.analyzer_key === "string" ? version.analyzer_key : null) ??
-    pickStr(analyzer, ["key"]) ??
+    pickStr(versionRecord, ["analyzer_key"]) ??
+    pickStr(analyzer, ["key", "rhythm.key"]) ??
     null;
 
   const model: AnalyzerCompareModel = {
-    projectTitle: version?.project?.title ?? "Untitled project",
-    versionName: version?.version_name ?? "Untitled version",
+    projectTitle: pickStr(versionRecord, ["project.0.title", "project.title"]) ?? "Untitled project",
+    versionName: pickStr(versionRecord, ["version_name"]) ?? "Untitled version",
     mixType: "MASTER",
-
-    bpm: bpm != null ? Math.round(bpm) : null,
+    bpm,
     key,
-    overallScore: typeof version?.overall_score === "number" ? version.overall_score : null,
-
+    overallScore: pickNum(versionRecord, ["overall_score"]),
+    referenceName: pickStr(versionRecord, ["reference_model_key"]),
     bandsNorm,
     spectral,
     loudness,
-
-    referenceName:
-      (typeof version?.reference_model_key === "string" && version.reference_model_key.trim()
-        ? version.reference_model_key.trim()
-        : null) ??
-      (typeof version?.analyzer_profile_key === "string" && version.analyzer_profile_key.trim()
-        ? version.analyzer_profile_key.trim()
-        : null) ??
-      null,
     referenceBandsNorm: referenceBandsNormFinal,
     referenceBandsPercentiles,
     referenceFeaturesPercentiles,
@@ -514,13 +530,11 @@ const loudness: Loudness = {
     referenceSpectralPercentiles: extractSpectralPercentiles(referenceModel),
     referenceSoundField: extractSoundFieldRef(referenceModel),
     referenceSoundFieldXY: extractSoundFieldXYRef(referenceModel),
-
     spectrumTrack: null,
     spectrumRef: referenceModel ? extractSpectrumRef(referenceModel) : null,
     soundField: null,
     levels: null,
     transients: null,
-
     momentaryLufs,
     shortTermLufs,
   };
@@ -611,38 +625,37 @@ const loudness: Loudness = {
 
   // levels -> levels
   if (isRecord(arrays?.levels)) {
-    const levels = arrays.levels;
-    if (Array.isArray(levels.channels) && Array.isArray(levels.rms_db) && Array.isArray(levels.peak_db)) {
-      const ch = levels.channels;
-      const rms = levels.rms_db;
-      const peak = levels.peak_db;
-      const out: { label: string; rmsDb: number; peakDb: number }[] = [];
-      for (let i = 0; i < Math.min(ch.length, rms.length, peak.length); i++) {
-        if (isString(ch[i]) && isNumber(rms[i]) && isNumber(peak[i])) {
-          out.push({ label: ch[i], rmsDb: rms[i], peakDb: peak[i] });
+    const levels = pick(arrays, ["levels"]);
+    if (isRecord(levels)) {
+      if (Array.isArray(levels.channels) && Array.isArray(levels.rms_db) && Array.isArray(levels.peak_db)) {
+        const ch = levels.channels;
+        const rms = levels.rms_db;
+        const peak = levels.peak_db;
+        const out: LevelMeter[] = [];
+        for (let i = 0; i < Math.min(ch.length, rms.length, peak.length); i++) {
+          if (isString(ch[i]) && isLevelLabel(ch[i]) && isNumber(rms[i]) && isNumber(peak[i])) {
+            out.push({ label: ch[i], rmsDb: rms[i], peakDb: peak[i] });
+          }
         }
+        model.levels = out.length ? out : null;
+      } else {
+        const rmsL = pickNum(levels, ["rms_db_l", "rmsDbL"]);
+        const rmsR = pickNum(levels, ["rms_db_r", "rmsDbR"]);
+        const peakL = pickNum(levels, ["peak_db_l", "peakDbL"]);
+        const peakR = pickNum(levels, ["peak_db_r", "peakDbR"]);
+        const out: LevelMeter[] = [];
+        if (isNumber(rmsL) && isNumber(peakL)) out.push({ label: "L", rmsDb: rmsL, peakDb: peakL });
+        if (isNumber(rmsR) && isNumber(peakR)) out.push({ label: "R", rmsDb: rmsR, peakDb: peakR });
+        model.levels = out.length ? out : null;
       }
-      model.levels = out.length ? out : null;
-    } else {
-      const rmsL = pickNum(levels, ["rms_db_l", "rmsDbL"]);
-      const rmsR = pickNum(levels, ["rms_db_r", "rmsDbR"]);
-      const peakL = pickNum(levels, ["peak_db_l", "peakDbL"]);
-      const peakR = pickNum(levels, ["peak_db_r", "peakDbR"]);
-      const out: { label: string; rmsDb: number; peakDb: number }[] = [];
-      if (isNumber(rmsL) && isNumber(peakL)) out.push({ label: "L", rmsDb: rmsL, peakDb: peakL });
-      if (isNumber(rmsR) && isNumber(peakR)) out.push({ label: "R", rmsDb: rmsR, peakDb: peakR });
-      model.levels = out.length ? out : null;
     }
   }
 
   // transients -> transients
   {
     const tCandidate =
-      (arrays?.transients && typeof arrays.transients === "object" ? arrays.transients : null) ??
-      (analyzer?.transients && typeof analyzer.transients === "object" ? analyzer.transients : null) ??
-      (analyzer?.arrays_blob?.transients && typeof analyzer.arrays_blob.transients === "object"
-        ? analyzer.arrays_blob.transients
-        : null) ??
+      pick(arrays, ["transients"]) ??
+      pick(analyzer, ["transients", "arrays_blob.transients", "analysis_pro.transients"]) ??
       null;
 
     if (isRecord(tCandidate)) {
@@ -727,33 +740,27 @@ const loudness: Loudness = {
 
   // extra (arrays.json)
   const extraCandidate =
-    (arrays?.extra && typeof arrays.extra === "object" ? arrays.extra : null) ??
-    (analyzer?.extra && typeof analyzer.extra === "object" ? analyzer.extra : null) ??
-    (analyzer?.analysis_pro?.extra && typeof analyzer.analysis_pro.extra === "object"
-      ? analyzer.analysis_pro.extra
-      : null) ??
+    pick(arrays, ["extra"]) ??
+    pick(analyzer, ["extra", "analysis_pro.extra"]) ??
     null;
 
   model.extra = {
     mfcc_mean: (() => {
       const m = ensureNumArr(
-        arrays?.mfcc_mean ??
-          extraCandidate?.mfcc_mean ??
-          extraCandidate?.mfcc?.mean ??
-          null
+        pick(arrays, ["mfcc_mean"]) ??
+        pick(extraCandidate, ["mfcc_mean", "mfcc.mean"]) ??
+        null
       );
       return m.length ? m : null;
     })(),
     hfc: pickNum(arrays, ["hfc"]) ?? pickNum(extraCandidate, ["hfc"]) ?? null,
     spectral_peaks_count:
       pickNum(arrays, ["spectral_peaks_count"]) ??
-      pickNum(extraCandidate, ["spectral_peaks_count"]) ??
-      pickNum(extraCandidate, ["spectral_peaks.count"]) ??
+      pickNum(extraCandidate, ["spectral_peaks_count", "spectral_peaks.count"]) ??
       null,
     spectral_peaks_energy:
       pickNum(arrays, ["spectral_peaks_energy"]) ??
-      pickNum(extraCandidate, ["spectral_peaks_energy"]) ??
-      pickNum(extraCandidate, ["spectral_peaks.energy"]) ??
+      pickNum(extraCandidate, ["spectral_peaks_energy", "spectral_peaks.energy"]) ??
       null,
   };
 

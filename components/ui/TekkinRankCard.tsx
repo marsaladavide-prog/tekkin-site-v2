@@ -1,3 +1,5 @@
+// app/v/[versionId]/page.tsx (o dove sta il tuo public version page)
+
 import { notFound } from "next/navigation";
 
 import AppShell from "@/components/ui/AppShell";
@@ -13,10 +15,10 @@ export const dynamic = "force-dynamic";
 const VERSION_FIELDS = `
   id,
   project_id,
-  visibility,
   version_name,
   audio_url,
   audio_path,
+  visibility,
   lufs,
   overall_score,
   analyzer_bpm,
@@ -33,23 +35,10 @@ const VERSION_FIELDS = `
   project:projects!inner(id,user_id,title,cover_url)
 `;
 
-type Props = {
-  params: Promise<{ versionId: string }>;
-};
+type PageProps = { params: { versionId: string } };
 
-type ProjectJoin = {
-  id?: string | null;
-  user_id?: string | null;
-  title?: string | null;
-  cover_url?: string | null;
-} | null;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === "object" && !Array.isArray(v);
-}
-
-export default async function PublicVersionPage({ params }: Props) {
-  const { versionId } = await params;
+export default async function PublicVersionPage({ params }: PageProps) {
+  const { versionId } = params;
 
   const supabase = createAdminClient();
 
@@ -61,19 +50,18 @@ export default async function PublicVersionPage({ params }: Props) {
 
   if (error || !row) notFound();
 
-  const visibility =
-    typeof (row as any)?.visibility === "string" ? ((row as any).visibility as string) : null;
+  const visibility = (row as any).visibility as string | null;
 
+  // segreto: accesso solo se è public o private_with_secret_link
   if (visibility !== "public" && visibility !== "private_with_secret_link") notFound();
 
-  const projectRaw = (row as any)?.project ?? null;
-  const project: ProjectJoin =
-    Array.isArray(projectRaw) ? ((projectRaw[0] ?? null) as any) : (projectRaw as any);
+  const project = (row as any).project as { title?: string | null; cover_url?: string | null } | null;
 
+  // arrays da bucket analyzer (usa service role)
   let parsedArrays: Record<string, unknown> | null = null;
 
   const arraysBlobPath =
-    typeof (row as any)?.arrays_blob_path === "string" ? ((row as any).arrays_blob_path as string) : null;
+    typeof (row as any).arrays_blob_path === "string" ? (row as any).arrays_blob_path : null;
 
   if (arraysBlobPath) {
     let arraysData: Blob | null = null;
@@ -88,30 +76,24 @@ export default async function PublicVersionPage({ params }: Props) {
 
     if (arraysData) {
       try {
-        const txt = await arraysData.text();
-        const json = JSON.parse(txt);
-        parsedArrays = isRecord(json) ? json : null;
+        parsedArrays = JSON.parse(await arraysData.text());
       } catch {
         parsedArrays = null;
       }
     }
   }
 
-  const analyzerJson = (row as any)?.analyzer_json;
-
   const profileKey =
-    (typeof (row as any)?.analyzer_profile_key === "string" && (row as any).analyzer_profile_key) ||
-    (isRecord(analyzerJson) && typeof analyzerJson.profile_key === "string" ? analyzerJson.profile_key : null);
+    (row as any).analyzer_profile_key ??
+    (typeof (row as any)?.analyzer_json === "object" && (row as any)?.analyzer_json
+      ? (row as any).analyzer_json.profile_key
+      : null);
 
   const reference = profileKey ? await loadReferenceModel(String(profileKey)) : null;
 
-  const directUrl =
-    typeof (row as any)?.audio_url === "string" && (row as any).audio_url ? ((row as any).audio_url as string) : null;
-
   const signedAudioUrl =
-    directUrl || (await signTrackUrl(supabase as any, (row as any)?.audio_path ?? null, 60 * 60));
-
-  if (!signedAudioUrl) notFound();
+    (typeof (row as any).audio_url === "string" && (row as any).audio_url) ||
+    (await signTrackUrl(supabase as any, (row as any).audio_path ?? null, 60 * 60));
 
   const title = project?.title ?? "Track";
 

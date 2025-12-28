@@ -185,11 +185,11 @@ export function mapChartsToUi(
     .sort((a, b) => a.rank_position - b.rank_position)
     .slice(0, 100)
     .map((r) => {
-      const record = isRecord(r) ? r : {};
+      const record: Record<string, unknown> = isRecord(r) ? r : ({} as Record<string, unknown>);
       return {
         ...r,
         likes: getNum(record, "likes") ?? 0,
-        liked: Boolean(record.liked),
+        liked: Boolean(record["liked"]),
       };
     });
 
@@ -198,11 +198,11 @@ export function mapChartsToUi(
     .sort((a, b) => a.rank_position - b.rank_position)
     .slice(0, 10)
     .map((r) => {
-      const record = isRecord(r) ? r : {};
+      const record: Record<string, unknown> = isRecord(r) ? r : ({} as Record<string, unknown>);
       return {
         ...r,
         likes: getNum(record, "likes") ?? 0,
-        liked: Boolean(record.liked),
+        liked: Boolean(record["liked"]),
       };
     });
 

@@ -1,5 +1,6 @@
 import type { AnalyzerPreviewData, Severity } from "@/lib/analyzer/previewAdapter";
 import { getAnalyzerAvailability } from "@/lib/analyzer/getAnalyzerAvailability";
+import type { GenreReference, StatPair, BandKey } from "@/lib/reference/types";
 
 // Tipo minimo: adattalo se la tua select ha più campi, ma questi bastano.
 export type ProjectVersionForAnalyzer = {
@@ -30,34 +31,25 @@ export type ProjectVersionForAnalyzer = {
   } | null;
 };
 
-type RefStats = {
-  mean?: number;
-  std?: number;
-};
-type RefPct = {
-  p10?: number;
-  p90?: number;
-};
-
-export type GenreReference = {
-  profile_key: string;
-  bands_norm_stats?: Record<string, RefStats>;
-  bands_norm_percentiles?: Record<string, { p10?: number; p90?: number }>;
-  features_stats?: Record<string, RefStats>;
-  features_percentiles?: Record<string, RefPct>;
-};
-
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
 
-function zScore(value: number | null, mean?: number, std?: number) {
+function zScore(
+  value: number | null,
+  mean: number | null | undefined,
+  std: number | null | undefined
+) {
   if (value == null) return null;
   if (mean == null || std == null || std === 0) return null;
   return (value - mean) / std;
 }
 
-function statusByPercentiles(value: number | null, p10?: number, p90?: number) {
+function statusByPercentiles(
+  value: number | null,
+  p10: number | null | undefined,
+  p90: number | null | undefined
+) {
   if (value == null) return "unknown" as const;
   if (p10 == null || p90 == null) return "unknown" as const;
   if (value < p10) return "low" as const;

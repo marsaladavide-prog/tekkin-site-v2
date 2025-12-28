@@ -108,7 +108,9 @@ export function toAnalyzerPreviewData(args: {
   trendSeries?: number[];
 }): AnalyzerPreviewData {
   const { analyzer, reference } = args;
-  const analyzerRecord = isRecord(analyzer) ? analyzer : {};
+  const analyzerRecord: Record<string, unknown> = isRecord(analyzer)
+    ? analyzer
+    : ({} as Record<string, unknown>);
 
   const bpm = n(analyzer.bpm) ?? 0;
   const key = safeKeyLabel(analyzer.key);

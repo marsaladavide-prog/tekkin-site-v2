@@ -89,22 +89,23 @@ export function TekkinRankExplanationCard({
   suggestedReferenceMatch,
   suggestedReferenceDelta,
 }: TekkinRankCardProps) {
-  const [openAdviceKey, setOpenAdviceKey] = useState<string | null>(null);
+const [openAdviceKey, setOpenAdviceKey] = useState<string | null>(null);
 
-  if (!rank) {
-    return (
-      <Card title="Tekkin Rank" subtitle="Cosa lo tiene sotto 100" className="h-full">
-        <div className="text-sm text-white/60">
-          Calcolo in corso o riferimento mancante. Riprova dopo un nuovo analyzer.
-        </div>
-      </Card>
-    );
-  }
+const precisionMap = useMemo(() => {
+  if (!rank) return new Map<TekkinVersionRankComponentKey, number | null>();
+  return new Map(rank.precisionBreakdown.map((entry) => [entry.key, entry.closeness]));
+}, [rank]);
 
-  const precisionMap = useMemo(
-    () => new Map(rank.precisionBreakdown.map((entry) => [entry.key, entry.closeness])),
-    [rank.precisionBreakdown]
+if (!rank) {
+  return (
+    <Card title="Tekkin Rank" subtitle="Cosa lo tiene sotto 100" className="h-full">
+      <div className="text-sm text-white/60">
+        Calcolo in corso o riferimento mancante. Riprova dopo un nuovo analyzer.
+      </div>
+    </Card>
   );
+}
+
 
   const issueCandidates = rank.components
     .map((component) => {

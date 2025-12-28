@@ -280,18 +280,21 @@ export async function getArtistDetail(artistId: string): Promise<ArtistDetailRes
     }
 
     const releases =
-      releasesRows
-        ?.map((row) => (isRecord(row) ? row : null))
-        .filter((row): row is Record<string, unknown> => Boolean(row))
-        .map((r) => ({
-          id: getStr(r, "id") ?? "",
-          title: getStr(r, "title") ?? "",
-          release_date: getStr(r, "release_date"),
-          cover_url: getStr(r, "cover_url"),
-          spotify_url: getStr(r, "spotify_url"),
-          album_type: getStr(r, "album_type"),
-          spotify_id: getStr(r, "spotify_id"),
-        })) ?? [];
+      releasesRows?.flatMap((row) => {
+        const r = isRecord(row) ? row : null;
+        if (!r) return [];
+        return [
+          {
+            id: getStr(r, "id") ?? "",
+            title: getStr(r, "title") ?? "",
+            release_date: getStr(r, "release_date"),
+            cover_url: getStr(r, "cover_url"),
+            spotify_url: getStr(r, "spotify_url"),
+            album_type: getStr(r, "album_type"),
+            spotify_id: getStr(r, "spotify_id"),
+          },
+        ];
+      }) ?? [];
 
     const total_releases = releasesRows?.length ?? 0;
 
