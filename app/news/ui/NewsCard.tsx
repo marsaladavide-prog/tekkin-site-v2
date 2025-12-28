@@ -79,7 +79,7 @@ export function NewsCard({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 text-sm font-medium underline-offset-4 hover:underline"
           >
-            Leggi l'articolo
+            Leggi l&apos;articolo
             <ExternalLink className="h-4 w-4" />
           </Link>
         </div>

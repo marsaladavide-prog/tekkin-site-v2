@@ -1,53 +1,56 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { GenreReference, BandKey } from "@/lib/reference/types";
+import type { GenreReference } from "@/lib/reference/types";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-function isBandKey(v: unknown): v is BandKey {
-  return (
-    v === "sub" ||
-    v === "low" ||
-    v === "lowmid" ||
-    v === "mid" ||
-    v === "presence" ||
-    v === "high" ||
-    v === "air"
-  );
-}
+function unwrap(parsed: unknown): unknown {
+  if (!isRecord(parsed)) return parsed;
 
-/**
- * Guard pragmatica:
- * controlliamo solo i campi che servono davvero a UI / analyzer.
- * Se questi esistono, il modello è utilizzabile.
- */
-function isGenreReference(v: unknown): v is GenreReference {
-  if (!isRecord(v)) return false;
+  const candidates = [
+    parsed,
+    isRecord(parsed.model) ? parsed.model : null,
+    isRecord(parsed.reference) ? parsed.reference : null,
+    isRecord(parsed.data) ? parsed.data : null,
+    isRecord(parsed.payload) ? parsed.payload : null,
+    isRecord(parsed.reference_model) ? parsed.reference_model : null,
+  ].filter(Boolean) as Record<string, unknown>[];
 
-  if (typeof v.profile_key !== "string") return false;
-  if (typeof v.sr !== "number") return false;
-  if (!Array.isArray(v.bands_schema)) return false;
+  // primo oggetto che sembra avere roba utile
+  for (const c of candidates) {
+    const hasBands =
+      isRecord(c.bands_norm_percentiles) || isRecord(c.bands_norm) || isRecord(c.bandsNorm);
+    const hasSpectrum =
+      isRecord(c.spectrum_db) || isRecord(c.spectrum_ref) || isRecord(c.spectrumDb) || isRecord(c.spectrumRef);
+    const hasStereo =
+      isRecord(c.stereo_percentiles) || isRecord(c.stereoPercentiles);
 
-  for (const b of v.bands_schema) {
-    if (!isRecord(b)) return false;
-    if (!isBandKey(b.key)) return false;
-    if (typeof b.fmin !== "number") return false;
-    if (typeof b.fmax !== "number") return false;
+    if (hasBands || hasSpectrum || hasStereo) return c;
   }
 
-  if (!isRecord(v.bands_norm_stats)) return false;
-  if (!isRecord(v.bands_norm_percentiles)) return false;
-
-  return true;
+  return parsed;
 }
 
-export async function loadReferenceModel(
-  profileKey: string
-): Promise<GenreReference | null> {
-  if (!profileKey || !profileKey.trim()) return null;
+function softLooksUsable(v: unknown): v is GenreReference {
+  if (!isRecord(v)) return false;
 
+  // NON richiedere tutto. Basta che ci sia almeno uno tra questi blocchi.
+  const hasBands =
+    isRecord(v.bands_norm_percentiles) || isRecord((v as any).bandsNormPercentiles) || isRecord((v as any).bands_norm);
+  const hasSpectrum =
+    isRecord((v as any).spectrum_db) || isRecord((v as any).spectrum_ref);
+  const hasFeatures =
+    isRecord((v as any).features_percentiles) || isRecord((v as any).loudness_percentiles);
+  const hasStereo =
+    isRecord((v as any).stereo_percentiles);
+
+  return hasBands || hasSpectrum || hasFeatures || hasStereo;
+}
+
+export async function loadReferenceModel(profileKey: string): Promise<GenreReference | null> {
+  if (!profileKey || !profileKey.trim()) return null;
   const clean = profileKey.trim();
 
   const candidates = [
@@ -59,17 +62,18 @@ export async function loadReferenceModel(
     try {
       const raw = await fs.readFile(p, "utf8");
       const parsed: unknown = JSON.parse(raw);
+      const model = unwrap(parsed);
 
-      if (!isGenreReference(parsed)) {
+      if (!softLooksUsable(model)) {
         if (process.env.NODE_ENV !== "production") {
-          console.warn(
-            `[loadReferenceModel] Invalid reference model shape: ${clean} (${p})`
-          );
+          console.warn(`[loadReferenceModel] Unusable reference model: ${clean} (${p})`, {
+            topKeys: isRecord(model) ? Object.keys(model) : null,
+          });
         }
-        return null;
+        continue; // IMPORTANT: prova l'altro path
       }
 
-      return parsed;
+      return model as GenreReference;
     } catch {
       // prova il prossimo path
     }

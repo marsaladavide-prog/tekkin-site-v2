@@ -1,6 +1,6 @@
 import type { AnalyzerPreviewData, Severity } from "@/lib/analyzer/previewAdapter";
 import { getAnalyzerAvailability } from "@/lib/analyzer/getAnalyzerAvailability";
-import type { GenreReference, StatPair, BandKey } from "@/lib/reference/types";
+import type { GenreReference } from "@/lib/reference/types";
 
 // Tipo minimo: adattalo se la tua select ha più campi, ma questi bastano.
 export type ProjectVersionForAnalyzer = {

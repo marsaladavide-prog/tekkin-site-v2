@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
-import { getSupabaseAdmin } from "@/app/api/artist/profile";
 import { notify } from "@/lib/notifications/notify";
 
 export const runtime = "nodejs";

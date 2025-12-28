@@ -38,9 +38,9 @@ export function ArtistSelection() {
                 <p className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
                   Minimal Groove 04
                 </p>
-                <p className="text-[11px] text-zinc-500 dark:text-tekkin-muted truncate">
-                  "The inspiration"
-                </p>
+	                <p className="text-[11px] text-zinc-500 dark:text-tekkin-muted truncate">
+	                  &quot;The inspiration&quot;
+	                </p>
               </div>
             </div>
 

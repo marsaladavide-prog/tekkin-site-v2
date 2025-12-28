@@ -35,14 +35,6 @@ function downsampleBeatTimes(times: number[] | null | undefined) {
 }
 
 export function RhythmCard({ bpm, keyName, rhythm, percentiles, descriptorsPercentiles, refState, className, bodyClassName }: RhythmCardProps) {
-  const descriptors = useMemo(() => {
-    if (!rhythm?.descriptors) return [];
-    return Object.entries(rhythm.descriptors)
-      .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6);
-  }, [rhythm]);
-
   const beatPositions = useMemo(() => {
     const beats = downsampleBeatTimes(rhythm?.beat_times);
     if (!beats.length) return [];

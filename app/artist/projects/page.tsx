@@ -9,10 +9,10 @@ import {
   useState,
   type ChangeEvent,
   type FormEvent,
-  type MouseEvent,
   type ReactNode,
 } from "react";
 import { Download, MoreVertical, Search, Send, Settings, Trash2 } from "lucide-react";
+import Image from "next/image";
 
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -190,7 +190,6 @@ export default function ProjectsPage() {
   const [signalFeedback, setSignalFeedback] = useState<string | null>(null);
   const [signalSending, setSignalSending] = useState(false);
   const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
-  const [visibilityError, setVisibilityError] = useState<string | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const [coverTargetProjectId, setCoverTargetProjectId] = useState<string | null>(null);
   const [coverUploadingProjectId, setCoverUploadingProjectId] = useState<string | null>(null);
@@ -268,29 +267,7 @@ export default function ProjectsPage() {
           }
         }
 
-        const { data, error } = selectResult;
-
-        if (error) {
-          const e = error as unknown;
-
-          const asErr = e instanceof Error ? e : null;
-          const asObj = e && typeof e === "object" ? (e as Record<string, unknown>) : null;
-
-          console.error("Supabase load projects error:", {
-            name: asErr?.name ?? (asObj?.["name"] as string | undefined),
-            message: asErr?.message ?? (asObj?.["message"] as string | undefined),
-            stack: asErr?.stack,
-            code: asObj?.["code"],
-            details: asObj?.["details"],
-            hint: asObj?.["hint"],
-            status: asObj?.["status"],
-            statusText: asObj?.["statusText"],
-            raw: e,
-          });
-
-          return;
-        }
-
+        const { data } = selectResult;
 
         const mapped = await Promise.all(
           (data ?? []).map(async (p: any) => {
@@ -654,6 +631,8 @@ export default function ProjectsPage() {
     }, 1500);
   }, []);
 
+  const [, setVisibilityError] = useState<string | null>(null);
+
   async function handleSetVisibility(
   projectId: string,
   visibility: "public" | "private_with_secret_link"
@@ -669,12 +648,8 @@ export default function ProjectsPage() {
 
     if (!res.ok) {
       const msg = payload?.error ?? "Impossibile aggiornare la visibilità.";
-
-      // QUI: mostra toast o setti stato errore UI
-      // esempio generico:
-      // toast.error(msg);
-
-      setVisibilityError?.(msg); // se hai uno state, altrimenti rimuovi questa riga
+      console.error("[projects] set-visibility failed:", msg);
+      setVisibilityError(msg);
       return;
     }
 
@@ -696,6 +671,9 @@ export default function ProjectsPage() {
         return { ...proj, versions: nextVersions };
       })
     );
+
+    // Optionally, reset on success
+    setVisibilityError(null);
   } catch (err) {
     console.error("Set visibility error:", err);
     const msg = err instanceof Error ? err.message : "Errore inatteso aggiornando la visibilità.";
@@ -935,9 +913,6 @@ export default function ProjectsPage() {
               latestVersion?.visibility === "public" ? "public" : "private_with_secret_link";
             const isPublishable =
               latestVersion?.overall_score != null && (!!latestVersion.audio_path || !!latestVersion.audio_url);
-            const latestVersionHref = latestVersion
-              ? `/artist/projects/${p.id}?version_id=${latestVersion.id}`
-              : `/artist/projects/${p.id}`;
             const canSignal = hasPreviewAudio;
 
             const settingsMenuItems: MenuItem[] = [
@@ -997,18 +972,20 @@ export default function ProjectsPage() {
                           setCoverMenuProjectId(p.id);
                         }}
                       >
-                        {p.cover_url ? (
-                          <img
-                            src={p.cover_url}
-                            alt={`Cover ${p.title}`}
-                            className="h-full w-full object-cover transition-all duration-300 hover:brightness-110"
-                          />
-                        ) : (
-                          <div className="grid h-full w-full place-items-center text-white/60 text-xs transition-all duration-300 hover:text-white/85">
-                            <span>Cover</span>
-                            <span>mancante</span>
-                          </div>
-                        )}
+{p.cover_url ? (
+  <>
+    <Image
+      src={p.cover_url}
+      alt={`Cover ${p.title}`}
+      width={512}
+      height={512}
+      className="h-32 w-32 rounded-lg border border-white/20 object-cover"
+      unoptimized
+    />
+  </>
+) : (
+  <div className="h-full w-full bg-white/5" />
+)}
                       </div>
                       {coverUploadingProjectId === p.id && (
                         <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/60 text-[10px] uppercase tracking-[0.4em] text-white/80">
@@ -1481,7 +1458,16 @@ export default function ProjectsPage() {
       {coverPreviewUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 px-4">
           <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-white/10 bg-black/80 p-6 shadow-xl">
-            <img src={coverPreviewUrl} alt="Anteprima cover" className="h-[70vh] w-full object-contain" />
+            <div className="relative h-[70vh] w-full">
+              <Image
+                src={coverPreviewUrl}
+                alt="Anteprima cover"
+                fill
+                sizes="100vw"
+                className="object-contain"
+                unoptimized
+              />
+            </div>
             <button
               type="button"
               onClick={() => setCoverPreviewUrl(null)}

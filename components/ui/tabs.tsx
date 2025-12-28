@@ -42,7 +42,7 @@ export function Tabs({
 }
 
 export function TabsList({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("inline-flex items-center gap-1", className)} {...props} />;
+  return <div role="tablist" className={cn("inline-flex items-center gap-1", className)} {...props} />;
 }
 
 export function TabsTrigger({
@@ -59,6 +59,7 @@ export function TabsTrigger({
     <button
       type="button"
       onClick={() => ctx.setValue(value)}
+      role="tab"
       className={cn(
         "px-3 py-1.5 text-sm transition",
         active ? "bg-white/10 text-white" : "text-white/70 hover:text-white",

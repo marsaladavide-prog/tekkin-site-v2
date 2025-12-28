@@ -10,7 +10,14 @@ import { createClient } from "@/utils/supabase/client";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import { TEKKIN_MIX_TYPES, type TekkinMixType, type TekkinGenreId, getTekkinGenreLabel } from "@/lib/constants/genres";
 import { uploadProjectCover, MAX_COVER_SIZE_BYTES } from "@/lib/projects/uploadCover";
-import type { AnalyzerMetricsFields, AnalyzerRunResponse, AnalyzerResult, FixSuggestion, ReferenceAi, AnalyzerAiAction, AnalyzerAiCoach, AnalyzerAiMeta } from "@/types/analyzer";
+import type {
+  AnalyzerMetricsFields,
+  AnalyzerRunResponse,
+  AnalyzerResult,
+  ReferenceAi,
+  AnalyzerAiAction,
+  AnalyzerAiMeta,
+} from "@/types/analyzer";
 import type { WaveformBands } from "@/types/analyzer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 
@@ -130,8 +137,6 @@ export default function ProjectDetailPage() {
   const [analyzerStatus, setAnalyzerStatus] = useState<AnalyzerStatus>("idle");
 
   const [audioPreviewByVersionId, setAudioPreviewByVersionId] = useState<Record<string, string | null>>({});
-  const [fixSuggestionsByVersion, setFixSuggestionsByVersion] = useState<Record<string, FixSuggestion[] | null>>({});
-  const [aiByVersion, setAiByVersion] = useState<Record<string, AnalyzerAiCoach | null>>({});
   const [confirmDeleteVersion, setConfirmDeleteVersion] = useState<ProjectVersionRow | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
   const [deleteVersionError, setDeleteVersionError] = useState<string | null>(null);
@@ -511,12 +516,8 @@ const path = rawPath;
       }
 
       setAnalyzerStatus("analyzing");
-      const runData = (await res.json().catch(() => null)) as AnalyzerRunResponse | null;
-
-      setFixSuggestionsByVersion((prev) => ({
-        ...prev,
-        [versionId]: runData?.analyzer_result?.fix_suggestions ?? null,
-      }));
+      const _runData = (await res.json().catch(() => null)) as AnalyzerRunResponse | null;
+      void _runData;
 
       setAnalyzerStatus("saving");
       await loadProject();
@@ -963,7 +964,7 @@ const path = rawPath;
               Elimina {confirmDeleteVersion.version_name ?? "versione"}
             </p>
             <p className="mt-2 text-xs text-white/70">
-              L'operazione rimuove definitivamente la versione e i file associati dal project.
+              L&apos;operazione rimuove definitivamente la versione e i file associati dal project.
             </p>
 
             {deleteVersionError && <p className="mt-2 text-xs text-red-300">{deleteVersionError}</p>}

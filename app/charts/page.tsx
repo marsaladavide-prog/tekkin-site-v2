@@ -30,14 +30,6 @@ type PeriodRow = {
   period_end: string | null;
 };
 
-const PROFILE_COLUMNS = `
-  user_id,
-  artist_name,
-  avatar_url,
-  photo_url,
-  spotify_url
-`;
-
 export default async function ChartsPageRoute() {
   const supabase = await createClient();
 

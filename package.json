@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "concurrently \"npm run dev:next\" \"npm run dev:analyzer\"",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "dev:next": "next dev --turbopack",
-    "dev:analyzer": "docker run --rm --env-file .env.local -p 8000:8000 -e TEKKIN_ANALYZER_DEBUG=1 -v \"%cd%\":/app -w /app tekkin-analyzer python -m uvicorn tekkin_analyzer_api:app --host 0.0.0.0 --port 8000"
-  },
+"scripts": {
+  "dev": "concurrently \"npm run dev:next\" \"npm run dev:analyzer\"",
+  "build": "next build",
+  "start": "next start",
+  "lint": "eslint .",
+  "lint:fix": "eslint . --fix",
+  "dev:next": "next dev --turbopack",
+  "dev:analyzer": "docker run --rm --env-file .env.local -p 8000:8000 -e TEKKIN_ANALYZER_DEBUG=1 -v \"%cd%\":/app -w /app tekkin-analyzer python -m uvicorn tekkin_analyzer_api:app --host 0.0.0.0 --port 8000"
+}
+,
   "dependencies": {
     "@lottiefiles/react-lottie-player": "^3.4.0",
     "@supabase/auth-helpers-nextjs": "^0.10.0",

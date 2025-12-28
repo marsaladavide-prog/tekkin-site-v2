@@ -6,7 +6,7 @@ import { computeArtistRank } from "@/lib/tekkin/computeArtistRank";
 
 import { Artist, ArtistMetrics, ArtistRankView } from "@/types/tekkinRank";
 
-function toNumber(value: any): number | null {
+function toNumber(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -17,7 +17,7 @@ export function useArtistRank() {
   const [error, setError] = useState<string | null>(null);
 
   // profilo salvato da /register in localStorage
-  const [localProfile] = useState<Record<string, any>>(() => {
+  const [localProfile] = useState<Record<string, unknown>>(() => {
     if (typeof window === "undefined") return {};
     try {
       const raw = localStorage.getItem("tekkin_artist_profile");

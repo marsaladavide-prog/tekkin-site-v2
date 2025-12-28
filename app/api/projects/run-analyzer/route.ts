@@ -5,6 +5,7 @@ import { buildAnalyzerUpdatePayload } from "@/lib/analyzer/handleAnalyzerResult"
 import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
 import { calculateTekkinVersionRankFromModel } from "@/lib/analyzer/tekkinVersionRank";
 import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
+import { isRecord, JsonObject } from "@/lib/types/json";
 
 export const runtime = "nodejs";
 
@@ -25,15 +26,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
     }
 
-    const requestBody = await req.json().catch(() => null);
+    const body = (await req.json()) as unknown;
+    if (!isRecord(body)) {
+      return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+    }
+
     const versionId =
-      typeof requestBody?.version_id === "string" && requestBody.version_id.trim()
-        ? requestBody.version_id.trim()
+      typeof body.version_id === "string" && body.version_id.trim()
+        ? body.version_id.trim()
         : null;
 
     const analyzerVersion =
-      typeof requestBody?.analyzer_version === "string" && requestBody.analyzer_version.trim()
-        ? requestBody.analyzer_version.trim()
+      typeof body.analyzer_version === "string" && body.analyzer_version.trim()
+        ? body.analyzer_version.trim()
         : "v3";
 
     if (!versionId) {
@@ -175,111 +180,29 @@ if (!audioUrl && audioPath) {
 
         console.log("[run-analyzer] raw saved ->", outPath);
       }
-    } catch (e) {
-      console.log("[run-analyzer] raw save failed ->", e);
+    } catch (_e) {
+      console.log("[run-analyzer] raw save failed ->", _e);
     }
 
-    let data: any = null;
+    let data: unknown = null;
     try {
       data = JSON.parse(raw);
-    } catch {
+    } catch (_e) {
       console.error("[run-analyzer] response not json");
       return NextResponse.json({ error: "Analyzer returned non-JSON" }, { status: 502 });
     }
 
-    const rhy =
-      (data as any)?.blocks?.rhythm?.data &&
-      typeof (data as any).blocks.rhythm.data === "object"
-        ? (data as any).blocks.rhythm.data
-        : null;
-
-    console.log("[run-analyzer] analyzer keys ->", {
-      analyzer_version_sent: analyzerVersion ?? null,
-      has_peaks: Array.isArray(data?.waveform_peaks),
-      peaks_len: Array.isArray(data?.waveform_peaks) ? data.waveform_peaks.length : null,
-      dur: typeof data?.waveform_duration === "number" ? data.waveform_duration : null,
-    });
-
-    if (DEBUG_WAVEFORM_PIPELINE) {
-      const analyzerBands = data?.waveform_bands;
-      console.log("[run-analyzer] waveform payload ->", {
-        peaksType: typeof data?.waveform_peaks,
-        peaksLen: Array.isArray(data?.waveform_peaks) ? data.waveform_peaks.length : null,
-        durationType: typeof data?.waveform_duration,
-        durationValue: data?.waveform_duration ?? null,
-        bandsKeys:
-          analyzerBands && typeof analyzerBands === "object"
-            ? Object.keys(analyzerBands)
-            : null,
-      });
+    if (!isRecord(data)) {
+      console.error("[run-analyzer] analyzer returned non-object JSON");
+      return NextResponse.json({ error: "Analyzer returned invalid JSON" }, { status: 502 });
     }
 
-    logAnalyzerSummary("run-analyzer", data);
-const matchRatio =
-  typeof (data as any)?.model_match?.match_ratio === "number" &&
-  Number.isFinite((data as any).model_match.match_ratio)
-    ? (data as any).model_match.match_ratio
-    : null;
-
-const modelMatchPercent = matchRatio == null ? null : Math.round(matchRatio * 100);
-
-    console.log("[run-analyzer] brief ->", {
-  bpm: (data as any)?.bpm ?? rhy?.bpm ?? null,
-  key: (data as any)?.key ?? rhy?.key ?? null,
-  lufs:
-    (data as any)?.loudness_stats?.integrated_lufs ??
-    (data as any)?.blocks?.loudness?.data?.integrated_lufs ??
-    null,
-  lra:
-    (data as any)?.loudness_stats?.lra ??
-    (data as any)?.blocks?.loudness?.data?.lra ??
-    null,
-  sample_peak_db:
-    (data as any)?.loudness_stats?.sample_peak_db ??
-    (data as any)?.blocks?.loudness?.data?.sample_peak_db ??
-    null,
-
-  has_band_norm: (() => {
-    const v3Bands = (data as any)?.blocks?.timbre_spectrum?.data?.bands_norm;
-    const legacyBands = (data as any)?.band_energy_norm;
-
-    const okV3 =
-      v3Bands && typeof v3Bands === "object" && Object.keys(v3Bands).length > 0;
-
-    const okLegacy =
-      legacyBands && typeof legacyBands === "object" && Object.keys(legacyBands).length > 0;
-
-    return okV3 || okLegacy;
-  })(),
-
-  model_match_percent: modelMatchPercent,
-  arrays_blob_path: (data as any)?.arrays_blob_path ?? null,
-  arrays_blob_size_bytes: (data as any)?.arrays_blob_size_bytes ?? null,
-});
-
-
-    if (DEBUG_ANALYZER_DEEP) {
-      const arrays = (data as any)?.arrays_blob ?? null;
-      if (arrays && typeof arrays === "object") {
-        console.log("[run-analyzer] arrays_blob keys", Object.keys(arrays));
-      }
-    }
-
-    if (!res.ok) {
-      console.error("[run-analyzer] Analyzer error:", res.status);
-      return NextResponse.json(
-        { error: "Errore dall'Analyzer", detail: raw || null },
-        { status: 502 }
-      );
-    }
-
-    // Se l'analyzer risponde già in v3, il mapper si arrangia col tuo adapter.
-    // Quindi non castiamo aggressivo.
-    const result = data as any;
-
-
-    // 4) Mapping centralizzato
+    const result = data as JsonObject;
     const updatePayload = buildAnalyzerUpdatePayload(result);
+    if (DEBUG_ANALYZER_DEEP) {
+  logAnalyzerSummary("run-analyzer", result);
+}
+
 
     console.log("[run-analyzer] update payload keys ->", Object.keys(updatePayload));
 console.log("[run-analyzer] update payload preview ->", {
@@ -288,6 +211,21 @@ console.log("[run-analyzer] update payload preview ->", {
   analyzer_key: (updatePayload as any).analyzer_key ?? null,
   arrays_blob_path: (updatePayload as any).arrays_blob_path ?? null,
 });
+const arraysPath =
+  (result as any)?.arrays_blob_path ??
+  (updatePayload as any)?.arrays_blob_path ??
+  null;
+
+let arraysJson: Record<string, unknown> | null = null;
+
+if (typeof arraysPath === "string" && arraysPath.length > 0) {
+  const dl = await downloadJsonWithServiceRole("tracks", arraysPath);
+  if (!dl.error && dl.json && isRecord(dl.json)) {
+    const existing = dl.json as Record<string, unknown>;
+    const patch = buildArraysBlobPatched(result);
+    arraysJson = { ...existing, ...patch };
+  }
+}
 
     try {
       const referenceModel = await loadReferenceModel(profileKey);
@@ -298,7 +236,7 @@ console.log("[run-analyzer] update payload preview ->", {
         project: { id: project.id, title: project.title ?? "Untitled project" },
         version_name: version.version_name,
         mix_type: version.mix_type,
-        analyzer_arrays: null,
+        analyzer_arrays: arraysJson,
         analyzer_profile_key: profileKey,
         reference_model_key: profileKey,
       };
@@ -327,57 +265,53 @@ console.log("[run-analyzer] update payload preview ->", {
 
     // PATCH arrays: genero arrays_view.json (leggero) senza toccare arrays.json
     try {
-      const arraysPath =
-        (result as any)?.arrays_blob_path ??
-        (updatePayload as any)?.arrays_blob_path ??
-        null;
-
       if (typeof arraysPath === "string" && arraysPath.length > 0) {
-        // 1) Scarico arrays.json esistente (quello vero)
-        const dl = await downloadJsonWithServiceRole("tracks", arraysPath);
+        const existing = arraysJson;
 
-      if (dl.error || !dl.json || typeof dl.json !== "object") {
-        console.log("[run-analyzer] arrays_view skipped -> cannot download/parse arrays.json", {
-          path: arraysPath,
-          err: dl.error?.message ?? String(dl.error),
-        });
-      } else {
-        const existing = dl.json as Record<string, any>;
-        console.log("[run-analyzer] arrays blob has fields", Object.keys(existing));
-        if ("sound_field" in existing) {
-          console.log("[run-analyzer] arrays blob sound_field sample", (existing as any).sound_field?.slice?.(0, 5) ?? null);
-        }
-        if ("sound_field_ref" in existing) {
-          console.log("[run-analyzer] arrays blob sound_field_ref sample", (existing as any).sound_field_ref?.angle_deg?.slice?.(0, 5) ?? null);
-        }
-
-        const patch = buildArraysBlobPatched(result);
-        const merged = { ...existing, ...patch };
-        const view = buildArraysView(merged);
-
-        const viewPath = arraysPath.endsWith("/arrays.json")
-  ? arraysPath.replace(/\/arrays\.json$/, "/arrays_view.json")
-  : `${arraysPath.replace(/\/+$/, "")}_view.json`;
-
-        const up = await uploadJsonWithServiceRole("tracks", viewPath, view);
-
-        if (up.error) {
-          console.log("[run-analyzer] arrays_view upload FAILED ->", {
-            path: viewPath,
-            err: up.error.message ?? String(up.error),
+        if (!existing || typeof existing !== "object") {
+          console.log("[run-analyzer] arrays_view skipped -> arrays.json missing/unreadable", {
+            path: arraysPath,
           });
         } else {
-          console.log("[run-analyzer] arrays_view upload OK ->", {
-            path: viewPath,
-            bytes: up.bytes,
-          });
+          console.log("[run-analyzer] arrays blob has fields", Object.keys(existing));
+          if ("sound_field" in existing) {
+            console.log(
+              "[run-analyzer] arrays blob sound_field sample",
+              (existing as any).sound_field?.slice?.(0, 5) ?? null
+            );
+          }
+          if ("sound_field_ref" in existing) {
+            console.log(
+              "[run-analyzer] arrays blob sound_field_ref sample",
+              (existing as any).sound_field_ref?.angle_deg?.slice?.(0, 5) ?? null
+            );
+          }
+
+          const view = buildArraysView(existing);
+
+          const viewPath = arraysPath.endsWith("/arrays.json")
+            ? arraysPath.replace(/\/arrays\.json$/, "/arrays_view.json")
+            : `${arraysPath.replace(/\/+$/, "")}_view.json`;
+
+          const up = await uploadJsonWithServiceRole("tracks", viewPath, view);
+
+          if (up.error) {
+            console.log("[run-analyzer] arrays_view upload FAILED ->", {
+              path: viewPath,
+              err: up.error.message ?? String(up.error),
+            });
+          } else {
+            console.log("[run-analyzer] arrays_view upload OK ->", {
+              path: viewPath,
+              bytes: up.bytes,
+            });
+          }
         }
-      }
       } else {
         console.log("[run-analyzer] arrays_view skipped -> arrays_blob_path missing");
       }
-    } catch (e: any) {
-      console.log("[run-analyzer] arrays_view exception ->", e?.message ?? e);
+    } catch (_e: unknown) {
+      console.log("[run-analyzer] arrays_view exception ->", _e);
     }
 
     // fallback se analyzer_key non esiste nel DB
@@ -400,9 +334,9 @@ console.log("[run-analyzer] update payload preview ->", {
       return rest as typeof updatePayload;
     })();
 
-    const hasAnalyzerKeyError = (error: any) => {
+    const hasAnalyzerKeyError = (error: unknown) => {
       if (!error) return false;
-      const message = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+      const message = `${(error as any)?.message ?? ""} ${(error as any)?.details ?? ""}`.toLowerCase();
       return message.includes("analyzer_key");
     };
 
@@ -456,7 +390,7 @@ console.log("[run-analyzer] update payload preview ->", {
     let updateResult = await updateVersion(includeKey, includeArrays);
 
     while (updateResult.error) {
-      const message = `${updateResult.error.message ?? ""} ${updateResult.error.details ?? ""}`.toLowerCase();
+      const message = `${updateResult.error?.message ?? ""} ${updateResult.error?.details ?? ""}`.toLowerCase();
       let retried = false;
 
       if (
@@ -527,7 +461,7 @@ if (DEBUG_WAVEFORM_PIPELINE) {
       { status: 200 }
     );
 
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Unexpected run-analyzer error:", err);
     return NextResponse.json({ error: "Errore inatteso Analyzer" }, { status: 500 });
   }
@@ -572,13 +506,13 @@ async function uploadJsonWithServiceRole(bucket: string, path: string, json: any
 async function downloadJsonWithServiceRole(bucket: string, path: string) {
   const admin = getAdmin();
   const { data, error } = await admin.storage.from(bucket).download(path);
-  if (error || !data) return { error, json: null as any };
+  if (error || !data) return { error, json: null as unknown };
 
   const text = await data.text();
   try {
-    return { error: null, json: JSON.parse(text) };
-  } catch (e: any) {
-    return { error: new Error("Invalid JSON in arrays blob"), json: null as any };
+    return { error: null, json: JSON.parse(text) as unknown };
+  } catch (_e: unknown) {
+    return { error: new Error("Invalid JSON in arrays blob"), json: null as unknown };
   }
 }
 

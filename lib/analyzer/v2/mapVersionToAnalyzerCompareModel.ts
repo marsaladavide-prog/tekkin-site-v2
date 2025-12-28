@@ -308,7 +308,7 @@ function pickSpectrumDb(obj: unknown): { hz: unknown; db: unknown } | null {
   return null;
 }
 
-function safeJsonParse(v: string) {
+function _safeJsonParse(v: string) {
   try {
     return JSON.parse(v);
   } catch {
@@ -404,9 +404,6 @@ export function mapVersionToAnalyzerCompareModel(version: unknown, referenceMode
   const bandsNorm = sanitizeBands(trackBandsCandidate);
   const referenceBandsNorm = sanitizeBands(referenceBandsCandidate);
   const referenceBandsPercentiles = extractBandsPercentiles(referenceModel);
-  const referenceRecord = isRecord(referenceModel) ? referenceModel : null;
-  const refFeatures = referenceRecord?.features_percentiles ?? null;
-  const refLoudness = referenceRecord?.loudness_percentiles ?? null;
   const referenceLoudnessPercentiles = buildPercentileRange(
     pick(referenceModel, ["features_percentiles.lufs", "loudness_percentiles.integrated_lufs"])
   );

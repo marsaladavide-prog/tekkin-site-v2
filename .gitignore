@@ -45,3 +45,11 @@ references/
 *.rar
 build.log
 lint.log
+# Tekkin debug
+.tekkin-debug/
+eslint-report.json
+k_test_*
+
+# Local experiments
+lib/types/
+docs/Tekkin * Visione Prodotto.md

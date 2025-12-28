@@ -156,8 +156,8 @@ function ImpactStatsBoard({ data }: { data: AnalyzerPreviewData }) {
                 {formatInt(data.rank.thisSeason)}
               </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
-              <div className="text-xs text-white/50">Quest'anno</div>
+	            <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+	              <div className="text-xs text-white/50">Quest&apos;anno</div>
               <div className="mt-1 text-lg font-semibold">
                 {formatInt(data.rank.thisYear)}
               </div>

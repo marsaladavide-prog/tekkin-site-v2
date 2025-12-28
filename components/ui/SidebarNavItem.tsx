@@ -21,37 +21,29 @@ export default function SidebarNavItem({
   nested = false,
   rightSlot,
 }: SidebarNavItemProps) {
-  const baseClasses = [
-    "flex items-center gap-3 rounded-full px-3 py-2 text-sm font-semibold transition",
-    nested ? "ml-4" : "",
-    active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-return (
-  <Link
-    href={href}
-    className={[
-      "flex w-full items-center gap-3 rounded-full px-3 py-2 text-sm font-semibold transition",
-      nested ? "ml-4" : "",
-      active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
-    ].filter(Boolean).join(" ")}
-    aria-current={active ? "page" : undefined}
-  >
-    <Icon
-      className={["h-5 w-5 shrink-0 transition", active ? "text-white" : "text-white/70"].join(" ")}
-      aria-hidden
-    />
-    <span
+  return (
+    <Link
+      href={href}
       className={[
-        "min-w-0 flex-1",
-        rightSlot ? "leading-tight" : "truncate",
-      ].join(" ")}
+        "flex w-full items-center gap-3 rounded-full px-3 py-2 text-sm font-semibold transition",
+        nested ? "ml-4" : "",
+        active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
+      ].filter(Boolean).join(" ")}
+      aria-current={active ? "page" : undefined}
     >
-      {label}
-    </span>
-    {rightSlot ? <span className="shrink-0">{rightSlot}</span> : null}
-  </Link>
-);
+      <Icon
+        className={["h-5 w-5 shrink-0 transition", active ? "text-white" : "text-white/70"].join(" ")}
+        aria-hidden
+      />
+      <span
+        className={[
+          "min-w-0 flex-1",
+          rightSlot ? "leading-tight" : "truncate",
+        ].join(" ")}
+      >
+        {label}
+      </span>
+      {rightSlot ? <span className="shrink-0">{rightSlot}</span> : null}
+    </Link>
+  );
 }

@@ -197,9 +197,6 @@ export default async function Page({
 
   console.log("[v2] transients model:", v2Model?.transients);
 
-  const aj = (versionForPreview as any).analyzer_json;
-  const parsed = typeof aj === "string" ? (() => { try { return JSON.parse(aj); } catch { return null; } })() : aj;
-
   const hasTransientsObj = !!arraysJson?.transients && typeof arraysJson.transients === "object";
   console.log("[page] arrays has transients obj:", hasTransientsObj);
   console.log("[page] arrays transients:", arraysJson?.transients ?? null);

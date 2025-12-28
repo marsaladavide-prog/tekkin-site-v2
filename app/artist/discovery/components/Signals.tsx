@@ -68,12 +68,6 @@ function levelFromScore(v: number | null) {
   return "In crescita";
 }
 
-function formatScore(v: number | null) {
-  if (v === null) return null;
-  if (v >= 10) return `${Math.round(v)}`;
-  return v.toFixed(1);
-}
-
 export function Signals() {
   const [receivedItems, setReceivedItems] = useState<DiscoveryInboxItem[]>([]);
   const [sentItems, setSentItems] = useState<DiscoveryOutboxItem[]>([]);
@@ -352,15 +346,15 @@ export function Signals() {
                   <article key={item.request_id} className={`rounded-2xl border px-4 py-4 transition ${cardClass}`}>
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        {item.sender_avatar ? (
-                          <img
-                            src={item.sender_avatar}
-                            alt={safeText(item.sender_name, "Artista")}
-                            className="h-12 w-12 rounded-full border border-white/20 object-cover"
-                          />
-                        ) : (
-                          <div className="h-12 w-12 rounded-full border border-white/20 bg-white/10" />
-                        )}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.sender_avatar ?? "/img/avatar-placeholder.png"}
+                          alt={safeText(item.sender_name, "Artista")}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          className="h-12 w-12 rounded-full border border-white/20 object-cover"
+                        />
+
                         <div>
                           <p className="text-[11px] uppercase tracking-[0.5em] text-white/60">Signal ACCETTATO</p>
                           <h3 className="text-xl font-semibold">

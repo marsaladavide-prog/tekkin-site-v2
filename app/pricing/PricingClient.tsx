@@ -4,10 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
-type RedeemResult =
-  | { ok: true; plan: string; current_period_end: string }
-  | { ok: false; error: string };
-
 function formatDateIT(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;

@@ -5,7 +5,7 @@ import type {
   UsersProfileInsert,
 } from "@/types/supabase";
 
-type ServerSupabase = SupabaseClient<any, any, any>;
+type ServerSupabase = SupabaseClient;
 
 function clean(value?: string | null): string | null {
   if (typeof value !== "string") return null;

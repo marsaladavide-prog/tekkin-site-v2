@@ -12,7 +12,7 @@ type AnalyzerUi = "v1" | "v2";
 
 export default function TekkinAnalyzerPageClient({
   ui = "v2",
-  versionId,
+  versionId: _versionId,
   track,
   initialData,
   v2Model,
@@ -20,7 +20,29 @@ export default function TekkinAnalyzerPageClient({
 }: {
   ui?: AnalyzerUi;
   versionId: string;
-  track: any;
+track: {
+  versionId: string;
+
+  // project/artist
+  artistId?: string | null;
+  artistSlug?: string | null;
+  artistName?: string | null;
+
+  // track metadata
+  title?: string | null;
+  coverUrl?: string | null;
+
+  // audio
+  audioUrl?: string | null;
+  profileKey?: string | null;
+
+  // waveform (db)
+  waveformPeaks?: unknown;
+  waveformBands?: unknown;
+  waveformDuration?: number | null;
+  createdAt?: string | null;
+};
+
   initialData: AnalyzerPreviewData;
   v2Model: AnalyzerCompareModel;
   sharePath: string;
@@ -63,9 +85,10 @@ export default function TekkinAnalyzerPageClient({
           setReanalyzeStatus("success");
           setReanalyzeMessage("Re-analyze completato");
           router.refresh();
-        } catch (err: any) {
+        } catch (err: unknown) {
           setReanalyzeStatus("error");
-          setReanalyzeMessage(err?.message ?? "Errore re-analyze");
+          const message = err instanceof Error ? err.message : "Errore re-analyze";
+          setReanalyzeMessage(message);
         } finally {
           setTimeout(() => {
             setReanalyzeStatus("idle");
@@ -132,6 +155,16 @@ export default function TekkinAnalyzerPageClient({
     window.open(url, "_blank", "noopener,noreferrer");
   }, [sharePath]);
 
+  function toNumberArray(value: unknown): number[] | null {
+    if (!Array.isArray(value)) return null;
+    const out: number[] = [];
+    for (const v of value) {
+      if (typeof v !== "number" || !Number.isFinite(v)) return null;
+      out.push(v);
+    }
+    return out;
+  }
+
   if (useV2) {
     return (
       <AnalyzerV2ProPanel
@@ -151,7 +184,7 @@ export default function TekkinAnalyzerPageClient({
           title: track.title ?? "Untitled",
           subtitle: track.artistName ?? undefined,
           audioUrl: track.audioUrl ?? null,
-          waveformPeaks: track.waveformPeaks ?? null,
+          waveformPeaks: toNumberArray(track.waveformPeaks) ?? undefined,
           waveformBands: track.waveformBands ?? null,
           waveformDuration: track.waveformDuration ?? null,
           createdAt: track.createdAt ?? null,

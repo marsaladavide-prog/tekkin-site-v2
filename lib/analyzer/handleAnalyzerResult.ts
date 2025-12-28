@@ -8,6 +8,44 @@ import { isJsonObject } from "@/types/json";
 
 type AnalyzerPayloadInput = AnalyzerResult | JsonObject;
 
+type RawAnalyzerLike = AnalyzerResult | JsonObject;
+
+type AnalyzerUpdatePayload = {
+  lufs: number | null;
+  overall_score: number | null;
+  sub_clarity: number | null;
+  hi_end: number | null;
+  dynamics: number | null;
+  stereo_image: number | null;
+  tonality: number | null;
+  feedback: string | null;
+
+  model_match_percent: number | null;
+
+  analyzer_json: JsonObject;
+  analyzer_reference_ai: JsonObject | null;
+
+  analyzer_bpm: number | null;
+  analyzer_spectral_centroid_hz: number | null;
+  analyzer_spectral_rolloff_hz: number | null;
+  analyzer_spectral_bandwidth_hz: number | null;
+  analyzer_spectral_flatness: number | null;
+  analyzer_zero_crossing_rate: number | null;
+  analyzer_key: string | null;
+
+  fix_suggestions: FixSuggestion[] | null;
+
+  analyzer_bands_norm: BandsNorm;
+
+  analyzer_profile_key: string | null;
+
+  arrays_blob_path?: string;
+  arrays_blob_size_bytes?: number;
+
+  waveform_peaks?: number[];
+  waveform_duration?: number;
+  waveform_bands?: JsonObject;
+};
 
 function isFiniteNumber(x: unknown): x is number {
   return typeof x === "number" && Number.isFinite(x);
@@ -206,7 +244,7 @@ export function extractBandsNormFromAnalyzer(result: AnalyzerResult | JsonObject
  * - Niente arrays_blob_path/size finché non c'è un vero bucket + fetch UI.
  * - Waveform peaks/bands ok (downsampled) perché UX.
  */
-export function buildAnalyzerUpdatePayload(result: any) {
+export function buildAnalyzerUpdatePayload(result: RawAnalyzerLike): AnalyzerUpdatePayload {
   const resultObj = getObj(result);
 
   // V3 adapter: se arriva payload con version=v3 e blocks.*, lo normalizziamo alla shape legacy
@@ -229,7 +267,7 @@ export function buildAnalyzerUpdatePayload(result: any) {
   // Fonte primaria: normalizedObj.spectral (legacy)
   // V3 fallback: blocks.spectral.data
   const spectralObj = getObj(normalizedObj?.["spectral"] ?? null);
-  const v3SpectralData = getObj((resultObj as any)?.blocks?.spectral?.data ?? null);
+  const v3SpectralData = getPathObj(resultObj, ["blocks", "spectral", "data"]);
 
   const spectralCentroid =
     getNum(spectralObj, "spectral_centroid_hz") ??
@@ -277,7 +315,7 @@ export function buildAnalyzerUpdatePayload(result: any) {
 
     // --- BPM / key ---
   // v3: blocks.rhythm.data.{bpm,key}
-  const v3RhythmData = getObj((resultObj as any)?.blocks?.rhythm?.data ?? null);
+  const v3RhythmData = getPathObj(resultObj, ["blocks", "rhythm", "data"]);
 
   const bpmValue =
     getNum(normalizedObj, "bpm") ??
@@ -455,18 +493,18 @@ export function buildAnalyzerUpdatePayload(result: any) {
 
   // --- Loudness percentiles / sections (SMALL) [sanitized] ---
   const momentaryPercentilesRaw =
-    getObj((normalizedObj as any)?.["momentary_percentiles"] ?? null) ??
-    getObj((resultObj as any)?.["momentary_percentiles"] ?? null) ??
-    getObj((resultObj as any)?.blocks?.loudness?.data?.momentary_percentiles ?? null);
+    getObj(normalizedObj?.["momentary_percentiles"] ?? null) ??
+    getObj(resultObj?.["momentary_percentiles"] ?? null) ??
+    getPathObj(resultObj, ["blocks", "loudness", "data", "momentary_percentiles"]);
 
   const shortTermPercentilesRaw =
-    getObj((normalizedObj as any)?.["short_term_percentiles"] ?? null) ??
-    getObj((resultObj as any)?.["short_term_percentiles"] ?? null) ??
-    getObj((resultObj as any)?.blocks?.loudness?.data?.short_term_percentiles ?? null);
+    getObj(normalizedObj?.["short_term_percentiles"] ?? null) ??
+    getObj(resultObj?.["short_term_percentiles"] ?? null) ??
+    getPathObj(resultObj, ["blocks", "loudness", "data", "short_term_percentiles"]);
 
   const sectionsRaw =
-    getObj((normalizedObj as any)?.["sections"] ?? null) ??
-    getObj((resultObj as any)?.["sections"] ?? null) ??
+    getObj(normalizedObj?.["sections"] ?? null) ??
+    getObj(resultObj?.["sections"] ?? null) ??
     getObj((resultObj as any)?.blocks?.sections?.data ?? null);
 
   const momentaryPercentiles = sanitizePercentileRange3(momentaryPercentilesRaw);
@@ -475,14 +513,14 @@ export function buildAnalyzerUpdatePayload(result: any) {
 
   // --- Stereo small (SMALL) [sanitized] ---
   const widthByBandRaw =
-    getObj((normalizedObj as any)?.["width_by_band"] ?? null) ??
-    getObj((resultObj as any)?.["width_by_band"] ?? null) ??
-    getObj((resultObj as any)?.blocks?.stereo?.data?.width_by_band ?? null);
+    getObj(normalizedObj?.["width_by_band"] ?? null) ??
+    getObj(resultObj?.["width_by_band"] ?? null) ??
+    getPathObj(resultObj, ["blocks", "stereo", "data", "width_by_band"]);
 
   const stereoSummaryRaw =
-    getObj((normalizedObj as any)?.["stereo_summary"] ?? null) ??
-    getObj((resultObj as any)?.["stereo_summary"] ?? null) ??
-    getObj((resultObj as any)?.blocks?.stereo?.data?.stereo_summary ?? null);
+    getObj(normalizedObj?.["stereo_summary"] ?? null) ??
+    getObj(resultObj?.["stereo_summary"] ?? null) ??
+    getPathObj(resultObj, ["blocks", "stereo", "data", "stereo_summary"]);
 
   const widthByBandObj = sanitizeBands(widthByBandRaw);
   const stereoSummaryObj = sanitizeNumberRecord(stereoSummaryRaw);
@@ -507,8 +545,8 @@ export function buildAnalyzerUpdatePayload(result: any) {
       : null);
 
   const rhythmDescriptorsRaw =
-    getObj((normalizedObj as any)?.["rhythm_descriptors"] ?? null) ??
-    getObj((resultObj as any)?.["rhythm_descriptors"] ?? null) ??
+    getObj(normalizedObj?.["rhythm_descriptors"] ?? null) ??
+    getObj(resultObj?.["rhythm_descriptors"] ?? null) ??
     getObj((resultObj as any)?.blocks?.rhythm?.data?.descriptors ?? null);
 
   const rhythmDescriptorsObj = sanitizeNumberRecord(rhythmDescriptorsRaw);
@@ -516,8 +554,8 @@ export function buildAnalyzerUpdatePayload(result: any) {
   // --- EXTRA (MFCC, HFC, SPECTRAL PEAKS) ---
 
   const extraObj =
-    getObj((normalizedObj as any)?.["extra"] ?? null) ??
-    getObj((resultObj as any)?.["extra"] ?? null) ??
+    getObj(normalizedObj?.["extra"] ?? null) ??
+    getObj(resultObj?.["extra"] ?? null) ??
     getObj((resultObj as any)?.blocks?.extra?.data ?? null);
 
   // MFCC: supporta sia shape vecchia (mfcc_mean) che V3 (mfcc.mean) -> sanitize to 13 values
@@ -597,7 +635,7 @@ true_peak_method: (() => {
     },
   };
 
-const out: any = {
+const out: AnalyzerUpdatePayload = {
   lufs,
   overall_score: mixScores.overall_score ?? overallScore,
   sub_clarity: mixScores.sub_clarity,
@@ -653,11 +691,30 @@ if (isFiniteNumber(waveformDuration) && waveformDuration > 0) {
   out.waveform_duration = waveformDuration;
 }
 if (waveformBandsObj) {
-  out.waveform_bands = waveformBandsObj as any;
+  out.waveform_bands = waveformBandsObj;
 }
 
 
 return out;
 
  
+}
+
+function getPath(obj: unknown, path: readonly string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of path) {
+    const o = getObj(cur);
+    if (!o) return null;
+    cur = o[key];
+  }
+  return cur ?? null;
+}
+
+function getPathObj(obj: unknown, path: readonly string[]): JsonObject | null {
+  return getObj(getPath(obj, path));
+}
+
+function _getPathNum(obj: unknown, path: readonly string[]): number | null {
+  const v = getPath(obj, path);
+  return isFiniteNumber(v) ? v : null;
 }

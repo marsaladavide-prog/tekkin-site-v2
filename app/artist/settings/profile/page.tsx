@@ -30,7 +30,6 @@ function safeBool(value: unknown, fallback: boolean): boolean {
 }
 
 export default function ArtistProfileSettingsPage() {
-  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -69,7 +68,6 @@ export default function ArtistProfileSettingsPage() {
         if (!active) return;
 
         const data = payload as ProfileData;
-        setProfile(data);
         setArtistName(safeString(data.artist_name));
         const firstGenre =
           Array.isArray(data.main_genres) && data.main_genres.length > 0
@@ -135,7 +133,6 @@ export default function ArtistProfileSettingsPage() {
       }
 
       setSuccessMsg("Profilo aggiornato.");
-      setProfile((curr) => ({ ...curr, ...payload }));
     } catch (err) {
       console.error("Profile save", err);
       setErrorMsg((err as Error)?.message ?? "Errore salvando il profilo.");

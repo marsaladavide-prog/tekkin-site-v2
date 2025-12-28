@@ -1,6 +1,1 @@
-type AvatarItem = {
-  id: string;
-  name: string;
-  imageUrl: string | null;
-  slug?: string;
-};
+// Delete this file as it is unused.
