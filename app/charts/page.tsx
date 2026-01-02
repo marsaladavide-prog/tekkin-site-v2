@@ -2,10 +2,7 @@ import { createClient } from "@/utils/supabase/server";
 import TopArtistsHero from "@/components/charts/TopArtistsHero";
 import PlaylistShelf from "@/components/charts/PlaylistShelf";
 import ChartsSplitBoard from "@/components/charts/ChartsSplitBoard";
-import {
-  mapChartsToUi,
-  RegisteredArtistProfile,
-} from "@/lib/charts/mapChartsToUi";
+import { mapChartsToUi, RegisteredArtistProfile } from "@/lib/charts/mapChartsToUi";
 import { getTrackUrlCached } from "@/lib/storage/getTrackUrlCached";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +14,7 @@ type SnapshotRow = {
   track_title: string | null;
   artist_name: string | null;
   artist_id?: string | null;
+  collab_artist_ids?: string[] | null;
   cover_url: string | null;
   audio_url: string | null;
   mix_type: string | null;
@@ -30,23 +28,38 @@ type PeriodRow = {
   period_end: string | null;
 };
 
+const formatArtistDisplay = (ownerName: string | null, collaboratorNames: string[]) => {
+  const names = [
+    ownerName?.trim() ? ownerName.trim() : null,
+    ...collaboratorNames,
+  ].filter((name): name is string => Boolean(name));
+
+  if (names.length === 0) return null;
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} feat. ${names[1]}`;
+  return `${names[0]} feat. ${names.slice(1).join(" & ")}`;
+};
+
 export default async function ChartsPageRoute() {
   const supabase = await createClient();
 
-  const { data: period, error: periodErr } = await supabase
-    .from("tekkin_charts_latest_period_v1")
-    .select("period_start, period_end")
-    .maybeSingle<PeriodRow>();
+  const [periodRes, snapshotsRes] = await Promise.all([
+    supabase
+      .from("tekkin_charts_latest_period_v1")
+      .select("period_start, period_end")
+      .maybeSingle<PeriodRow>(),
+    supabase
+      .from("public_charts_snapshots")
+      .select(
+        "profile_key, project_id, version_id, track_title, artist_id, cover_url, audio_url, mix_type, rank_position, score_public"
+      ),
+  ]);
 
-  if (periodErr) console.error("[charts] period error:", periodErr);
+  if (periodRes.error) console.error("[charts] period error:", periodRes.error);
+  if (snapshotsRes.error) console.error("[charts] snapshots error:", snapshotsRes.error);
 
-  const { data: rows, error: snapshotsErr } = await supabase
-    .from("tekkin_charts_latest_snapshots_v1")
-    .select(
-      "profile_key, project_id, version_id, track_title, artist_name, artist_id, cover_url, audio_url, mix_type, rank_position, score_public"
-    );
-
-  if (snapshotsErr) console.error("[charts] snapshots error:", snapshotsErr);
+  const period = periodRes.data ?? null;
+  const rows = snapshotsRes.data ?? null;
 
   const versionIds =
     rows
@@ -71,18 +84,19 @@ export default async function ChartsPageRoute() {
   const likedSet = new Set<string>();
 
   if (versionIds.length > 0) {
-    const { data: likeCounts } = await supabase
-      .from("track_likes_counts_v1")
-      .select("version_id, likes_count")
-      .in("version_id", versionIds);
+    const [likeCountsRes, authRes] = await Promise.all([
+      supabase
+        .from("track_likes_counts_v1")
+        .select("version_id, likes_count")
+        .in("version_id", versionIds),
+      supabase.auth.getUser(),
+    ]);
 
-    likeCounts?.forEach((r) => {
+    likeCountsRes.data?.forEach((r) => {
       likesCountByVersionId.set(r.version_id, r.likes_count ?? 0);
     });
 
-    const { data: auth } = await supabase.auth.getUser();
-    const user = auth?.user ?? null;
-
+    const user = authRes?.data?.user ?? null;
     if (user) {
       const { data: myLikes } = await supabase
         .from("track_likes")
@@ -145,40 +159,87 @@ export default async function ChartsPageRoute() {
   const ownerUserIds = Array.from(
     new Set(Array.from(ownerByProjectId.values()).filter(Boolean))
   );
+  const artistIdsFromRows = Array.from(
+    new Set(
+      (rows ?? [])
+        .map((row) => row?.artist_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  );
+
+  const { data: collabRows, error: collabErr } = await supabase
+    .from("project_collaborators")
+    .select("project_id, user_id")
+    .in("project_id", projectIds);
+
+  if (collabErr) {
+    console.error("[charts] project_collaborators error:", collabErr);
+  }
+
+  const collabByProjectId = new Map<string, string[]>();
+  const collaboratorUserIds = new Set<string>();
+
+  (collabRows ?? []).forEach((row) => {
+    if (!row?.project_id || !row?.user_id) return;
+    collaboratorUserIds.add(row.user_id);
+    const list = collabByProjectId.get(row.project_id) ?? [];
+    list.push(row.user_id);
+    collabByProjectId.set(row.project_id, list);
+  });
+
+  const allArtistUserIds = Array.from(
+    new Set([...ownerUserIds, ...artistIdsFromRows, ...Array.from(collaboratorUserIds)])
+  );
 
   // 2) Carichiamo i profili degli artisti registrati (users_profile)
   let registeredArtists: RegisteredArtistProfile[] = [];
 
-  if (ownerUserIds.length) {
-    const { data: artistProfiles, error: artistProfilesErr } = await supabase
-      .from("users_profile")
-      .select("user_id, artist_name, photo_url, avatar_url, role")
-      .in("user_id", ownerUserIds)
-      .eq("role", "artist");
-
-    if (artistProfilesErr) {
-      console.error("[charts] artist profiles error:", artistProfilesErr);
-    }
-
-    registeredArtists = artistProfiles ?? [];
-  }
-
   const slugByUserId = new Map<string, string>();
-  if (ownerUserIds.length > 0) {
-    const { data: slugRows, error: slugRowsErr } = await supabase
-      .from("artists")
-      .select("user_id, slug")
-      .in("user_id", ownerUserIds);
+  if (allArtistUserIds.length) {
+    const [artistsRes, profileRes] = await Promise.all([
+      supabase
+        .from("public_artists")
+        .select("user_id, artist_name, slug, ig_profile_picture")
+        .in("user_id", allArtistUserIds)
+        .limit(allArtistUserIds.length),
+      supabase
+        .from("public_artist_profiles")
+        .select("user_id, photo_url, avatar_url")
+        .in("user_id", allArtistUserIds)
+        .limit(allArtistUserIds.length),
+    ]);
 
-    if (slugRowsErr) {
-      console.error("[charts] artist slugs error:", slugRowsErr);
-    } else {
-      slugRows?.forEach((row) => {
-        if (row?.user_id && typeof row.slug === "string" && row.slug.trim()) {
-          slugByUserId.set(row.user_id, row.slug.trim());
-        }
-      });
+    if (artistsRes.error) {
+      console.error("[charts] artist profiles error:", artistsRes.error);
     }
+    if (profileRes.error) {
+      console.error("[charts] artist profile avatars error:", profileRes.error);
+    }
+
+    const photoByUserId = new Map<string, { photo_url?: string | null; avatar_url?: string | null }>();
+    (profileRes.data ?? []).forEach((row) => {
+      if (row?.user_id) {
+        photoByUserId.set(row.user_id, {
+          photo_url: row.photo_url ?? null,
+          avatar_url: row.avatar_url ?? null,
+        });
+      }
+    });
+
+    registeredArtists = (artistsRes.data ?? []).map((row) => {
+      const photos = row?.user_id ? photoByUserId.get(row.user_id) : null;
+      return {
+        ...row,
+        photo_url: photos?.photo_url ?? null,
+        avatar_url: photos?.avatar_url ?? null,
+      };
+    });
+
+    (artistsRes.data ?? []).forEach((row) => {
+      if (row?.user_id && typeof row.slug === "string" && row.slug.trim()) {
+        slugByUserId.set(row.user_id, row.slug.trim());
+      }
+    });
   }
 
   // 3) Arricchiamo le righe chart con artist_id/artist_name reali
@@ -188,17 +249,37 @@ export default async function ChartsPageRoute() {
   });
 
   const enriched = allWithAudio.map((r) => {
-    const uid = ownerByProjectId.get(r.project_id) ?? null;
+    const uid = ownerByProjectId.get(r.project_id) ?? r.artist_id ?? null;
     const prof = uid ? profileByUserId.get(uid) : null;
-
+    const ownerName = prof?.artist_name ?? r.artist_name ?? null;
+    const collabIds = collabByProjectId.get(r.project_id) ?? [];
+    const collaboratorNames = collabIds
+      .map((id) => profileByUserId.get(id)?.artist_name ?? null)
+      .filter((name): name is string => Boolean(name));
+    const displayName = formatArtistDisplay(ownerName, collaboratorNames) ?? ownerName ?? r.artist_name ?? null;
     const slug = uid ? slugByUserId.get(uid) ?? null : null;
+    const collabBadges = [
+      ownerName
+        ? { label: ownerName, href: slug ? `/@${slug}` : null }
+        : null,
+      ...collabIds
+        .map((id) => {
+          const name = profileByUserId.get(id)?.artist_name ?? null;
+          const collabSlug = slugByUserId.get(id) ?? null;
+          if (!name) return null;
+          return { label: name, href: collabSlug ? `/@${collabSlug}` : null };
+        })
+        .filter((entry): entry is { label: string; href: string | null } => Boolean(entry)),
+    ].filter(Boolean);
     return {
       ...r,
       artist_id: uid ?? r.artist_id ?? null,
-      artist_name: (prof?.artist_name ?? r.artist_name ?? null) as string | null,
+      artist_name: displayName as string | null,
       artist_slug: slug,
       cover_url: r.cover_url ?? null,
-      __artist_avatar_url: (prof?.avatar_url ?? prof?.photo_url ?? null) as string | null,
+      __artist_avatar_url: (prof?.ig_profile_picture ?? prof?.artist_photo_url ?? null) as string | null,
+      collab_artist_ids: collabIds,
+      collab_badges: collabBadges.length > 0 ? collabBadges : null,
       plays: playsByVersionId.get(r.version_id ?? "") ?? 0,
       likes: likesCountByVersionId.get(r.version_id ?? "") ?? 0,
       liked: likedSet.has(r.version_id ?? ""),

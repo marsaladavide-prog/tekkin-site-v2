@@ -64,6 +64,7 @@ export default function TrackTable({
       versionId: entry.version_id,
       title: entry.track_title ?? "Untitled",
       subtitle: entry.artist_name ?? "Tekkin",
+      collabBadges: entry.collab_badges ?? entry.collabBadges ?? null,
       audioUrl: entry.audio_url,
     };
   }, []);

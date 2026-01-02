@@ -12,9 +12,11 @@ type PeriodRow = {
 export type RegisteredArtistProfile = {
   user_id: string;
   artist_name?: string | null;
-  avatar_url?: string | null;
+  slug?: string | null;
+  ig_profile_picture?: string | null;
+  artist_photo_url?: string | null;
   photo_url?: string | null;
-  spotify_url?: string | null;
+  avatar_url?: string | null;
 };
 
 type ChartBlueprint = {
@@ -57,11 +59,11 @@ function buildTopArtists(
     { bestRank: number; bestScore: number }
   >();
 
-  for (const entry of globalRows) {
-    const identityKey = (entry.artist_id ?? "").toString().trim();
-    if (!identityKey) continue;
+  const addCandidate = (identityKey: string, entry: ChartSnapshotEntry) => {
+    const key = identityKey.toString().trim();
+    if (!key) return;
 
-    const existing = candidateMap.get(identityKey);
+    const existing = candidateMap.get(key);
     const bestRank = Math.min(
       existing?.bestRank ?? Number.POSITIVE_INFINITY,
       entry.rank_position
@@ -71,7 +73,20 @@ function buildTopArtists(
       entry.score_public ?? 0
     );
 
-    candidateMap.set(identityKey, { bestRank, bestScore });
+    candidateMap.set(key, { bestRank, bestScore });
+  };
+
+  for (const entry of globalRows) {
+    const ownerKey = (entry.artist_id ?? "").toString().trim();
+    if (ownerKey) addCandidate(ownerKey, entry);
+
+    const record = isRecord(entry) ? entry : null;
+    const collabIdsRaw = record?.collab_artist_ids;
+    if (Array.isArray(collabIdsRaw)) {
+      collabIdsRaw
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        .forEach((id) => addCandidate(id, entry));
+    }
   }
 
   const registeredMap = new Map<string, RegisteredArtistProfile>();
@@ -91,9 +106,6 @@ function buildTopArtists(
 
   const topArtists: ChartTopArtist[] = [];
   for (const [key, stats] of sortedCandidates) {
-    const profile = registeredMap.get(key);
-    if (!profile) continue;
-
     const matchedRow = globalRows.find(
       (row) => (row.artist_id ?? "").toString().trim() === key
     );
@@ -101,21 +113,30 @@ function buildTopArtists(
     const avatarFromRows = rowRecord ? getStr(rowRecord, "__artist_avatar_url") : null;
     const slugFromRows = rowRecord ? getStr(rowRecord, "artist_slug") : null;
 
+    const registeredProfile = registeredMap.get(key);
     const displayName =
-      profile.artist_name?.trim() || profile.artist_name || "Tekkin Artist";
+      registeredProfile?.artist_name?.trim() ||
+      registeredProfile?.artist_name ||
+      getStr(rowRecord, "artist_name") ||
+      "Tekkin Artist";
     const avatarUrl =
-      profile.avatar_url ??
-      profile.photo_url ??
+      registeredProfile?.ig_profile_picture ??
+      registeredProfile?.artist_photo_url ??
+      registeredProfile?.avatar_url ??
+      registeredProfile?.photo_url ??
       avatarFromRows ??
       null;
+    const slug =
+      registeredProfile?.slug ??
+      (typeof slugFromRows === "string" && slugFromRows.trim() ? slugFromRows.trim() : null);
 
     topArtists.push({
-        id: profile.user_id,
-        name: displayName,
-        avatarUrl,
-        score: stats.bestScore,
-        slug: typeof slugFromRows === "string" && slugFromRows.trim() ? slugFromRows.trim() : null,
-      });
+      id: registeredProfile?.user_id ?? key,
+      name: displayName,
+      avatarUrl,
+      score: stats.bestScore,
+      slug,
+    });
 
     if (topArtists.length >= 12) break;
   }

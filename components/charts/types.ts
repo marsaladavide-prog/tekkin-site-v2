@@ -1,3 +1,5 @@
+import type { TrackCollabBadge } from "@/lib/tracks/types";
+
 export type ChartSnapshotEntry = {
   profile_key: string;
   project_id: string;
@@ -6,6 +8,9 @@ export type ChartSnapshotEntry = {
   artist_name: string | null;
   artist_id?: string | null;
   artist_slug?: string | null;
+  collab_artist_ids?: string[] | null;
+  collab_badges?: TrackCollabBadge[] | null;
+  collabBadges?: TrackCollabBadge[] | null;
   cover_url: string | null;
   audio_url: string | null;
   mix_type: string | null;

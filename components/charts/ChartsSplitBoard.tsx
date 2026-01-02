@@ -66,6 +66,7 @@ export default function ChartsSplitBoard({ globalItems, qualityItems }: ChartsSp
         versionId: track.versionId,
         title: track.title ?? "Untitled",
         subtitle: track.artistName ?? "Tekkin",
+        collabBadges: track.collabBadges ?? null,
         audioUrl: track.audioUrl,
         artistId: track.artistId ?? undefined,
         artistSlug: track.artistSlug ?? undefined,
