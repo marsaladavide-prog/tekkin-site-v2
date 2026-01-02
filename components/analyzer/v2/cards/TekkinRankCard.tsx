@@ -64,6 +64,13 @@ const ISSUE_COPY: Record<
     praise: "Rhythm centrato: BPM e danceability in target, groove stabile.",
     keep: "Mantieni il timing: piccole variazioni degradano il groove.",
   },
+  stereo: {
+    ok: "Stereo width e correlation in target.",
+    warn: "Stereo non in target: width o correlation da riallineare.",
+    action: "Controlla width globale e correlation: evita widening eccessivo.",
+    praise: "Stereo solido: width e correlation coerenti col reference.",
+    keep: "Mantieni il campo stereo stabile, senza eccessi di widening.",
+  },
 };
 
 function getIssueCopy(key: TekkinVersionRankComponentKey, isOk: boolean) {

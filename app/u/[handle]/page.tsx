@@ -7,6 +7,7 @@ import { ReleasesHighlights } from "@/components/artist/ReleasesHighlights";
 import { TekkinRankSection } from "@/components/artist/TekkinRankSection";
 import { EditArtistProfileButton } from "@/app/artist/discovery/components/EditArtistProfileButton";
 import PublicTracksGallery from "@/components/artist/PublicTracksGallery";
+import TopTracksSidebar from "@/components/artist/TopTracksSidebar";
 
 import { getArtistDetail } from "@/lib/artist/discovery/getArtistDetail";
 import { toSpotifyEmbedUrl } from "@/utils/spotify";
@@ -132,45 +133,148 @@ export default async function PublicArtistPage({ params }: Props) {
   const admin = createAdminClient();
 
   // Evitiamo filtri su join (più fragili): carichiamo prima i project dell'owner, poi le versioni public.
-  const { data: projectRowsByUser, error: projectRowsByUserErr } = await admin
-    .from("projects")
-    .select("id")
-    .eq("user_id", projectOwnerId);
+  const [
+    projectRowsByUserRes,
+    projectRowsByArtistRes,
+    collabProjectRowsRes,
+  ] = await Promise.all([
+    admin.from("projects").select("id").eq("user_id", projectOwnerId),
+    admin.from("projects").select("id").eq("artist_id", artistId),
+    admin.from("project_collaborators").select("project_id").eq("user_id", projectOwnerId),
+  ]);
 
-  if (projectRowsByUserErr) {
-    console.error("[public-artist] projects by user_id error:", projectRowsByUserErr);
+  if (projectRowsByUserRes.error) {
+    console.error("[public-artist] projects by user_id error:", projectRowsByUserRes.error);
+  }
+  if (collabProjectRowsRes.error) {
+    console.error("[public-artist] project_collaborators error:", collabProjectRowsRes.error);
   }
 
   let projectIds =
-    projectRowsByUser?.map((p: any) => p.id).filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+    projectRowsByUserRes.data
+      ?.map((p: any) => p.id)
+      .filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
 
-  // Fallback: alcuni dati legacy possono legare i project a `artist_id` invece che `user_id`.
-  if (projectIds.length === 0) {
-    const { data: projectRowsByArtist, error: projectRowsByArtistErr } = await admin
-      .from("projects")
-      .select("id")
-      .eq("artist_id", artistId);
 
-    if (projectRowsByArtistErr) {
-      console.error("[public-artist] projects by artist_id error:", projectRowsByArtistErr);
-    } else {
-      projectIds =
-        projectRowsByArtist?.map((p: any) => p.id).filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+  const collabProjectIds =
+    collabProjectRowsRes.data
+      ?.map((row: any) => row.project_id)
+      .filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+
+  projectIds = Array.from(new Set([...projectIds, ...collabProjectIds]));
+
+  const ownerByProjectId = new Map<string, string>();
+  const collabByProjectId = new Map<string, { id: string; name: string; slug: string | null }[]>();
+
+  if (projectIds.length > 0) {
+    const [projectOwnerRowsRes, collabRowsRes] = await Promise.all([
+      admin.from("projects").select("id, user_id").in("id", projectIds),
+      admin.from("project_collaborators").select("project_id, user_id").in("project_id", projectIds),
+    ]);
+
+    if (projectOwnerRowsRes.error) {
+      console.error("[public-artist] projects owner error:", projectOwnerRowsRes.error);
     }
+    if (collabRowsRes.error) {
+      console.error("[public-artist] collaborators lookup error:", collabRowsRes.error);
+    }
+
+    projectOwnerRowsRes.data?.forEach((row) => {
+      if (row?.id && row?.user_id) ownerByProjectId.set(row.id, row.user_id);
+    });
+
+    const collaboratorIds = Array.from(
+      new Set(
+        (collabRowsRes.data ?? [])
+          .map((row) => row?.user_id)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+
+    const nameByUserId = new Map<string, string>();
+    const slugByUserId = new Map<string, string>();
+
+    if (collaboratorIds.length > 0) {
+      const [collaboratorProfilesRes, collaboratorSlugsRes] = await Promise.all([
+        admin.from("users_profile").select("user_id, artist_name").in("user_id", collaboratorIds),
+        admin.from("artists").select("user_id, slug").in("user_id", collaboratorIds),
+      ]);
+
+      collaboratorProfilesRes.data?.forEach((row) => {
+        if (row?.user_id && typeof row.artist_name === "string" && row.artist_name.trim()) {
+          nameByUserId.set(row.user_id, row.artist_name.trim());
+        }
+      });
+
+      collaboratorSlugsRes.data?.forEach((row) => {
+        if (row?.user_id && typeof row.slug === "string" && row.slug.trim()) {
+          slugByUserId.set(row.user_id, row.slug.trim());
+        }
+      });
+    }
+
+    (collabRowsRes.data ?? []).forEach((row) => {
+      const projectId = row?.project_id;
+      const collaboratorId = row?.user_id;
+      if (typeof projectId !== "string" || typeof collaboratorId !== "string") return;
+
+      const ownerId = ownerByProjectId.get(projectId);
+      if (ownerId && collaboratorId === ownerId) return;
+
+      const name = nameByUserId.get(collaboratorId) ?? "Artista Tekkin";
+      const slug = slugByUserId.get(collaboratorId) ?? null;
+      const list = collabByProjectId.get(projectId) ?? [];
+      list.push({ id: collaboratorId, name, slug });
+      collabByProjectId.set(projectId, list);
+    });
   }
 
-const { data: tracks } =
-  projectIds.length > 0
-    ? await admin
-        .from("project_versions")
-        .select(
-          "id, project_id, version_name, audio_url, visibility, overall_score, waveform_peaks, waveform_bands, waveform_duration, projects!inner(cover_url)"
-        )
-        .in("project_id", projectIds)
-        .eq("visibility", "public")
-        .order("overall_score", { ascending: false })
-        .order("created_at", { ascending: false })
-    : { data: [] as any[] };
+  const { data: tracks } =
+    projectIds.length > 0
+      ? await admin
+          .from("project_versions")
+          .select(
+            "id, project_id, version_name, audio_url, visibility, overall_score, waveform_peaks, waveform_bands, waveform_duration, created_at, projects!inner(cover_url)"
+          )
+          .in("project_id", projectIds)
+          .eq("visibility", "public")
+          .order("overall_score", { ascending: false })
+          .order("created_at", { ascending: false })
+      : { data: [] as any[] };
+
+  const versionIds =
+    tracks?.map((v: any) => v.id).filter((id: any) => typeof id === "string" && id.length > 0) ?? [];
+
+  const playsByVersionId = new Map<string, number>();
+  const likesCountByVersionId = new Map<string, number>();
+  const likedSet = new Set<string>();
+
+  if (versionIds.length > 0) {
+    const [{ data: counters }, { data: likeCounts }, authRes] = await Promise.all([
+      admin.from("tekkin_track_counters").select("version_id, plays").in("version_id", versionIds),
+      admin.from("track_likes_counts_v1").select("version_id, likes_count").in("version_id", versionIds),
+      supabase.auth.getUser(),
+    ]);
+
+    counters?.forEach((c) => {
+      playsByVersionId.set(c.version_id, c.plays ?? 0);
+    });
+
+    likeCounts?.forEach((r) => {
+      likesCountByVersionId.set(r.version_id, r.likes_count ?? 0);
+    });
+
+    const user = authRes?.data?.user ?? null;
+    if (user) {
+      const { data: myLikes } = await supabase
+        .from("track_likes")
+        .select("version_id")
+        .in("version_id", versionIds)
+        .eq("user_id", user.id);
+
+      myLikes?.forEach((r) => likedSet.add(r.version_id));
+    }
+  }
 
   const resolveProjectCover = (projectData: any): string | null => {
     if (!projectData) return null;
@@ -182,37 +286,80 @@ const { data: tracks } =
   };
 
 
-const items: TrackItem[] = (tracks ?? []).map((v: any) => {
-  const rawAudio = typeof v.audio_url === "string" ? v.audio_url.trim() : "";
-  const audioUrl = rawAudio && rawAudio.startsWith("http") ? rawAudio : null;
-  const scoreValue =
-    typeof v.overall_score === "number"
-      ? v.overall_score
-      : typeof v.overall_score === "string"
-      ? Number(v.overall_score) || null
-      : null;
+  const items: TrackItem[] = (tracks ?? []).map((v: any) => {
+    const rawAudio = typeof v.audio_url === "string" ? v.audio_url.trim() : "";
+    const audioUrl = rawAudio && rawAudio.startsWith("http") ? rawAudio : null;
+    const scoreValue =
+      typeof v.overall_score === "number"
+        ? v.overall_score
+        : typeof v.overall_score === "string"
+        ? Number(v.overall_score) || null
+        : null;
 
-  return {
-    versionId: v.id,
-    projectId: typeof v.project_id === "string" ? v.project_id : null,
-    title: v.version_name ?? "Untitled",
-    artistName: artist.artist_name,
-    artistId: artist.id,
-    artistSlug: slug,
-    coverUrl: resolveProjectCover(v.projects),
-    audioUrl,
-    waveformPeaks: Array.isArray(v.waveform_peaks) ? v.waveform_peaks : null,
-    waveformBands: v.waveform_bands ?? null,
-    waveformDuration:
-      typeof v.waveform_duration === "number" && Number.isFinite(v.waveform_duration)
-        ? v.waveform_duration
-        : null,
-    scorePublic: scoreValue,
-    likesCount: 0,
-    likedByMe: false,
-  };
-});
+    const projectId = typeof v.project_id === "string" ? v.project_id : null;
+    const ownerId = projectId ? ownerByProjectId.get(projectId) ?? projectOwnerId : projectOwnerId;
+    const isOwner = ownerId === projectOwnerId;
+    const collabList = projectId ? collabByProjectId.get(projectId) ?? [] : [];
+    const collabBadges = isOwner
+      ? collabList.map((entry) => ({
+          label: `feat. ${entry.name}`,
+          href: entry.slug ? `/@${entry.slug}` : null,
+        }))
+      : [{ label: "Collab" }];
 
+    return {
+      versionId: v.id,
+      projectId,
+      title: v.version_name ?? "Untitled",
+      artistName: artist.artist_name,
+      artistId: artist.id,
+      artistSlug: slug,
+      coverUrl: resolveProjectCover(v.projects),
+      audioUrl,
+      waveformPeaks: Array.isArray(v.waveform_peaks) ? v.waveform_peaks : null,
+      waveformBands: v.waveform_bands ?? null,
+      waveformDuration:
+        typeof v.waveform_duration === "number" && Number.isFinite(v.waveform_duration)
+          ? v.waveform_duration
+          : null,
+      scorePublic: scoreValue,
+      plays: playsByVersionId.get(v.id) ?? 0,
+      likesCount: likesCountByVersionId.get(v.id) ?? 0,
+      likedByMe: likedSet.has(v.id),
+      collabBadges: collabBadges.length > 0 ? collabBadges : null,
+    };
+  });
+
+  const QUALITY_MULTIPLIER = 5;
+  const topTracks = (tracks ?? [])
+    .map((v: any) => {
+      const baseScore =
+        typeof v.overall_score === "number"
+          ? v.overall_score
+          : typeof v.overall_score === "string"
+          ? Number(v.overall_score) || null
+          : null;
+      const scorePublic = typeof baseScore === "number" ? Math.round(baseScore * QUALITY_MULTIPLIER) : null;
+      const item = items.find((entry) => entry.versionId === v.id);
+      return item
+        ? {
+            ...item,
+            scorePublic,
+            rankScore: baseScore ?? -1,
+            createdAt: typeof v.created_at === "string" ? v.created_at : null,
+          }
+        : null;
+    })
+    .filter((t): t is NonNullable<typeof t> => Boolean(t))
+    .sort((a, b) => {
+      const scoreDiff = (b.rankScore ?? -1) - (a.rankScore ?? -1);
+      if (scoreDiff !== 0) return scoreDiff;
+      const aDate = Date.parse(a.createdAt ?? "") || 0;
+      const bDate = Date.parse(b.createdAt ?? "") || 0;
+      return bDate - aDate;
+    })
+    .slice(0, 10)
+    .map((t, index) => ({ ...t, rankPosition: index + 1 }));
 
   return (
     <main className="flex-1 min-h-screen bg-tekkin-bg px-4 py-6 md:px-10 md:py-8">
@@ -233,7 +380,10 @@ const items: TrackItem[] = (tracks ?? []).map((v: any) => {
           <EditArtistProfileButton artistId={artist.id} />
         </div>
 
-        <TekkinRankSection overrideData={rankView ?? undefined} />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <TekkinRankSection overrideData={rankView ?? undefined} />
+          <TopTracksSidebar tracks={topTracks} artistId={artist.id} />
+        </div>
 
         <div className="space-y-5">
           <ReleasesHighlights releases={highlightReleases} />

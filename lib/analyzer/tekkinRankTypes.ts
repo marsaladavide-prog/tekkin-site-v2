@@ -1,4 +1,10 @@
-export type TekkinVersionRankComponentKey = "tonal" | "loudness" | "spectral" | "transients" | "rhythm";
+export type TekkinVersionRankComponentKey =
+  | "tonal"
+  | "loudness"
+  | "spectral"
+  | "stereo"
+  | "transients"
+  | "rhythm";
 
 export interface TekkinVersionRankComponent {
   key: TekkinVersionRankComponentKey;

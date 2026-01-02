@@ -236,6 +236,29 @@ function buildReferenceRhythmScores(
   return averageScores(checks);
 }
 
+function buildReferenceStereoScores(
+  model: AnalyzerCompareModel,
+  reference: AnalyzerCompareModel["referenceStereoPercentiles"]
+): number | null {
+  if (!reference) return null;
+  const corrArr = Array.isArray(model.correlation)
+    ? model.correlation.filter((x) => typeof x === "number" && Number.isFinite(x))
+    : [];
+  const corrAvg =
+    corrArr.length > 0
+      ? corrArr.reduce((a, b) => a + b, 0) / corrArr.length
+      : typeof model.stereoSummary?.correlation_avg === "number"
+        ? model.stereoSummary.correlation_avg
+        : null;
+
+  const checks: Array<number | null> = [
+    scoreAgainstRange(model.stereoWidth ?? null, reference.stereoWidth ?? null),
+    scoreAgainstRange(corrAvg, reference.lrCorrelation ?? null),
+  ];
+
+  return averageScores(checks);
+}
+
 function buildPrecisionDetails(model: AnalyzerCompareModel) {
   const tonalChecks: Array<PrecisionCheck> = BAND_KEYS.map((key) => ({
     value: model.bandsNorm?.[key] ?? null,
@@ -410,6 +433,7 @@ function buildReferenceFitBreakdown(model: AnalyzerCompareModel) {
   const spectralScore = buildReferenceSpectralScores(model.spectral, model.referenceSpectralPercentiles);
   const transientsScore = buildReferenceTransientsScores(model.transients, model.referenceTransientsPercentiles);
   const rhythmScore = buildReferenceRhythmScores(model, model.referenceRhythmPercentiles);
+  const stereoScore = buildReferenceStereoScores(model, model.referenceStereoPercentiles);
   const loudnessDetailLines = model.referenceFeaturesPercentiles
     ? [
         describeRangeStatus(
@@ -441,14 +465,14 @@ function buildReferenceFitBreakdown(model: AnalyzerCompareModel) {
       key: "tonal",
       label: "Tonal balance",
       description: "Sub, bassi, mid, presence, alti e air vs percentili reference.",
-      weight: 0.35,
+      weight: 0.3,
       score: tonalScore,
     },
     {
       key: "loudness",
       label: "Loudness",
       description: "Integrated LUFS e LRA vs target.",
-      weight: 0.25,
+      weight: 0.22,
       score: loudnessScore,
       detailLines: loudnessDetailLines.length ? loudnessDetailLines : undefined,
     },
@@ -456,14 +480,14 @@ function buildReferenceFitBreakdown(model: AnalyzerCompareModel) {
       key: "spectral",
       label: "Spettro",
       description: "Centroid, bandwidth, rolloff, flatness e ZCR vs reference.",
-      weight: 0.15,
+      weight: 0.14,
       score: spectralScore,
     },
     {
       key: "transients",
       label: "Transients",
       description: "Strength, density, crest e attack vs reference.",
-      weight: 0.15,
+      weight: 0.14,
       score: transientsScore,
     },
     {
@@ -472,6 +496,13 @@ function buildReferenceFitBreakdown(model: AnalyzerCompareModel) {
       description: "BPM e danceability confrontati al reference.",
       weight: 0.1,
       score: rhythmScore,
+    },
+    {
+      key: "stereo",
+      label: "Stereo",
+      description: "Stereo width e correlation vs reference.",
+      weight: 0.1,
+      score: stereoScore,
     },
   ];
 

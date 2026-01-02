@@ -13,6 +13,7 @@ import {
   Moon,
   Newspaper,
   Package,
+  Plus,
   Radar,
   Search,
   Settings,
@@ -24,7 +25,6 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 
-import SoftButton from "@/components/ui/SoftButton";
 import SidebarNavItem from "@/components/ui/SidebarNavItem";
 import { useTheme } from "@/app/artist/hooks/useTheme";
 import { useArtistRank } from "@/components/artist/hooks/useArtistRank";
@@ -70,12 +70,15 @@ export default function ArtistSidebar() {
     typeof artist?.artist_slug === "string" && artist.artist_slug.trim().length > 0
       ? artist.artist_slug.trim()
       : null;
-  const fallbackHandle = artistName
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
+  const handleSource = artist?.artist_name?.trim() || null;
+  const fallbackHandle = handleSource
+    ? handleSource
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+    : null;
   const profileHandle = artistSlug || (fallbackHandle ? fallbackHandle : null);
   const profileHref = profileHandle ? `/@${profileHandle}` : "/artist/settings/profile";
   const tekkinScore =
@@ -93,10 +96,6 @@ export default function ArtistSidebar() {
       .toUpperCase() || "AR";
 
   const hasPhoto = !!(artistPhoto && artistPhoto.startsWith("http"));
-
-  const handleCreate = () => {
-    router.push("/artist/projects?new=1");
-  };
 
   const handleLogout = async () => {
     if (isLoggingOut) return;
@@ -154,14 +153,13 @@ export default function ArtistSidebar() {
                 </span>
               </div>
 
-              <SoftButton
-                variant="accent"
-                className="h-10 w-10 rounded-full p-0 text-xl font-bold tracking-[0.2em]"
-                aria-label="Upload new track"
-                onClick={handleCreate}
+              <Link
+                href="http://localhost:3000/artist/projects/new"
+                className="group flex h-10 w-10 items-center justify-center rounded-full bg-[#1b1f24] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),_0_8px_18px_rgba(0,0,0,0.45)] transition hover:bg-[#232831]"
+                aria-label="Nuovo progetto"
               >
-                +
-              </SoftButton>
+                <Plus className="h-4 w-4 text-white/70 transition group-hover:text-white" strokeWidth={2.5} />
+              </Link>
             </div>
 
             <nav className="space-y-6 text-sm">
