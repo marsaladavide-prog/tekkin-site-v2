@@ -109,9 +109,10 @@ function buildTopArtists(
     const matchedRow = globalRows.find(
       (row) => (row.artist_id ?? "").toString().trim() === key
     );
-    const rowRecord = isRecord(matchedRow) ? matchedRow : null;
-    const avatarFromRows = rowRecord ? getStr(rowRecord, "__artist_avatar_url") : null;
-    const slugFromRows = rowRecord ? getStr(rowRecord, "artist_slug") : null;
+const rowRecord: Record<string, unknown> = isRecord(matchedRow) ? matchedRow : {};
+const avatarFromRows = getStr(rowRecord, "__artist_avatar_url");
+const slugFromRows = getStr(rowRecord, "artist_slug");
+
 
     const registeredProfile = registeredMap.get(key);
     const displayName =
