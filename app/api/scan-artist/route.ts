@@ -228,10 +228,10 @@ export async function POST(request: Request) {
 
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser();
     if (authError) {
       console.error("[scan-artist] supabase auth error:", authError);
     }
@@ -363,18 +363,37 @@ export async function POST(request: Request) {
       if (!authError && user) {
         const { data: profile, error: profileErr } = await supabase
           .from("users_profile")
-          .select("id")
+          .select("id, artist_name")
           .eq("user_id", user.id)
           .maybeSingle();
 
         if (!profileErr && profile) {
           const profileArtistId = profile.id as string;
+          const spotifyArtistName =
+            typeof spotifyArtist.name === "string" && spotifyArtist.name.trim()
+              ? spotifyArtist.name.trim()
+              : null;
+          const profileArtistName =
+            typeof profile.artist_name === "string" && profile.artist_name.trim()
+              ? profile.artist_name.trim()
+              : null;
+          const metaArtistName =
+            typeof user.user_metadata?.artist_name === "string" &&
+            user.user_metadata.artist_name.trim()
+              ? user.user_metadata.artist_name.trim()
+              : null;
+          const effectiveArtistName =
+            spotifyArtistName ??
+            profileArtistName ??
+            artist.name ??
+            spotifyArtist.name ??
+            "Untitled artist";
 
           const profileUpdate: Record<string, any> = {
-            artist_name: artist.name,
             photo_url: artist.imageUrl,
             spotify_id: artist.spotifyId,
             spotify_url: artist.spotify_url,
+            artist_name: spotifyArtistName ?? profileArtistName ?? null,
           };
 
           const { error: profileUpdateErr } = await supabase
@@ -400,16 +419,17 @@ export async function POST(request: Request) {
           }
 
           if (adminSupabase) {
+            const desiredArtistName = effectiveArtistName;
             const artistPayload: Record<string, any> = {
               id: profileArtistId,
-              user_id: userId ?? null,
-              artist_name:
-                artist.name || spotifyArtist.name || "Untitled artist",
+              user_id: user?.id ?? userId ?? null,
+              artist_name: desiredArtistName,
               spotify_id: artist.spotifyId ?? spotifyArtist.id ?? null,
               spotify_url:
                 artist.spotify_url ?? spotifyArtist.external_urls?.spotify ?? null,
               spotify_followers: artist.spotifyFollowers ?? null,
               spotify_popularity: artist.spotifyPopularity ?? null,
+              is_public: Boolean(desiredArtistName),
             };
 
             console.log(
@@ -429,7 +449,7 @@ export async function POST(request: Request) {
               return NextResponse.json(
                 {
                   error: "failed to upsert artist",
-                  details: artistUpsertError,
+                  details: artistUpsertError?.message ?? artistUpsertError,
                 },
                 { status: 500 }
               );

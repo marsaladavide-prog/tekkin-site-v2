@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
     const { data: projectRows, error: projectError } = await supabase
       .from("projects")
-      .select("id, title")
+      .select("id, title, cover_url")
       .in("id", projectIds);
 
     if (projectError) {
@@ -174,9 +174,16 @@ export async function GET(req: NextRequest) {
     }
 
     const versionByProjectId = new Map<string, any>();
+    const versionCountByProjectId = new Map<string, number>();
     for (const v of versionRows ?? []) {
-      if (!v?.project_id || versionByProjectId.has(v.project_id)) continue;
-      versionByProjectId.set(v.project_id, v);
+      if (!v?.project_id) continue;
+      if (!versionByProjectId.has(v.project_id)) {
+        versionByProjectId.set(v.project_id, v);
+      }
+      versionCountByProjectId.set(
+        v.project_id,
+        (versionCountByProjectId.get(v.project_id) ?? 0) + 1
+      );
     }
 
     const requestIds = requests.map((r) => r.id);
@@ -229,6 +236,7 @@ export async function GET(req: NextRequest) {
           kind: r.kind,
           project_id: r.project_id,
           project_title: projectById.get(r.project_id)?.title ?? "Project",
+          project_cover_url: projectById.get(r.project_id)?.cover_url ?? null,
           status: r.status ?? "pending",
           sender_id: r.sender_id ?? null,
           sender_name: sender?.artist_name ?? null,
@@ -245,6 +253,7 @@ export async function GET(req: NextRequest) {
           audio_url: t?.audio_url ?? null,
           message: r.message,
           messages: messagesByRequest.get(r.id) ?? [],
+          version_count: versionCountByProjectId.get(r.project_id) ?? 0,
         };
       })
     );

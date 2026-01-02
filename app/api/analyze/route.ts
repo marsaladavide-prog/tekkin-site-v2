@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
       [
         "-u", // output unbuffered
         "-Xutf8",
-        path.resolve("tools", "analyze_master_web.py"),
+        "-m",
+        "tools.analyze_master_web",
         lang,
         genre,
         mode,
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
         plotsDir,
       ],
       {
+        cwd: process.cwd(),
         env: { ...process.env, PYTHONIOENCODING: "utf-8" },
       }
     );
@@ -61,10 +63,12 @@ export async function POST(req: NextRequest) {
           controller.enqueue(prefixed);
         });
 
-        py.on("close", async () => {
-          controller.enqueue(
-            Buffer.from("\n✅ Analisi completata.\n", "utf-8")
-          );
+        py.on("close", async (code) => {
+          if (code === 0) {
+            controller.enqueue(Buffer.from("\n✅ Analisi completata.\n", "utf-8"));
+          } else {
+            controller.enqueue(Buffer.from(`\n❌ Analisi fallita (exit ${code}).\n`, "utf-8"));
+          }
           await unlink(wavPath).catch(() => {});
           controller.close();
         });

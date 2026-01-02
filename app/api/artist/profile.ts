@@ -65,16 +65,16 @@ export function buildArtistPayload(
     sanitize(metadata.artist_image_url) ||
     null;
 
+  const artistName = sanitize(metadata.artist_name);
+  const isPublic = Boolean(artistName);
+
   return {
     id: artistId,
     user_id: artistId,
-    artist_name: sanitize(metadata.artist_name),
-    artist_genre: sanitize(metadata.artist_genre),
-    artist_photo_url: photo,
-    artist_link_source: sanitize(metadata.artist_link_source),
+    artist_name: artistName,
+    photo_url: photo,
     spotify_id: sanitize(metadata.spotify_id),
     spotify_url: sanitize(metadata.spotify_url),
-    instagram_url: sanitize(metadata.instagram_url),
     beatport_url: sanitize(metadata.beatport_url),
     beatstats_url: sanitize(metadata.beatstats_url),
     traxsource_url: sanitize(metadata.traxsource_url),
@@ -82,8 +82,8 @@ export function buildArtistPayload(
     songstats_url: sanitize(metadata.songstats_url),
     resident_advisor_url: sanitize(metadata.resident_advisor_url),
     songkick_url: sanitize(metadata.songkick_url),
-    apple_music_url: sanitize(metadata.apple_music_url),
     tidal_url: sanitize(metadata.tidal_url),
+    is_public: isPublic,
   };
 }
 

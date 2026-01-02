@@ -63,16 +63,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Notifica con notify
+    const signalType = `signal_${kind}_received`;
+
     await notify({
       userId: receiver_id,
-      type: "signal_received",
+      type: signalType,
       title: "Nuovo Signal ricevuto",
       body:
         kind === "promo"
           ? "Hai ricevuto una richiesta promo anonima."
           : "Hai ricevuto una richiesta collab anonima.",
       href: "/discovery",
-      data: { request_id: insertData.id, project_id },
+      data: { request_id: insertData.id, project_id, kind },
     });
 
     async function ensureDiscoveryTrack(projectId: string, ownerId: string) {

@@ -41,7 +41,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Errore lettura progetto" }, { status: 500 });
     }
 
-    if (!proj || proj.user_id !== user.id) {
+    let isCollaborator = false;
+    if (proj && proj.user_id !== user.id) {
+      const { data: collabRow, error: collabErr } = await supabase
+        .from("project_collaborators")
+        .select("user_id")
+        .eq("project_id", projectId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (collabErr) {
+        console.error("[set-visibility] collaborator check error:", collabErr);
+      }
+
+      isCollaborator = Boolean(collabRow?.user_id);
+    }
+
+    if (!proj || (proj.user_id !== user.id && !isCollaborator)) {
       return NextResponse.json({ error: "Non autorizzato" }, { status: 403 });
     }
 

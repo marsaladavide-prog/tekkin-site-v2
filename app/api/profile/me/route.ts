@@ -217,10 +217,20 @@ export async function PUT(req: NextRequest) {
 
     const admin = getSupabaseAdmin();
 
-    if (updated) {
-      await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
-      return NextResponse.json(updated, { status: 200 });
+  if (updated) {
+    await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
+    if (updatePayload.artist_name) {
+      await admin
+        .from("artists")
+        .update({
+          artist_name: updatePayload.artist_name,
+          is_public: true,
+        })
+        .eq("user_id", user.id)
+        .limit(1);
     }
+    return NextResponse.json(updated, { status: 200 });
+  }
 
     const { data: inserted, error: insertError } = await admin
       .from("users_profile")
@@ -251,8 +261,18 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
-    return NextResponse.json(inserted, { status: 200 });
+  await ensureArtistSync(admin, user.id, updatePayload.spotify_url);
+  if (updatePayload.artist_name) {
+    await admin
+      .from("artists")
+      .update({
+        artist_name: updatePayload.artist_name,
+        is_public: true,
+      })
+      .eq("user_id", user.id)
+      .limit(1);
+  }
+  return NextResponse.json(inserted, { status: 200 });
   } catch (err: any) {
     console.error("[PUT /api/profile/me] unexpected error:", err);
     return NextResponse.json(

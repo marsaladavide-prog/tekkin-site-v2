@@ -321,7 +321,10 @@ async function fetchLatestVersionsFromView(
 export async function POST(req: Request) {
   try {
     const bearer = req.headers.get("authorization") ?? "";
-    const token = bearer.startsWith("Bearer ") ? bearer.slice(7) : undefined;
+    const headerToken = bearer.startsWith("Bearer ") ? bearer.slice(7) : undefined;
+    const url = new URL(req.url);
+    const queryToken = url.searchParams.get("secret") ?? undefined;
+    const token = headerToken ?? queryToken;
     if (!token || token !== TEKKIN_CRON_SECRET) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
