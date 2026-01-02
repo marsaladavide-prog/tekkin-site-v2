@@ -46,13 +46,12 @@ export type UsersProfileInsert = {
 export type ArtistInsert = {
   id: string;
   user_id: string;
+  slug?: string | null;
+  is_public?: boolean | null;
   artist_name?: string | null;
-  artist_genre?: string | null;
-  artist_photo_url?: string | null;
-  artist_link_source?: string | null;
+  photo_url?: string | null;
   spotify_id?: string | null;
   spotify_url?: string | null;
-  instagram_url?: string | null;
   beatport_url?: string | null;
   beatstats_url?: string | null;
   traxsource_url?: string | null;
@@ -60,7 +59,6 @@ export type ArtistInsert = {
   songstats_url?: string | null;
   resident_advisor_url?: string | null;
   songkick_url?: string | null;
-  apple_music_url?: string | null;
   tidal_url?: string | null;
 };
 

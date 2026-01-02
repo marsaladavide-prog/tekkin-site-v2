@@ -44,13 +44,14 @@ function buildArtist(userId: string, meta: ArtistSignupMetadata): ArtistInsert {
   const photo =
     clean(meta.artist_photo_url) || clean(meta.artist_image_url) || null;
 
+  const artistName = clean(meta.artist_name);
+  const isPublic = Boolean(artistName);
+
   return {
     id: userId,
     user_id: userId,
-    artist_name: clean(meta.artist_name),
-    artist_genre: clean(meta.artist_genre),
-    artist_photo_url: photo,
-    artist_link_source: clean(meta.artist_link_source),
+    artist_name: artistName,
+    photo_url: photo,
     spotify_id: clean(meta.spotify_id),
     spotify_url: clean(meta.spotify_url),
     instagram_url: clean(meta.instagram_url),
@@ -61,8 +62,8 @@ function buildArtist(userId: string, meta: ArtistSignupMetadata): ArtistInsert {
     songstats_url: clean(meta.songstats_url),
     resident_advisor_url: clean(meta.resident_advisor_url),
     songkick_url: clean(meta.songkick_url),
-    apple_music_url: clean(meta.apple_music_url),
     tidal_url: clean(meta.tidal_url),
+    is_public: isPublic,
   };
 }
 

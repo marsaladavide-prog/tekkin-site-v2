@@ -19,6 +19,12 @@ const TYPE_LABEL: Record<string, string> = {
   signal_received: "Signal ricevuto",
   signal_accepted: "Signal accettato",
   signal_rejected: "Signal rifiutato",
+  signal_collab_received: "Signal collab",
+  signal_promo_received: "Signal promo",
+  signal_collab_accepted: "Collab accettato",
+  signal_collab_rejected: "Collab rifiutato",
+  signal_promo_accepted: "Promo accettato",
+  signal_promo_rejected: "Promo rifiutato",
 };
 
 function formatDateLabel(iso: string | null) {

@@ -166,6 +166,20 @@ export default function ArtistProfileSettingsPage() {
 
       setScanLogs(Array.isArray(data.logs) ? data.logs : []);
       setSuccessMsg("Scan Spotify completato. Profilo aggiornato.");
+
+      const refreshRes = await fetch("/api/profile/me", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const refreshPayload = await refreshRes.json().catch(() => null);
+      if (refreshRes.ok && refreshPayload) {
+        const refreshed = refreshPayload as ProfileData;
+        setArtistName(safeString(refreshed.artist_name));
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("tekkin:artist-updated"));
+      }
     } catch (err) {
       console.error("Scan Spotify", err);
       setErrorMsg((err as Error)?.message ?? "Errore inatteso durante la scansione.");

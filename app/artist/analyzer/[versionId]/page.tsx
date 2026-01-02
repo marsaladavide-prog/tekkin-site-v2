@@ -115,12 +115,28 @@ export default async function Page({
 
   // OWNER CHECK
   const isOwner = project.user_id === user.id;
+  let isCollaborator = false;
+  if (!isOwner) {
+    const { data: collabRow, error: collabErr } = await supabase
+      .from("project_collaborators")
+      .select("user_id")
+      .eq("project_id", project.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (collabErr) {
+      console.error("[ANALYZER PAGE] collaborator check error:", collabErr);
+    }
+
+    isCollaborator = Boolean(collabRow?.user_id);
+  }
   console.log("[ANALYZER PAGE] ownership", {
     ok: isOwner,
+    isCollaborator,
     projectUserId: project.user_id ?? null,
     authUserId: user.id ?? null,
   });
-  if (!isOwner) notFound();
+  if (!isOwner && !isCollaborator) notFound();
 
   // ARRAYS DOWNLOAD + PARSE
   let arraysJson: any | null = null;

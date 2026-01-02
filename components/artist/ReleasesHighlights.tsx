@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import SpotifyEmbedModal from "@/components/SpotifyEmbedModal";
@@ -26,6 +26,16 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
   const [playError, setPlayError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [embedUrl, setEmbedUrl] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<"recent" | "oldest">("recent");
+
+  const sortedReleases = useMemo(() => {
+    const list = [...releases].sort((a, b) => {
+      const aDate = Date.parse(a.releaseDate ?? "") || 0;
+      const bDate = Date.parse(b.releaseDate ?? "") || 0;
+      return bDate - aDate;
+    });
+    return sortMode === "recent" ? list : list.reverse();
+  }, [releases, sortMode]);
 
   useEffect(() => {
     if (!playError) return undefined;
@@ -152,7 +162,32 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
           Main Releases & Highlights
         </h2>
         <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-500 dark:text-tekkin-muted">
+          <span>{releases.length} releases</span>
           <span>Sync: Spotify Жњ Beatport</span>
+          <div className="ml-3 inline-flex overflow-hidden rounded-full border border-[var(--border-color)]/70">
+            <button
+              type="button"
+              onClick={() => setSortMode("recent")}
+              className={`px-2.5 py-0.5 text-[10px] uppercase tracking-[0.2em] ${
+                sortMode === "recent"
+                  ? "bg-white/10 text-white"
+                  : "text-tekkin-muted hover:text-white"
+              }`}
+            >
+              Recenti
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortMode("oldest")}
+              className={`px-2.5 py-0.5 text-[10px] uppercase tracking-[0.2em] ${
+                sortMode === "oldest"
+                  ? "bg-white/10 text-white"
+                  : "text-tekkin-muted hover:text-white"
+              }`}
+            >
+              Vecchie
+            </button>
+          </div>
         </div>
       </div>
 
@@ -166,14 +201,16 @@ export function ReleasesHighlights({ releases }: ReleasesHighlightsProps) {
         <div className="overflow-x-auto pb-2">
           <div className="flex items-stretch gap-4 pt-3">
             {hasRealData
-              ? releases.map((rel, idx) => {
+              ? sortedReleases.map((rel, idx) => {
                   const gradient =
                     gradientClasses[idx % gradientClasses.length];
                   const typeLabel = getTypeLabel(rel.albumType);
+                  const key =
+                    rel.id || rel.spotifyId || `${rel.title ?? "release"}-${idx}`;
 
                   return (
                     <div
-                      key={rel.id}
+                      key={key}
                       className="min-w-[150px] max-w-[150px] flex-shrink-0"
                     >
                       <div className="relative rounded-xl overflow-hidden bg-black border border-[var(--border-color)]/90 shadow-md">

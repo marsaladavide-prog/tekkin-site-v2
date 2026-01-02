@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Play } from "lucide-react";
 
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import WaveformPreviewUnified from "@/components/player/WaveformPreviewUnified";
 import type { PlayPayload } from "@/lib/player/useTekkinPlayer";
-import type { TrackItem } from "@/lib/tracks/types";
+import type { TrackCollabBadge, TrackItem } from "@/lib/tracks/types";
 
 type Props = {
   items: TrackItem[];
@@ -24,12 +25,44 @@ const resolvePlayPayload = (item: TrackItem, audioUrl: string): PlayPayload => (
   versionId: item.versionId,
   title: item.title,
   subtitle: item.artistName ?? undefined,
+  collabBadges: item.collabBadges ?? null,
   artistId: item.artistId ?? null,
   artistSlug: item.artistSlug ?? null,
   audioUrl,
   duration: item.waveformDuration ?? undefined,
   coverUrl: item.coverUrl ?? null,
 });
+
+const renderCollabBadges = (badges?: TrackCollabBadge[] | null) => {
+  if (!badges || badges.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-[0.3em] text-white/45">
+      {badges.map((badge, index) => {
+        const content = (
+          <span className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5">
+            {badge.label}
+          </span>
+        );
+        if (badge.href) {
+          return (
+            <Link
+              key={`${badge.label}-${index}`}
+              href={badge.href}
+              className="hover:text-white/80"
+            >
+              {content}
+            </Link>
+          );
+        }
+        return (
+          <span key={`${badge.label}-${index}`} className="text-white/60">
+            {content}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
 
 export default function PublicTracksGallery({ items }: Props) {
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
@@ -142,6 +175,7 @@ export default function PublicTracksGallery({ items }: Props) {
             <p className="text-[11px] uppercase tracking-[0.3em] text-white/50">
               {selectedItem?.artistName ?? "Artist"}
             </p>
+            {renderCollabBadges(selectedItem?.collabBadges ?? null)}
           </div>
 
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-white/60">
@@ -219,6 +253,7 @@ export default function PublicTracksGallery({ items }: Props) {
               <p className="text-[11px] uppercase tracking-[0.4em] text-white/50">
                 {item.artistName ?? "Artist"}
               </p>
+              {renderCollabBadges(item.collabBadges ?? null)}
             </button>
           );
         })}

@@ -34,12 +34,28 @@ type DiscoveryInboxItem = {
   message: string | null;
   audio_url: string | null;
   messages: DiscoveryMessage[];
+  version_count?: number;
+  project_cover_url?: string | null;
 };
 
 type DiscoveryOutboxItem = DiscoveryInboxItem & {
   receiver_id: string;
   receiver_name: string | null;
   receiver_avatar: string | null;
+};
+
+type IdentityReveal = {
+  senderName: string;
+  senderAvatar: string | null;
+  projectTitle: string;
+  projectCoverUrl: string | null;
+  versionCount: number;
+  genre: string | null;
+  overallScore: number | null;
+  mixScore: number | null;
+  masterScore: number | null;
+  bpm: number | null;
+  kind: "collab" | "promo";
 };
 
 const statusTabs = [
@@ -68,6 +84,13 @@ function levelFromScore(v: number | null) {
   return "In crescita";
 }
 
+function formatMetricValue(v: number | null | undefined) {
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return v.toFixed(1);
+  }
+  return "—";
+}
+
 export function Signals() {
   const [receivedItems, setReceivedItems] = useState<DiscoveryInboxItem[]>([]);
   const [sentItems, setSentItems] = useState<DiscoveryOutboxItem[]>([]);
@@ -77,6 +100,7 @@ export function Signals() {
   const [receivedStatusTab, setReceivedStatusTab] = useState<StatusKey>("pending");
   const [sentStatusTab, setSentStatusTab] = useState<StatusKey>("pending");
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
+  const [identityReveal, setIdentityReveal] = useState<IdentityReveal | null>(null);
   const player = useTekkinPlayer((s) => s);
 
   const receivedLists = useMemo(
@@ -134,6 +158,20 @@ export function Signals() {
     void loadSignals();
   }, [loadSignals]);
 
+  useEffect(() => {
+    if (!identityReveal) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIdentityReveal(null);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [identityReveal]);
+
   const getCardClasses = (status: StatusKey) => {
     if (status === "accepted") return "border-emerald-500/60 bg-emerald-500/10 hover:bg-emerald-500/20";
     if (status === "rejected") return "border-rose-500/60 bg-rose-500/10 hover:bg-rose-500/20";
@@ -157,7 +195,26 @@ export function Signals() {
           return;
         }
 
-        toast.success(action === "accept" ? "Signal accettato" : "Signal rifiutato", { id: toastId });
+        if (action === "accept") {
+          const name = safeText(data?.sender?.artist_name, "Artista");
+          setIdentityReveal({
+            senderName: name,
+            senderAvatar: data?.sender?.avatar_url ?? item.sender_avatar ?? null,
+            projectTitle: item.project_title,
+            projectCoverUrl: item.project_cover_url ?? null,
+            versionCount: item.version_count ?? 0,
+            genre: item.genre,
+            overallScore: item.overall_score,
+            mixScore: item.mix_score,
+            masterScore: item.master_score,
+            bpm: item.bpm,
+            kind: item.kind,
+          });
+          toast.success("Signal accettato", { id: toastId });
+        } else {
+          toast.success("Signal rifiutato", { id: toastId });
+        }
+
         void loadSignals();
       } catch (err) {
         console.error("Signals respond error:", err);
@@ -283,6 +340,102 @@ export function Signals() {
         </div>
       </div>
 
+      {identityReveal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+          <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            onClick={() => setIdentityReveal(null)}
+          />
+          <div className="relative z-10 w-full max-w-5xl rounded-3xl border border-white/10 bg-black/80 p-6 shadow-[0_30px_60px_rgba(0,0,0,0.55)]">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.3em] text-white/50">
+                  {identityReveal.kind === "collab" ? "Collab Signal" : "Promo Signal"}
+                </p>
+                <h3 className="text-2xl font-semibold text-white">{identityReveal.projectTitle}</h3>
+                <p className="text-[12px] text-white/60">
+                  {safeText(identityReveal.genre, "Genere n.d.")} · versioni {identityReveal.versionCount}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIdentityReveal(null)}
+                className="rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-[11px] font-semibold text-white/80 transition hover:border-white/30"
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
+              <div className="relative h-64 overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+                <img
+                  src={identityReveal.projectCoverUrl ?? "/img/cover-placeholder.png"}
+                  alt={`${identityReveal.projectTitle} cover`}
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-x-0 bottom-0 rounded-b-2xl bg-gradient-to-t from-black/80 to-transparent p-4">
+                  <p className="text-[11px] uppercase tracking-[0.4em] text-white/60">Track</p>
+                  <p className="text-base font-semibold text-white">Versioni {identityReveal.versionCount}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={identityReveal.senderAvatar ?? "/img/avatar-placeholder.png"}
+                    alt={safeText(identityReveal.senderName, "Artista")}
+                    className="h-12 w-12 rounded-full border border-white/15 object-cover"
+                    loading="lazy"
+                  />
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.4em] text-white/50">Da</p>
+                    <p className="text-lg font-semibold text-white">{identityReveal.senderName}</p>
+                    <p className="text-[11px] text-white/60">Tu</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
+                    <p className="text-[11px] text-white/60">Overall score</p>
+                    <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.overallScore)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
+                    <p className="text-[11px] text-white/60">Mix score</p>
+                    <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.mixScore)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
+                    <p className="text-[11px] text-white/60">Master score</p>
+                    <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.masterScore)}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
+                    <p className="text-[11px] text-white/60">BPM</p>
+                    <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.bpm)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-black/60 p-4 text-sm text-white/70">
+                  <p>Tekkin Analyze</p>
+                  <dl className="mt-2 grid gap-2">
+                    <div className="flex items-center justify-between">
+                      <span>Genre</span>
+                      <span>{safeText(identityReveal.genre, "—")}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Versioni</span>
+                      <span>{identityReveal.versionCount}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Segnale</span>
+                      <span>{identityReveal.kind === "collab" ? "Collab" : "Promo"}</span>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && <p className="text-sm text-white/60">Caricamento Signals...</p>}
       {errorMsg && <p className="text-sm text-rose-400">{errorMsg}</p>}
 
@@ -391,27 +544,28 @@ export function Signals() {
                     <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-white/70">
                       <p className="font-semibold uppercase tracking-[0.35em] text-white/60">Chat</p>
                       {renderMessages(item)}
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Scrivi un messaggio..."
-                          value={messageInputs[`received-${item.request_id}`] ?? ""}
-                          onChange={(event) =>
-                            setMessageInputs((prev) => ({
-                              ...prev,
-                              [`received-${item.request_id}`]: event.target.value,
-                            }))
-                          }
-                          className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSendMessage(item, "received")}
-                          className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60"
-                        >
-                          Invia
-                        </button>
-                      </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Scrivi un messaggio..."
+                            value={messageInputs[`received-${item.request_id}`] ?? ""}
+                            onChange={(event) =>
+                              setMessageInputs((prev) => ({
+                                ...prev,
+                                [`received-${item.request_id}`]: event.target.value,
+                              }))
+                            }
+                            className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSendMessage(item, "received")}
+                            disabled={!((messageInputs[`received-${item.request_id}`] ?? "").trim())}
+                            className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
+                          >
+                            Invia
+                          </button>
+                        </div>
                     </div>
                     <div className="mt-3 flex items-center gap-2 text-xs text-white/70">
                       <span className="rounded-full border border-white/20 px-3 py-1">Chiuso cronologicamente</span>
@@ -531,27 +685,28 @@ export function Signals() {
                     <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/70">
                       <p className="font-semibold uppercase tracking-[0.35em] text-white/60">Chat</p>
                       {renderMessages(item)}
-                      <div className="mt-2 flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Scrivi un messaggio..."
-                          value={messageInputs[`sent-${item.request_id}`] ?? ""}
-                          onChange={(event) =>
-                            setMessageInputs((prev) => ({
-                              ...prev,
-                              [`sent-${item.request_id}`]: event.target.value,
-                            }))
-                          }
-                          className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSendMessage(item, "sent")}
-                          className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60"
-                        >
-                          Invia
-                        </button>
-                      </div>
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Scrivi un messaggio..."
+                            value={messageInputs[`sent-${item.request_id}`] ?? ""}
+                            onChange={(event) =>
+                              setMessageInputs((prev) => ({
+                                ...prev,
+                                [`sent-${item.request_id}`]: event.target.value,
+                              }))
+                            }
+                            className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSendMessage(item, "sent")}
+                            disabled={!((messageInputs[`sent-${item.request_id}`] ?? "").trim())}
+                            className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
+                          >
+                            Invia
+                          </button>
+                        </div>
                     </div>
                   </div>
                 </article>

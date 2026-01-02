@@ -160,56 +160,24 @@ export default function ProjectDetailPage() {
       const { data: sessionData } = await supabase.auth.getSession();
       console.log("[loadProject] session user id:", sessionData?.session?.user?.id ?? null);
 
-      const { data, error } = await supabase
-        .from("projects")
-        .select(
-          `
-          id, title, status, created_at, genre, mix_type, cover_url, description,
-          project_versions (
-            id, created_at, version_name, mix_type,
-            audio_url,
-              audio_path,
-            lufs, sub_clarity, hi_end, dynamics, stereo_image, tonality, overall_score, feedback,
-            analyzer_bpm, analyzer_key,
-            analyzer_reference_ai, analyzer_json,
-            analyzer_ai_summary, analyzer_ai_actions, analyzer_ai_meta,
-            waveform_peaks, waveform_duration, waveform_bands
-          )
-        `
-        )
-        .eq("id", pageProjectId)
-        .maybeSingle();
+      const res = await fetch(`/api/artist/projects/${pageProjectId}`);
+      const payload = (await res.json().catch(() => null)) as { project?: unknown; error?: string } | null;
 
-      if (error || !data) {
-        const errObj = error
-          ? {
-              name: (error as any).name,
-              message: (error as any).message,
-              code: (error as any).code,
-              details: (error as any).details,
-              hint: (error as any).hint,
-              status: (error as any).status,
-            }
-          : null;
-
+      if (!res.ok || !payload?.project) {
         console.error(
           "[loadProject] failed pageProjectId=" +
             String(pageProjectId) +
-            " hasError=" +
-            String(Boolean(error)) +
-            " dataIsNull=" +
-            String(data == null)
+            " status=" +
+            String(res.status)
         );
-        console.error("[loadProject] error=" + JSON.stringify(errObj));
-        console.error("[loadProject] data=" + JSON.stringify(data));
+        console.error("[loadProject] error=" + JSON.stringify(payload?.error ?? null));
         setProject(null);
         setLoading(false);
-        setErrorMsg("Project non trovato o errore nel caricamento.");
+        setErrorMsg(payload?.error ?? "Project non trovato o errore nel caricamento.");
         return;
       }
 
-
-      const p = data as unknown as ProjectRow;
+      const p = payload.project as ProjectRow;
       p.project_versions = Array.isArray(p.project_versions) ? p.project_versions : [];
       p.project_versions = [...p.project_versions].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 

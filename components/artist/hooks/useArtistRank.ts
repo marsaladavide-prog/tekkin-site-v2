@@ -15,6 +15,7 @@ export function useArtistRank() {
   const [data, setData] = useState<ArtistRankView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // profilo salvato da /register in localStorage
   const [localProfile] = useState<Record<string, unknown>>(() => {
@@ -29,6 +30,18 @@ export function useArtistRank() {
       return {};
     }
   });
+
+  useEffect(() => {
+    const handleRefresh = () => setRefreshKey((prev) => prev + 1);
+    if (typeof window !== "undefined") {
+      window.addEventListener("tekkin:artist-updated", handleRefresh);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("tekkin:artist-updated", handleRefresh);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,22 +102,27 @@ export function useArtistRank() {
         const { data: artistRow, error: _artistErr } = await supabase
           .from("artists")
           .select(
-            "id,user_id,slug,artist_name,artist_photo_url,avatar_url,artist_genre,artist_link_source,spotify_id,spotify_url,instagram_url,beatport_url,beatstats_url,soundcloud_url"
+            "id,user_id,slug,artist_name,spotify_id,spotify_url,beatport_url,beatstats_url,soundcloud_url,source_link,main_genre,ig_username,ig_profile_picture"
           )
           .eq("user_id", user.id)
           .maybeSingle();
 
         const { data: profileRow } = await supabase
           .from("users_profile")
-          .select("photo_url")
+          .select("photo_url, artist_name")
           .eq("user_id", user.id)
           .maybeSingle();
+
+        const profileArtistName =
+          typeof profileRow?.artist_name === "string" && profileRow.artist_name.trim()
+            ? profileRow.artist_name.trim()
+            : null;
 
         // Se la query non restituisce righe potremmo avere un errore vuoto; non logghiamo per evitare rumore in console
 
         const genreFromTable =
-          artistRow && typeof (artistRow as any).artist_genre === "string"
-            ? ((artistRow as any).artist_genre as string)
+          artistRow && typeof (artistRow as any).main_genre === "string"
+            ? ((artistRow as any).main_genre as string)
             : null;
 
         const spotifyId =
@@ -132,8 +150,10 @@ export function useArtistRank() {
           (localProfile.beatstats_url as string | undefined) ||
           null;
 
+        const instagramHandle =
+          (artistRow?.ig_username as string) || null;
         const instagramUrl =
-          (artistRow?.instagram_url as string) ||
+          (instagramHandle ? `https://instagram.com/${instagramHandle}` : null) ||
           (meta.instagram_url as string) ||
           (localProfile.instagram_url as string | undefined) ||
           null;
@@ -155,14 +175,14 @@ export function useArtistRank() {
             null,
 
           artist_name:
+            profileArtistName ||
             artistRow?.artist_name ||
             metaName ||
             (localProfile.artist_name as string | undefined) ||
             "Tekkin Artist",
 
           artist_photo_url:
-            (artistRow?.artist_photo_url as string | undefined) ||
-            (artistRow?.avatar_url as string | undefined) ||
+            (artistRow?.ig_profile_picture as string | undefined) ||
             (profileRow?.photo_url as string | undefined) ||
             metaPhoto ||
             (localProfile.artist_photo_url as string | undefined) ||
@@ -175,7 +195,7 @@ export function useArtistRank() {
             "Artist",
 
           artist_link_source:
-            (artistRow?.artist_link_source as string | undefined) ||
+            (artistRow?.source_link as string | undefined) ||
             (meta.artist_link_source as string) ||
             null,
 
@@ -315,7 +335,7 @@ export function useArtistRank() {
     return () => {
       isMounted = false;
     };
-  }, [localProfile]);
+  }, [localProfile, refreshKey]);
 
   return { data, loading, error };
 }

@@ -3,6 +3,8 @@ import AppShell from "@/components/ui/AppShell";
 import ArtistSidebar from "@/components/nav/ArtistSidebar";
 import { createClient } from "@/utils/supabase/server";
 import Link from "next/link";
+import type { ArtistSignupMetadata } from "@/types/supabase";
+import { buildArtistPayload, getSupabaseAdmin } from "@/app/api/artist/profile";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,52 @@ export default async function ArtistLayout({ children }: { children: ReactNode }
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (user) {
+    try {
+      const meta = (user.user_metadata ?? {}) as ArtistSignupMetadata;
+      const metaName =
+        typeof meta.artist_name === "string" && meta.artist_name.trim()
+          ? meta.artist_name.trim()
+          : null;
+
+      const { data: profileRow, error: profileErr } = await supabase
+        .from("users_profile")
+        .select("artist_name")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (profileErr) {
+        console.error("[artist/layout] users_profile lookup error:", profileErr);
+      }
+
+      const profileName =
+        typeof profileRow?.artist_name === "string" && profileRow.artist_name.trim()
+          ? profileRow.artist_name.trim()
+          : null;
+
+      const artistName = profileName || metaName;
+      if (artistName) {
+        const admin = getSupabaseAdmin();
+        const artistPayload = buildArtistPayload(user.id, {
+          ...meta,
+          artist_name: artistName,
+        });
+        const { error: artistErr } = await admin
+          .from("artists")
+          .upsert(artistPayload, { onConflict: "id" });
+        if (artistErr) {
+          console.error(
+            "[artist/layout] ensure artist error:",
+            artistErr,
+            JSON.stringify(artistErr)
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[artist/layout] ensure artist exception:", err);
+    }
+  }
 
   const { data: access } = user
     ? await supabase

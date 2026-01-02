@@ -62,6 +62,8 @@ type ProjectRow = {
   latestVersionCreatedAt: string | null;
   version_count: number;
   versions: ProjectVersionRow[];
+  user_id: string;
+  isCollaborator?: boolean;
 };
 
 const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBands: boolean) => {
@@ -87,6 +89,7 @@ const buildProjectsSelectQuery = (includeProjectInfo: boolean, includeWaveformBa
     title,
     status,
     genre,
+    user_id,
     created_at,
     project_versions (
       ${versionFields}
@@ -210,6 +213,7 @@ export default function ProjectsPage() {
   const [sortMode, setSortMode] = useState<"recent" | "score">("recent");
 
   const player = useTekkinPlayer();
+  const [userId, setUserId] = useState<string | null>(null);
 
   const filteredProjects = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -240,38 +244,94 @@ export default function ProjectsPage() {
         const supabase = createClient();
 
         const { data: auth } = await supabase.auth.getUser();
-        console.log("projects: user id =", auth.user?.id);
+        const currentUserId = auth.user?.id ?? null;
+        setUserId(currentUserId);
+        console.log("projects: user id =", currentUserId);
 
-        const fetchProjects = async (includeProjectInfo: boolean, includeWaveformBands: boolean) =>
-          supabase
-            .from("projects")
-            .select(buildProjectsSelectQuery(includeProjectInfo, includeWaveformBands))
-            .order("created_at", { ascending: false });
+        if (!currentUserId) {
+          setErrorMsg("Utente non autenticato.");
+          setProjects([]);
+          setLoading(false);
+          return;
+        }
 
-        let includeProjectInfo = allowProjectInfoSelectRef.current;
-        let includeWaveformBands = waveformBandsSelectableRef.current;
-        let selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
+        // Fetch owned projects
+        const { data: ownedData, error: ownedError } = await supabase
+          .from("projects")
+          .select(buildProjectsSelectQuery(true, true))
+          .eq("user_id", currentUserId);
 
-        if (selectResult.error) {
-          const message = `${selectResult.error.message ?? ""} ${selectResult.error.details ?? ""}`.toLowerCase();
-          if (includeWaveformBands && message.includes("waveform_bands")) {
-            includeWaveformBands = false;
-            waveformBandsSelectableRef.current = false;
-            selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
-          }
+        if (ownedError) {
+          console.error("Owned projects error:", ownedError);
+          setErrorMsg("Errore caricamento progetti propri.");
+          setProjects([]);
+          setLoading(false);
+          return;
+        }
 
-          if (selectResult.error && includeProjectInfo && shouldExcludeProjectInfo(selectResult.error)) {
-            includeProjectInfo = false;
-            allowProjectInfoSelectRef.current = false;
-            selectResult = await fetchProjects(includeProjectInfo, includeWaveformBands);
+        // Fetch collaborative projects
+        const { data: collabData, error: collabError } = await supabase
+          .from("project_collaborators")
+          .select(`
+            project:projects (
+              ${buildProjectsSelectQuery(true, true)}
+            )
+          `)
+          .eq("user_id", currentUserId);
+
+        if (collabError) {
+          console.error("Collab projects error:", collabError);
+          setErrorMsg("Errore caricamento progetti collaborativi.");
+          setProjects([]);
+          setLoading(false);
+          return;
+        }
+
+        const ownedProjectIds =
+          ownedData?.map((row: any) => row?.id).filter((id: any) => typeof id === "string") ?? [];
+
+        const collabByProjectId = new Map<string, string[]>();
+        if (ownedProjectIds.length > 0) {
+          const { data: ownerCollabRows, error: ownerCollabErr } = await supabase
+            .from("project_collaborators")
+            .select("project_id, user_id")
+            .in("project_id", ownedProjectIds);
+
+          if (ownerCollabErr) {
+            console.error("Owner collab lookup error:", ownerCollabErr);
+          } else {
+            ownerCollabRows?.forEach((row) => {
+              if (!row?.project_id || !row?.user_id) return;
+              const list = collabByProjectId.get(row.project_id) ?? [];
+              list.push(row.user_id);
+              collabByProjectId.set(row.project_id, list);
+            });
           }
         }
 
-        const { data } = selectResult;
+        // Merge owned and collab projects (dedupe by id)
+        const projectById = new Map<string, any>();
+        (ownedData ?? []).forEach((row: any) => {
+          if (row?.id) {
+            const hasCollaborators = (collabByProjectId.get(row.id) ?? []).length > 0;
+            projectById.set(row.id, { ...row, __source: "owned", __hasCollaborators: hasCollaborators });
+          }
+        });
+        (collabData ?? [])
+          .map((p: any) => p.project)
+          .filter(Boolean)
+          .forEach((row: any) => {
+            if (!row?.id) return;
+            if (!projectById.has(row.id)) {
+              projectById.set(row.id, { ...row, __source: "collab" });
+            }
+          });
+
+        const allProjectsData = Array.from(projectById.values());
 
         const mapped = await Promise.all(
-          (data ?? []).map(async (p: any) => {
-            const rawVersions = (p.project_versions ?? []) as any[];
+          allProjectsData.map(async (proj: any) => {
+            const rawVersions = (proj.project_versions ?? []) as any[];
 
             const sortedVersions: ProjectVersionRow[] = await Promise.all(
               [...rawVersions]
@@ -303,7 +363,7 @@ export default function ProjectsPage() {
                     const bands = version.waveform_bands;
                     const rawPeaksLen = Array.isArray(version.waveform_peaks) ? version.waveform_peaks.length : null;
                     console.log("[ProjectsPage] waveform raw ->", {
-                      projectId: p.id,
+                      projectId: proj.id,
                       versionId: version.id,
                       rawType: typeof version.waveform_peaks,
                       isArray: Array.isArray(version.waveform_peaks),
@@ -342,19 +402,26 @@ export default function ProjectsPage() {
 
             const latestVersion = sortedVersions[0] ?? null;
 
+            const isCollaborator =
+              proj.__source === "collab" ||
+              proj.__hasCollaborators === true ||
+              (currentUserId ? proj.user_id !== currentUserId : false);
+
             return {
-              id: p.id,
-              title: p.title,
-              genre: typeof p.genre === "string" ? (p.genre as TekkinGenreId) : null,
-              status: p.status,
+              id: proj.id,
+              title: proj.title,
+              genre: typeof proj.genre === "string" ? (proj.genre as TekkinGenreId) : null,
+              status: proj.status,
               version_name: latestVersion?.version_name ?? null,
               latestVersionId: latestVersion?.id ?? null,
-              created_at: p.created_at,
-              cover_url: p.cover_url ?? null,
-              description: p.description ?? null,
+              created_at: proj.created_at,
+              cover_url: proj.cover_url ?? null,
+              description: proj.description ?? null,
               latestVersionCreatedAt: latestVersion?.created_at ?? null,
               version_count: sortedVersions.length,
               versions: sortedVersions,
+              user_id: proj.user_id,
+              isCollaborator,
             } as ProjectRow;
           })
         );
@@ -1025,6 +1092,9 @@ export default function ProjectsPage() {
                           className="max-w-[360px] flex-1 truncate text-lg font-semibold text-white hover:underline"
                         >
                           {p.title}
+                          {p.isCollaborator && (
+                            <span className="ml-2 text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded">collab</span>
+                          )}
                         </Link>
                         <div className="flex flex-wrap items-center gap-2">
                           {primaryChips.map((chip) => (
@@ -1312,7 +1382,7 @@ export default function ProjectsPage() {
               <button
                 type="button"
                 onClick={() => setConfirmProject(null)}
-                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-[var(--accent)] hover:text-[var,--accent)]"
                 disabled={!!deletingId}
               >
                 Annulla
