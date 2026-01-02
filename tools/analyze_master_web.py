@@ -17,7 +17,7 @@ import numpy as np
 import re
 import tempfile
 import httpx
-from reference_ai import load_reference_db, evaluate_track_with_reference
+from .reference_ai import load_reference_db, evaluate_track_with_reference
 
 
 # Matplotlib in headless
@@ -31,7 +31,7 @@ from scipy.signal import butter, sosfiltfilt, resample_poly
 from fastapi import Request, HTTPException
 
 
-ANALYZER_SECRET = os.environ["TEKKIN_ANALYZER_SECRET"]
+ANALYZER_SECRET = os.getenv("TEKKIN_ANALYZER_SECRET", "")
 
 # Forza UTF-8 anche su Windows e quando avviato da Node
 try:

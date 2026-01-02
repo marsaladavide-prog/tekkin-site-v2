@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Tuple
 
 
 
-from tools.model_math import compute_model_match
+from .model_math import compute_model_match
 
-from reference_builder import build_feature_vector
+from .reference_builder import build_feature_vector
 
 
 
