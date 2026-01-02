@@ -13,6 +13,7 @@ export function playTrack(item: TrackItem) {
     audioUrl: item.audioUrl,
     title: item.title,
     subtitle: item.artistName ?? "",
+    collabBadges: item.collabBadges ?? null,
     artistId: item.artistId ?? undefined,
     artistSlug: item.artistSlug ?? null,
     coverUrl: item.coverUrl ?? null,

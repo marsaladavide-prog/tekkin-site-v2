@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import type { RefObject } from "react";
+import type { TrackCollabBadge } from "@/lib/tracks/types";
 
 type AudioRef = RefObject<HTMLAudioElement | null>;
 
@@ -10,6 +11,7 @@ export type PlayPayload = {
   versionId: string;
   title: string;
   subtitle?: string;
+  collabBadges?: TrackCollabBadge[] | null;
   audioUrl: string; // signed url, può cambiare
   duration?: number;
   artistId?: string | null;
@@ -27,6 +29,7 @@ export type TekkinPlayerState = {
 
   title: string;
   subtitle: string;
+  collabBadges: TrackCollabBadge[] | null;
   audioUrl: string | null;
   artistId: string | null;
   artistSlug: string | null;
@@ -89,6 +92,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
 
   title: "",
   subtitle: "",
+  collabBadges: null,
   audioUrl: null,
   artistId: null,
   artistSlug: null,
@@ -179,6 +183,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
         isOpen: true,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
+        collabBadges: payload.collabBadges ?? st.collabBadges,
         artistId: payload.artistId ?? st.artistId,
         artistSlug: payload.artistSlug ?? st.artistSlug,
       });
@@ -197,6 +202,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",
+      collabBadges: payload.collabBadges ?? null,
       artistId: payload.artistId ?? null,
       artistSlug: payload.artistSlug ?? null,
       audioUrl: payload.audioUrl,
@@ -221,6 +227,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
         pendingSeekRatio: r,
         title: payload.title,
         subtitle: payload.subtitle ?? "",
+        collabBadges: payload.collabBadges ?? st.collabBadges,
         artistId: payload.artistId ?? st.artistId,
         artistSlug: payload.artistSlug ?? st.artistSlug,
       });
@@ -244,6 +251,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       versionId: payload.versionId,
       title: payload.title,
       subtitle: payload.subtitle ?? "",
+      collabBadges: payload.collabBadges ?? null,
       artistId: payload.artistId ?? null,
       artistSlug: payload.artistSlug ?? null,
       audioUrl: payload.audioUrl,
@@ -276,6 +284,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       versionId: null,
       title: "",
       subtitle: "",
+      collabBadges: null,
       audioUrl: null,
       duration: 0,
       currentTime: 0,

@@ -1,4 +1,4 @@
-import type { TrackItem, TrackVisibility } from "@/lib/tracks/types";
+import type { TrackCollabBadge, TrackItem, TrackVisibility } from "@/lib/tracks/types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
@@ -65,6 +65,12 @@ export function mapChartsAnyToTrackItem(x: unknown): TrackItem | null {
         ? record.artist_slug
         : typeof record.artistSlug === "string"
         ? record.artistSlug
+        : null,
+    collabBadges:
+      Array.isArray(record.collab_badges)
+        ? (record.collab_badges as TrackCollabBadge[])
+        : Array.isArray(record.collabBadges)
+        ? (record.collabBadges as TrackCollabBadge[])
         : null,
 
     mixType:

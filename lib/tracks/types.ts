@@ -2,6 +2,11 @@ import type { WaveformBands } from "@/types/analyzer";
 
 export type TrackVisibility = "public" | "private_with_secret_link" | "private";
 
+export type TrackCollabBadge = {
+  label: string;
+  href?: string | null;
+};
+
 export type TrackItem = {
   // identity
   versionId: string;
@@ -13,6 +18,7 @@ export type TrackItem = {
   coverUrl: string | null;
   artistId?: string | null;
   artistSlug?: string | null;
+  collabBadges?: TrackCollabBadge[] | null;
 
   // audio (in charts può non esserci sempre: se vuoi zero errori, rendilo nullable)
   audioUrl: string | null;

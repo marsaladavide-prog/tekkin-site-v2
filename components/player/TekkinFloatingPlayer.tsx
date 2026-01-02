@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useCallback } from "react";
 import { Pause, Play, X } from "lucide-react";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
+import type { TrackCollabBadge } from "@/lib/tracks/types";
 
 function fmt(t: number) {
   if (!Number.isFinite(t) || t < 0) return "00:00";
@@ -17,6 +18,7 @@ export function TekkinFloatingPlayer() {
   const isPlaying = useTekkinPlayer((s) => s.isPlaying);
   const title = useTekkinPlayer((s) => s.title);
   const subtitle = useTekkinPlayer((s) => s.subtitle);
+  const collabBadges = useTekkinPlayer((s) => s.collabBadges);
   const audioUrl = useTekkinPlayer((s) => s.audioUrl);
   const duration = useTekkinPlayer((s) => s.duration);
   const currentTime = useTekkinPlayer((s) => s.currentTime);
@@ -37,6 +39,61 @@ export function TekkinFloatingPlayer() {
   const setVolume = useTekkinPlayer((s) => s.setVolume);
   const toggleMute = useTekkinPlayer((s) => s.toggleMute);
   const artistSlug = useTekkinPlayer((s) => s.artistSlug);
+
+  const renderArtistLinks = (badges: TrackCollabBadge[]) => {
+    const cleaned = badges
+      .map((badge) => ({ ...badge, label: badge.label.trim() }))
+      .filter((badge) => badge.label.length > 0);
+
+    if (cleaned.length === 0) return null;
+    if (cleaned.length === 1) {
+      const badge = cleaned[0];
+      return badge.href ? (
+        <Link href={badge.href} className="hover:text-white hover:underline">
+          {badge.label}
+        </Link>
+      ) : (
+        <span>{badge.label}</span>
+      );
+    }
+
+    const [owner, ...others] = cleaned;
+    const renderLink = (badge: TrackCollabBadge) =>
+      badge.href ? (
+        <Link
+          key={`${badge.label}-${badge.href ?? "nolink"}`}
+          href={badge.href}
+          className="hover:text-white hover:underline"
+        >
+          {badge.label}
+        </Link>
+      ) : (
+        <span key={badge.label}>{badge.label}</span>
+      );
+
+    if (others.length === 1) {
+      return (
+        <>
+          {renderLink(owner)}
+          {", "}
+          {renderLink(others[0])}
+        </>
+      );
+    }
+
+    return (
+      <>
+        {renderLink(owner)}
+        {" feat. "}
+        {others.map((badge, index) => (
+          <span key={`${badge.label}-${index}`}>
+            {renderLink(badge)}
+            {index < others.length - 1 ? " & " : ""}
+          </span>
+        ))}
+      </>
+    );
+  };
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -218,16 +275,15 @@ export function TekkinFloatingPlayer() {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{title || "Preview"}</div>
-              <div className="flex flex-wrap items-center gap-2">
-                {artistSlug ? (
-                  <Link
-                    href={`/@${artistSlug}`}
-                    className="truncate text-xs text-white/60 hover:text-white hover:underline"
-                  >
+              <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
+                {Array.isArray(collabBadges) && collabBadges.length > 0 ? (
+                  renderArtistLinks(collabBadges)
+                ) : artistSlug ? (
+                  <Link href={`/@${artistSlug}`} className="hover:text-white hover:underline">
                     {subtitle}
                   </Link>
                 ) : (
-                  <span className="truncate text-xs text-white/60">{subtitle}</span>
+                  <span>{subtitle}</span>
                 )}
               </div>
             </div>

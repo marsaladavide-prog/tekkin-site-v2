@@ -4,6 +4,7 @@ import { Play } from "lucide-react";
 import type { TrackItem } from "@/lib/tracks/types";
 import { playTrack } from "@/lib/player/playTrack";
 import Link from "next/link";
+import type { TrackCollabBadge } from "@/lib/tracks/types";
 
 type Variant = "row" | "compact";
 
@@ -41,6 +42,57 @@ export default function TrackRow({
       ? String(Math.round(item.scorePublic))
       : null;
 
+  const renderArtistLinks = (badges: TrackCollabBadge[]) => {
+    if (badges.length === 1) {
+      const badge = badges[0];
+      return badge.href ? (
+        <Link href={badge.href} className="hover:underline">
+          {badge.label}
+        </Link>
+      ) : (
+        <span>{badge.label}</span>
+      );
+    }
+
+    const [owner, ...others] = badges;
+    const renderLink = (badge: TrackCollabBadge) =>
+      badge.href ? (
+        <Link key={badge.label} href={badge.href} className="hover:underline">
+          {badge.label}
+        </Link>
+      ) : (
+        <span key={badge.label}>{badge.label}</span>
+      );
+
+    if (others.length === 1) {
+      return (
+        <>
+          {renderLink(owner)}
+          {", "}
+          {renderLink(others[0])}
+        </>
+      );
+    }
+
+    return (
+      <>
+        {renderLink(owner)}
+        {" feat. "}
+        {others.map((badge, index) => (
+          <span key={`${badge.label}-${index}`}>
+            {renderLink(badge)}
+            {index < others.length - 1 ? " & " : ""}
+          </span>
+        ))}
+      </>
+    );
+  };
+
+  const collabBadges =
+    Array.isArray(item.collabBadges) && item.collabBadges.length > 0
+      ? item.collabBadges
+      : null;
+
   return (
     <div
       className={[
@@ -73,7 +125,9 @@ export default function TrackRow({
           <div className="truncate text-sm font-semibold text-[var(--fg)]">{item.title}</div>
           {showArtist && (
             <div className="truncate text-xs text-[var(--muted)]">
-              {item.artistSlug ? (
+              {collabBadges ? (
+                renderArtistLinks(collabBadges)
+              ) : item.artistSlug ? (
                 <Link href={`/@${item.artistSlug}`} className="hover:underline">
                   {item.artistName ?? ""}
                 </Link>
