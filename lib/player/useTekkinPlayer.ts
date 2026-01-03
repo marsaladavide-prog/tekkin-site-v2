@@ -38,6 +38,7 @@ export type TekkinPlayerState = {
   currentTime: number;
 
   playRequestId: number;
+  playToken: number;
 
   // Per evitare reload inutili con signed url diversi
   lastLoadedVersionId: string | null;
@@ -82,6 +83,10 @@ function safePositive(n: unknown): number {
   return x;
 }
 
+function preserveValue<T>(incoming: T | null | undefined, previous: T | null | undefined): T | null | undefined {
+  return incoming == null ? previous : incoming;
+}
+
 export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
   open: (payload: PlayPayload) => get().play(payload),
   isOpen: false,
@@ -101,6 +106,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
   currentTime: 0,
 
   playRequestId: 0,
+  playToken: 0,
 
   lastLoadedVersionId: null,
   audioRef: null,
@@ -109,6 +115,7 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
 
   volume: 0.9,
   isMuted: false,
+  coverUrl: null,
 
   setIsPlaying: (v) => set({ isPlaying: !!v }),
 
@@ -164,7 +171,6 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
   play: (payload) => {
     const st = get();
 
-    // play() senza payload: riprendi se c'è una sorgente già impostata
     if (!payload) {
       if (!st.audioUrl || !st.versionId) return;
       set({
@@ -174,18 +180,28 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       return;
     }
 
+    const nextToken = st.playToken + 1;
     const sameVersion = st.versionId === payload.versionId;
 
+    const mergedTitle = preserveValue(payload.title, st.title) ?? "";
+    const mergedSubtitle = preserveValue(payload.subtitle, st.subtitle) ?? "";
+    const mergedCollabBadges = preserveValue(payload.collabBadges ?? null, st.collabBadges ?? null) ?? null;
+    const mergedArtistId = preserveValue(payload.artistId ?? null, st.artistId ?? null) ?? null;
+    const mergedArtistSlug = preserveValue(payload.artistSlug ?? null, st.artistSlug ?? null) ?? null;
+    const mergedCoverUrl = preserveValue(payload.coverUrl ?? null, st.coverUrl ?? null) ?? null;
+    const mergedProjectId = preserveValue(payload.projectId ?? null, st.projectId ?? null) ?? null;
+
     if (sameVersion) {
-      // Non toccare audioUrl qui: è signed, cambia spesso e crea mismatch UI.
-      // Non incrementare playRequestId se stai già suonando.
       set({
         isOpen: true,
-        title: payload.title,
-        subtitle: payload.subtitle ?? "",
-        collabBadges: payload.collabBadges ?? st.collabBadges,
-        artistId: payload.artistId ?? st.artistId,
-        artistSlug: payload.artistSlug ?? st.artistSlug,
+        playToken: nextToken,
+        title: mergedTitle,
+        subtitle: mergedSubtitle,
+        collabBadges: mergedCollabBadges,
+        artistId: mergedArtistId,
+        artistSlug: mergedArtistSlug,
+        coverUrl: mergedCoverUrl,
+        projectId: mergedProjectId,
       });
 
       if (!st.isPlaying) {
@@ -194,23 +210,26 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       return;
     }
 
-    // Nuova versione: reset sensato
+    const mergedAudioUrl = payload.audioUrl ?? st.audioUrl ?? null;
+
     set({
       isOpen: true,
       isPlaying: false,
-      projectId: payload.projectId ?? null,
+      projectId: mergedProjectId,
       versionId: payload.versionId,
-      title: payload.title,
-      subtitle: payload.subtitle ?? "",
-      collabBadges: payload.collabBadges ?? null,
-      artistId: payload.artistId ?? null,
-      artistSlug: payload.artistSlug ?? null,
-      audioUrl: payload.audioUrl,
+      title: mergedTitle,
+      subtitle: mergedSubtitle,
+      collabBadges: mergedCollabBadges,
+      artistId: mergedArtistId,
+      artistSlug: mergedArtistSlug,
+      audioUrl: mergedAudioUrl,
+      coverUrl: mergedCoverUrl,
       duration: safePositive(payload.duration),
       currentTime: 0,
       pendingSeekRatio: null,
       playRequestId: st.playRequestId + 1,
-      lastLoadedVersionId: null, // forza reload nel floating
+      lastLoadedVersionId: null,
+      playToken: nextToken,
     });
   },
 
@@ -218,48 +237,59 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
     const r = clamp01(ratio);
     const st = get();
 
+    const nextToken = st.playToken + 1;
     const sameVersion = st.versionId === payload.versionId;
 
+    const mergedTitle = preserveValue(payload.title, st.title) ?? "";
+    const mergedSubtitle = preserveValue(payload.subtitle, st.subtitle) ?? "";
+    const mergedCollabBadges = preserveValue(payload.collabBadges ?? null, st.collabBadges ?? null) ?? null;
+    const mergedArtistId = preserveValue(payload.artistId ?? null, st.artistId ?? null) ?? null;
+    const mergedArtistSlug = preserveValue(payload.artistSlug ?? null, st.artistSlug ?? null) ?? null;
+    const mergedCoverUrl = preserveValue(payload.coverUrl ?? null, st.coverUrl ?? null) ?? null;
+    const mergedProjectId = preserveValue(payload.projectId ?? null, st.projectId ?? null) ?? null;
+    const mergedAudioUrl = payload.audioUrl ?? st.audioUrl ?? null;
+
     if (sameVersion) {
-      // stessa versione: non cambiare audioUrl (signed url cambia spesso)
       set({
         isOpen: true,
+        playToken: nextToken,
         pendingSeekRatio: r,
-        title: payload.title,
-        subtitle: payload.subtitle ?? "",
-        collabBadges: payload.collabBadges ?? st.collabBadges,
-        artistId: payload.artistId ?? st.artistId,
-        artistSlug: payload.artistSlug ?? st.artistSlug,
+        title: mergedTitle,
+        subtitle: mergedSubtitle,
+        collabBadges: mergedCollabBadges,
+        artistId: mergedArtistId,
+        artistSlug: mergedArtistSlug,
+        coverUrl: mergedCoverUrl,
+        projectId: mergedProjectId,
       });
 
-      // retrigger play solo se non stai già suonando
       if (!st.isPlaying) {
         set({ playRequestId: st.playRequestId + 1 });
       } else {
-        // se stai già suonando, applica seek appena possibile senza ripartire
         queueMicrotask(() => get().applyPendingSeekIfPossible());
       }
 
       return;
     }
 
-    // nuova traccia
     set({
       isOpen: true,
       isPlaying: false,
-      projectId: payload.projectId ?? null,
+      projectId: mergedProjectId,
       versionId: payload.versionId,
-      title: payload.title,
-      subtitle: payload.subtitle ?? "",
-      collabBadges: payload.collabBadges ?? null,
-      artistId: payload.artistId ?? null,
-      artistSlug: payload.artistSlug ?? null,
-      audioUrl: payload.audioUrl,
+      title: mergedTitle,
+      subtitle: mergedSubtitle,
+      collabBadges: mergedCollabBadges,
+      artistId: mergedArtistId,
+      artistSlug: mergedArtistSlug,
+      audioUrl: mergedAudioUrl,
+      coverUrl: mergedCoverUrl,
       duration: safePositive(payload.duration),
       currentTime: 0,
       pendingSeekRatio: r,
       playRequestId: st.playRequestId + 1,
       lastLoadedVersionId: null,
+      playToken: nextToken,
     });
   },
 
@@ -286,10 +316,12 @@ export const useTekkinPlayer = create<TekkinPlayerState>()((set, get) => ({
       subtitle: "",
       collabBadges: null,
       audioUrl: null,
+      coverUrl: null,
       duration: 0,
       currentTime: 0,
       pendingSeekRatio: null,
       lastLoadedVersionId: null,
+      playToken: 0,
       artistId: null,
       artistSlug: null,
     });

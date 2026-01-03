@@ -1,6 +1,13 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import {
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  ResponsiveContainer,
+} from "recharts";
 import type {
   TekkinVersionRankComponentKey,
   TekkinVersionRankDetails,
@@ -145,6 +152,12 @@ if (!rank) {
     ? `Punti forti: ${strongComponents.slice(0, 3).join(", ")}.`
     : "Sistema i fondamentali e alza il livello.";
 
+  const chartData = rank.components.map((c) => ({
+    subject: c.label,
+    A: c.score ?? 0,
+    fullMark: 100,
+  }));
+
   return (
     <Card title="Tekkin Rank" subtitle="Cosa lo tiene sotto 100" className="h-full">
       <div className="space-y-4">
@@ -175,70 +188,23 @@ if (!rank) {
           <div className="mt-1 text-[11px] text-white/50">{coachStrength}</div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {rank.components.map((component) => {
-            const closeness = precisionMap.get(component.key) ?? null;
-            const isOpen = openAdviceKey === component.key;
-            const isStrong = component.score != null && component.score >= 95;
-            return (
-              <div key={component.key} className="rounded-xl border border-white/10 bg-black/30 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-[12px] font-semibold text-white">{component.label}</div>
-                  <div className="text-sm font-semibold text-white">
-                    {component.score != null ? `${component.score.toFixed(1)}` : "n/a"}
-                  </div>
-                </div>
-                <div className="mt-3 h-2 rounded-full bg-white/5">
-                  {component.score != null && (
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400"
-                      style={{ width: `${Math.min(100, Math.max(0, component.score))}%` }}
-                    />
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-white/50">
-                  <span>Peso {Math.round(component.weight * 100)}%</span>
-                  <span>+{component.contribution != null ? component.contribution.toFixed(1) : "n/a"}</span>
-                  <span>Aderenza {fmtPercent(closeness)}</span>
-                </div>
-                <button
-                  type="button"
-                  className="mt-2 text-[10px] font-medium text-white/60 hover:text-white"
-                  onClick={() =>
-                    setOpenAdviceKey((prev) => (prev === component.key ? null : component.key))
-                  }
-                >
-                  {isOpen ? "Chiudi dettagli" : "Dettagli"}
-                </button>
-                {isOpen ? (
-                  <div className="mt-3 rounded-xl border border-white/10 bg-black/40 p-3 text-[11px] text-white/70">
-                    {isStrong ? (
-                      <>
-                        <div className="text-[10px] text-white/50">Punto forte</div>
-                        <p className="mt-2 text-white/70">{getPraiseCopy(component.key)}</p>
-                        <div className="mt-3 text-[10px] text-white/50">Mantieni</div>
-                        <p className="mt-2 text-white/70">{getKeepCopy(component.key)}</p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[10px] text-white/50">Cosa manca</div>
-                        <p className="mt-2 text-white/70">{getIssueCopy(component.key, false)}</p>
-                        <div className="mt-3 text-[10px] text-white/50">Cosa fare</div>
-                        <p className="mt-2 text-white/70">{getActionCopy(component.key)}</p>
-                      </>
-                    )}
-                    {component.detailLines?.length ? (
-                      <div className="mt-3 space-y-1 text-[10px] text-white/50">
-                        {component.detailLines.map((line) => (
-                          <div key={line}>{line}</div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
+        <div className="h-[220px] w-full -ml-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
+              <PolarGrid stroke="rgba(255,255,255,0.1)" />
+              <PolarAngleAxis
+                dataKey="subject"
+                tick={{ fill: "rgba(255,255,255,0.5)", fontSize: 10 }}
+              />
+              <Radar
+                name="Tekkin"
+                dataKey="A"
+                stroke="#10b981"
+                fill="#10b981"
+                fillOpacity={0.3}
+              />
+            </RadarChart>
+          </ResponsiveContainer>
         </div>
 
         <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
@@ -268,7 +234,78 @@ if (!rank) {
 
         <details className="rounded-xl border border-white/10 bg-black/20 p-3">
           <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.2em] text-white/60">
-            Dettagli
+            Dettagli Punteggi
+          </summary>
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            {rank.components.map((component) => {
+              const closeness = precisionMap.get(component.key) ?? null;
+              const isOpen = openAdviceKey === component.key;
+              const isStrong = component.score != null && component.score >= 95;
+              return (
+                <div key={component.key} className="rounded-xl border border-white/10 bg-black/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[12px] font-semibold text-white">{component.label}</div>
+                    <div className="text-sm font-semibold text-white">
+                      {component.score != null ? `${component.score.toFixed(1)}` : "n/a"}
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-white/5">
+                    {component.score != null && (
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-sky-400"
+                        style={{ width: `${Math.min(100, Math.max(0, component.score))}%` }}
+                      />
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-white/50">
+                    <span>Peso {Math.round(component.weight * 100)}%</span>
+                    <span>+{component.contribution != null ? component.contribution.toFixed(1) : "n/a"}</span>
+                    <span>Aderenza {fmtPercent(closeness)}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 text-[10px] font-medium text-white/60 hover:text-white"
+                    onClick={() =>
+                      setOpenAdviceKey((prev) => (prev === component.key ? null : component.key))
+                    }
+                  >
+                    {isOpen ? "Chiudi dettagli" : "Dettagli"}
+                  </button>
+                  {isOpen ? (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/40 p-3 text-[11px] text-white/70">
+                      {isStrong ? (
+                        <>
+                          <div className="text-[10px] text-white/50">Punto forte</div>
+                          <p className="mt-2 text-white/70">{getPraiseCopy(component.key)}</p>
+                          <div className="mt-3 text-[10px] text-white/50">Mantieni</div>
+                          <p className="mt-2 text-white/70">{getKeepCopy(component.key)}</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-[10px] text-white/50">Cosa manca</div>
+                          <p className="mt-2 text-white/70">{getIssueCopy(component.key, false)}</p>
+                          <div className="mt-3 text-[10px] text-white/50">Cosa fare</div>
+                          <p className="mt-2 text-white/70">{getActionCopy(component.key)}</p>
+                        </>
+                      )}
+                      {component.detailLines?.length ? (
+                        <div className="mt-3 space-y-1 text-[10px] text-white/50">
+                          {component.detailLines.map((line) => (
+                            <div key={line}>{line}</div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+
+        <details className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.2em] text-white/60">
+            Info Reference
           </summary>
           <div className="mt-3 space-y-2 text-[11px] text-white/60">
             <div>Tekkin Rank = Fit reference + bonus - penalita.</div>

@@ -232,7 +232,8 @@ const arraysPath =
   (updatePayload as any)?.arrays_blob_path ??
   null;
 
-let arraysJson: Record<string, unknown> | null = null;
+    let arraysJson: Record<string, unknown> | null = null;
+    let tekkinRankScore: number | null = null;
 
 if (typeof arraysPath === "string" && arraysPath.length > 0) {
   const dl = await downloadJsonWithServiceRole("tracks", arraysPath);
@@ -260,6 +261,7 @@ if (typeof arraysPath === "string" && arraysPath.length > 0) {
       const model = mapVersionToAnalyzerCompareModel(versionForModel, referenceModel);
       const tekkinVersionRank = calculateTekkinVersionRankFromModel(model);
       updatePayload.overall_score = tekkinVersionRank.score;
+      tekkinRankScore = tekkinVersionRank.score;
       console.log("[run-analyzer] tekkin rank ->", tekkinVersionRank.score);
     } catch (rankErr) {
       console.warn("[run-analyzer] tekkin rank calcolo fallito", rankErr);
@@ -431,15 +433,30 @@ if (typeof arraysPath === "string" && arraysPath.length > 0) {
       updateResult = await updateVersion(includeKey, includeArrays);
     }
 
-    const { data: updatedVersion, error: updateError } = updateResult;
+const { data: updatedVersion, error: updateError } = updateResult;
 
-    if (updateError || !updatedVersion) {
-      console.error("[run-analyzer] Update version error:", updateError);
-      return NextResponse.json(
-        { error: "Errore aggiornando i dati di analisi" },
-        { status: 500 }
-      );
-    }
+if (updateError) {
+  console.error("[run-analyzer] Update version error:", updateError);
+  return NextResponse.json(
+    { error: "Errore aggiornando i dati di analisi" },
+    { status: 500 }
+  );
+}
+
+// Nessun errore ma nessuna riga aggiornata: 0 rows (tipicamente RLS o filtro non matchato)
+if (!updatedVersion) {
+  console.warn("[run-analyzer] Update returned no row (0 updated). Possible RLS.", {
+    versionId: version.id,
+    projectId: version.project_id,
+    userId: user.id,
+  });
+
+  return NextResponse.json(
+    { error: "Non hai permesso di salvare l'analisi su questa traccia." },
+    { status: 403 }
+  );
+}
+
 
     if (DEBUG_WAVEFORM_PIPELINE) {
       const saved = updatedVersion as any;
@@ -472,13 +489,31 @@ if (DEBUG_WAVEFORM_PIPELINE) {
   });
 }
 
-    return NextResponse.json(
-      { ok: true, version: updatedVersion, analyzer_result: result },
-      { status: 200 }
-    );
+    console.log("[run-analyzer] respond -> start");
+    const sanitizedVersion = serializeVersion(updatedVersion);
+    const arraysBlobPathAfterUpdate =
+      (updatedVersion as any)?.arrays_blob_path ?? arraysPath ?? null;
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      version: sanitizedVersion,
+    };
+    if (tekkinRankScore != null) {
+      responsePayload.tekkin_rank = tekkinRankScore;
+    }
+    if (arraysBlobPathAfterUpdate) {
+      responsePayload.arrays_blob_path = arraysBlobPathAfterUpdate;
+    }
+    console.log("[run-analyzer] respond -> payload ready", {
+      versionId: sanitizedVersion?.["id"] ?? null,
+      tekkinRank: tekkinRankScore,
+      arraysBlobPath: arraysBlobPathAfterUpdate,
+    });
+    console.log("[run-analyzer] respond -> done");
+    return NextResponse.json(responsePayload, { status: 200 });
 
   } catch (err: unknown) {
-    console.error("Unexpected run-analyzer error:", err);
+    const message = err instanceof Error ? err.stack ?? err.message : JSON.stringify(err);
+    console.error("Unexpected run-analyzer error:", message);
     return NextResponse.json({ error: "Errore inatteso Analyzer" }, { status: 500 });
   }
 }
@@ -530,6 +565,19 @@ async function downloadJsonWithServiceRole(bucket: string, path: string) {
   } catch (_e: unknown) {
     return { error: new Error("Invalid JSON in arrays blob"), json: null as unknown };
   }
+}
+
+function serializeVersion(row: unknown): Record<string, unknown> | null {
+  if (!isRecord(row)) return null;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (typeof value === "bigint") {
+      result[key] = value.toString();
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 function _downsample(xs: number[], maxPoints: number) {
@@ -1079,7 +1127,7 @@ function logAnalyzerSummary(tag: string, raw: any) {
           }
         : null,
     });
-  } catch (e) {
-    console.log(`[${tag}] analyzer summary failed`, { err: String(e) });
+  } catch (_e) {
+    console.log(`[${tag}] analyzer summary failed`, { err: String(_e) });
   }
 }

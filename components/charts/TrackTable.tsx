@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import SoftButton from "@/components/ui/SoftButton";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 import type { ChartSnapshotEntry } from "./types";
+import { mapChartsRowToTrackSnapshot } from "@/lib/tracks/trackSnapshot";
 
 type TrackTableProps = {
   title: string;
@@ -58,14 +59,15 @@ export default function TrackTable({
   };
 
   const launchPayload = useCallback((entry: ChartSnapshotEntry) => {
-    if (!entry.audio_url) return null;
+    const snapshot = mapChartsRowToTrackSnapshot(entry);
+    if (!snapshot.audioUrl || !snapshot.versionId) return null;
     return {
-      projectId: entry.project_id,
-      versionId: entry.version_id,
-      title: entry.track_title ?? "Untitled",
+      projectId: snapshot.projectId || entry.project_id,
+      versionId: snapshot.versionId,
+      title: snapshot.title ?? entry.track_title ?? "Untitled",
       subtitle: entry.artist_name ?? "Tekkin",
       collabBadges: entry.collab_badges ?? entry.collabBadges ?? null,
-      audioUrl: entry.audio_url,
+      audioUrl: snapshot.audioUrl,
     };
   }, []);
 

@@ -6,6 +6,7 @@ import AnalyzerV2ProPanel from "@/components/analyzer/v2/AnalyzerV2ProPanel";
 import TekkinAnalyzerPreviewUi from "@/components/analyzer/TekkinAnalyzerPreviewUi";
 import type { AnalyzerPreviewData } from "@/lib/analyzer/previewAdapter";
 import type { AnalyzerCompareModel } from "@/lib/analyzer/v2/types";
+import type { AnalyzerCardsModel } from "@/lib/analyzer/cards/types";
 import { useTekkinPlayer } from "@/lib/player/useTekkinPlayer";
 
 type AnalyzerUi = "v1" | "v2";
@@ -17,6 +18,7 @@ export default function TekkinAnalyzerPageClient({
   initialData,
   v2Model,
   sharePath,
+  cardsModel,
 }: {
   ui?: AnalyzerUi;
   versionId: string;
@@ -46,6 +48,7 @@ track: {
   initialData: AnalyzerPreviewData;
   v2Model: AnalyzerCompareModel;
   sharePath: string;
+  cardsModel: AnalyzerCardsModel;
 }) {
   const router = useRouter();
   const player = useTekkinPlayer();
@@ -178,6 +181,7 @@ track: {
         }}
         onPlay={handlePlay}
         onShare={handleShare}
+        cardsModel={cardsModel}
         track={{
           versionId: track.versionId,
           projectId: track.artistId ?? null,

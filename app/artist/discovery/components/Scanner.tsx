@@ -9,7 +9,6 @@ type ScannerTrack = {
   project_id: string;
   genre: string;
   overall_score: number | null;
-  mix_score: number | null;
   master_score: number | null;
   bass_energy: number | null;
   has_vocals: boolean | null;
@@ -124,8 +123,6 @@ export function Scanner() {
                 </span>
               </div>
               <div className="text-xs text-muted-foreground">
-                Score: {t.overall_score ?? "N/A"}
-                {t.mix_score != null && <> · Mix: {t.mix_score}</>}
                 {t.master_score != null && <> · Master: {t.master_score}</>}
                 {t.bass_energy != null && <> · Bass: {t.bass_energy}</>}
                 {t.has_vocals != null && (

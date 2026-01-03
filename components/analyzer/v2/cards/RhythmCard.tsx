@@ -2,7 +2,7 @@
 
 import React, { useMemo } from "react";
 import type { Rhythm, ReferenceRhythmPercentiles, ReferenceRhythmDescriptorsPercentiles } from "@/lib/analyzer/v2/types";
-import type { RefState } from "../utils/refState";
+import type { RefState } from "@/lib/analyzer/cards/refState";
 import { Card, Pill, SourcePills } from "../utils/ui";
 
 const MAX_BEAT_TICKS = 256;

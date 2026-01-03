@@ -3,7 +3,7 @@ const TEKKIN_GENRE_IDS = [
   "tech_house",
   "house",
   "minimal_house",
- "other",
+  "other",
 ] as const;
 
 export type TekkinGenreId = (typeof TEKKIN_GENRE_IDS)[number];
@@ -27,12 +27,23 @@ export const TEKKIN_GENRES: TekkinGenreOption[] = TEKKIN_GENRE_IDS.map(
   })
 );
 
+const TEKKIN_GENRE_ID_SET = new Set(TEKKIN_GENRE_IDS);
+const LABEL_SANITIZER = /[^a-z0-9]/g;
+const TEKKIN_GENRE_LABEL_LOOKUP = new Map<string, TekkinGenreId>();
+
+function normalizeLabelForLookup(value: string) {
+  return value.toLowerCase().replace(LABEL_SANITIZER, "");
+}
+
+for (const genre of TEKKIN_GENRES) {
+  TEKKIN_GENRE_LABEL_LOOKUP.set(normalizeLabelForLookup(genre.label), genre.id);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 export function formatGenreLabel(value: unknown) {
-  // Defensive: callers might pass objects (eg. TekkinGenreOption) or non-strings.
   const raw =
     typeof value === "string"
       ? value
@@ -61,6 +72,33 @@ export function getTekkinGenreLabel(input?: unknown): string | null {
   if (!id) return null;
   const match = TEKKIN_GENRES.find((genre) => genre.id === id);
   return match ? match.label : formatGenreLabel(id);
+}
+
+function normalizeTekkinGenreId(value: unknown): TekkinGenreId | null {
+  if (value == null) return null;
+  const candidate =
+    typeof value === "string"
+      ? value
+      : isRecord(value) && "id" in value
+        ? String(value.id)
+        : "";
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  if (TEKKIN_GENRE_ID_SET.has(trimmed as TekkinGenreId)) {
+    return trimmed as TekkinGenreId;
+  }
+  const normalizedLabel = normalizeLabelForLookup(trimmed);
+  return TEKKIN_GENRE_LABEL_LOOKUP.get(normalizedLabel) ?? null;
+}
+
+export function parseTekkinGenreIds(raw?: unknown): TekkinGenreId[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((entry) => normalizeTekkinGenreId(entry))
+      .filter((entry): entry is TekkinGenreId => Boolean(entry));
+  }
+  const single = normalizeTekkinGenreId(raw);
+  return single ? [single] : [];
 }
 
 export const TEKKIN_MIX_TYPES = ["premaster", "master"] as const;

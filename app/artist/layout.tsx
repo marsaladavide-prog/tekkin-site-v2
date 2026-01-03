@@ -94,7 +94,9 @@ export default async function ArtistLayout({ children }: { children: ReactNode }
 
   return (
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--text-primary)] selection:bg-[var(--accent)] selection:text-black font-sans transition-colors">
-      <ArtistSidebar />
+      <div className="relative z-50">
+        <ArtistSidebar />
+      </div>
 
       <main className="relative flex-1 overflow-y-auto">
         <AppShell className="bg-transparent" innerClassName="gap-6 px-0 py-8" maxWidth="full" fullHeight>

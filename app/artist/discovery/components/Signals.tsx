@@ -14,31 +14,42 @@ type DiscoveryMessage = {
   created_at: string;
 };
 
-type DiscoveryInboxItem = {
+type CollaboratorEntry = {
+  name?: string | null;
+  avatar?: string | null;
+};
+
+type DiscoveryBaseItem = {
   request_id: string;
-  kind: "collab" | "promo";
+  kind: "collab" | "promo" | string;
   project_id: string;
+  version_id: string | null;
   project_title: string;
+  project_cover_url?: string | null;
+
   genre: string | null;
   overall_score: number | null;
-  mix_score: number | null;
   master_score: number | null;
   bass_energy: number | null;
   has_vocals: boolean | null;
   bpm: number | null;
   key?: string | null;
+
   status: "pending" | "accepted" | "rejected" | string;
-  sender_id: string | null;
-  sender_name: string | null;
-  sender_avatar: string | null;
   message: string | null;
   audio_url: string | null;
   messages: DiscoveryMessage[];
-  version_count?: number;
-  project_cover_url?: string | null;
 };
 
-type DiscoveryOutboxItem = DiscoveryInboxItem & {
+type DiscoveryInboxItem = DiscoveryBaseItem & {
+  sender_id: string | null;
+  sender_name: string | null;
+  sender_avatar: string | null;
+  collaborators: { name: string | null; avatar: string | null }[];
+  version_count?: number;
+};
+
+type DiscoveryOutboxItem = DiscoveryBaseItem & {
   receiver_id: string;
   receiver_name: string | null;
   receiver_avatar: string | null;
@@ -52,10 +63,10 @@ type IdentityReveal = {
   versionCount: number;
   genre: string | null;
   overallScore: number | null;
-  mixScore: number | null;
   masterScore: number | null;
   bpm: number | null;
-  kind: "collab" | "promo";
+  kind: "collab" | "promo" | string;
+  collaborators: { name: string | null; avatar: string | null }[];
 };
 
 const statusTabs = [
@@ -85,11 +96,15 @@ function levelFromScore(v: number | null) {
 }
 
 function formatMetricValue(v: number | null | undefined) {
-  if (typeof v === "number" && Number.isFinite(v)) {
-    return v.toFixed(1);
-  }
-  return "—";
+  if (typeof v === "number" && Number.isFinite(v)) return v.toFixed(1);
+  return "-";
 }
+
+type HasMessages = {
+  messages: DiscoveryMessage[];
+  sender_id?: string | null;
+  sender_name?: string | null;
+};
 
 export function Signals() {
   const [receivedItems, setReceivedItems] = useState<DiscoveryInboxItem[]>([]);
@@ -101,6 +116,7 @@ export function Signals() {
   const [sentStatusTab, setSentStatusTab] = useState<StatusKey>("pending");
   const [messageInputs, setMessageInputs] = useState<Record<string, string>>({});
   const [identityReveal, setIdentityReveal] = useState<IdentityReveal | null>(null);
+
   const player = useTekkinPlayer((s) => s);
 
   const receivedLists = useMemo(
@@ -197,6 +213,14 @@ export function Signals() {
 
         if (action === "accept") {
           const name = safeText(data?.sender?.artist_name, "Artista");
+          const collaborators =
+            Array.isArray(data?.collaborators) && data.collaborators.length
+              ? data.collaborators.map((entry: CollaboratorEntry) => ({
+                  name: safeText(entry?.name ?? null, "Artista"),
+                  avatar: entry?.avatar ?? "/img/avatar-placeholder.png",
+                }))
+              : [];
+
           setIdentityReveal({
             senderName: name,
             senderAvatar: data?.sender?.avatar_url ?? item.sender_avatar ?? null,
@@ -205,10 +229,10 @@ export function Signals() {
             versionCount: item.version_count ?? 0,
             genre: item.genre,
             overallScore: item.overall_score,
-            mixScore: item.mix_score,
             masterScore: item.master_score,
             bpm: item.bpm,
             kind: item.kind,
+            collaborators,
           });
           toast.success("Signal accettato", { id: toastId });
         } else {
@@ -225,15 +249,23 @@ export function Signals() {
   );
 
   const playSignal = useCallback(
-    (item: DiscoveryInboxItem | DiscoveryOutboxItem, subtitle?: string) => {
+    (item: DiscoveryBaseItem, subtitle?: string) => {
       const audioUrl = typeof item.audio_url === "string" ? item.audio_url : null;
+      const versionId = typeof item.version_id === "string" && item.version_id.trim() ? item.version_id : null;
+
+      if (!versionId) {
+        toast.error("Track non disponibile (versione mancante).");
+        return;
+      }
+
       if (!audioUrl) {
         toast.error("Anteprima audio in arrivo.");
         return;
       }
+
       player.play({
         projectId: item.project_id,
-        versionId: item.request_id,
+        versionId,
         title: safeText(item.project_title, "Signal"),
         subtitle: subtitle ?? (item.kind === "promo" ? "Promo Signal" : "Collab Signal"),
         audioUrl,
@@ -242,22 +274,23 @@ export function Signals() {
     [player]
   );
 
-  const handleDownload = useCallback((url: string) => {
-    if (!url) {
-      toast.error("Download non disponibile.");
-      return;
-    }
-    try {
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "";
-      anchor.click();
-      toast.success("Download avviato.");
-    } catch (err) {
-      console.error("Download error:", err);
-      toast.error("Impossibile avviare il download.");
-    }
-  }, []);
+const handleDownload = useCallback((url: string | null | undefined) => {
+  if (!url) {
+    toast.error("Download non disponibile.");
+    return;
+  }
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "";
+    anchor.click();
+    toast.success("Download avviato.");
+  } catch (err) {
+    console.error("Download error:", err);
+    toast.error("Impossibile avviare il download.");
+  }
+}, []);
+
 
   const handleSendMessage = useCallback(
     async (item: DiscoveryInboxItem | DiscoveryOutboxItem, role: "received" | "sent") => {
@@ -278,7 +311,7 @@ export function Signals() {
             message: text,
             receiver_id:
               role === "received"
-                ? item.sender_id
+                ? (item as DiscoveryInboxItem).sender_id
                 : (item as DiscoveryOutboxItem).receiver_id,
           }),
         });
@@ -297,7 +330,7 @@ export function Signals() {
     [loadSignals, messageInputs]
   );
 
-  const renderMessages = (item: DiscoveryInboxItem) => (
+  const renderMessages = (item: HasMessages) => (
     <div className="space-y-2">
       {(item.messages ?? []).map((msg) => (
         <div
@@ -305,12 +338,12 @@ export function Signals() {
           className="space-y-1 rounded-xl border border-white/5 bg-white/5 px-3 py-2 text-xs text-white/70"
         >
           <p className="text-[11px] uppercase tracking-[0.3em] text-white/50">
-            {msg.sender_id === item.sender_id ? safeText(item.sender_name, "Mittente") : "Tu"}
+            {msg.sender_id && msg.sender_id === item.sender_id
+              ? safeText(item.sender_name, "Mittente")
+              : "Tu"}
           </p>
           <p>{msg.message}</p>
-          <p className="text-[10px] text-white/40">
-            {new Date(msg.created_at).toLocaleString("it-IT")}
-          </p>
+          <p className="text-[10px] text-white/40">{new Date(msg.created_at).toLocaleString("it-IT")}</p>
         </div>
       ))}
     </div>
@@ -342,10 +375,7 @@ export function Signals() {
 
       {identityReveal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
-          <div
-            className="absolute inset-0 bg-black/80 backdrop-blur-md"
-            onClick={() => setIdentityReveal(null)}
-          />
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setIdentityReveal(null)} />
           <div className="relative z-10 w-full max-w-5xl rounded-3xl border border-white/10 bg-black/80 p-6 shadow-[0_30px_60px_rgba(0,0,0,0.55)]">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -388,9 +418,9 @@ export function Signals() {
                     loading="lazy"
                   />
                   <div>
-                    <p className="text-xs uppercase tracking-[0.4em] text-white/50">Da</p>
+                    <p className="text-xs uppercase tracking-[0.4em] text-white/50">Sbloccato</p>
                     <p className="text-lg font-semibold text-white">{identityReveal.senderName}</p>
-                    <p className="text-[11px] text-white/60">Tu</p>
+                    <p className="text-[11px] text-white/60">Hai accettato il Signal</p>
                   </div>
                 </div>
 
@@ -398,10 +428,6 @@ export function Signals() {
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
                     <p className="text-[11px] text-white/60">Overall score</p>
                     <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.overallScore)}</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
-                    <p className="text-[11px] text-white/60">Mix score</p>
-                    <p className="mt-1 text-xl font-semibold">{formatMetricValue(identityReveal.mixScore)}</p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-white">
                     <p className="text-[11px] text-white/60">Master score</p>
@@ -418,7 +444,7 @@ export function Signals() {
                   <dl className="mt-2 grid gap-2">
                     <div className="flex items-center justify-between">
                       <span>Genre</span>
-                      <span>{safeText(identityReveal.genre, "—")}</span>
+                      <span>{safeText(identityReveal.genre, "n.d.")}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Versioni</span>
@@ -429,6 +455,27 @@ export function Signals() {
                       <span>{identityReveal.kind === "collab" ? "Collab" : "Promo"}</span>
                     </div>
                   </dl>
+
+                  {identityReveal.kind === "collab" && identityReveal.collaborators.length > 0 && (
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-white/70">
+                      <p className="text-[11px] uppercase tracking-[0.3em] text-white/60">Collaboratori</p>
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        {identityReveal.collaborators.map((collab, index) => (
+                          <span
+                            key={`${collab.name}-${index}`}
+                            className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-[11px] text-white/70"
+                          >
+                            <img
+                              src={collab.avatar ?? "/img/avatar-placeholder.png"}
+                              alt={safeText(collab.name, "Artista")}
+                              className="h-5 w-5 rounded-full object-cover"
+                            />
+                            {safeText(collab.name, "Artista Tekkin")}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -455,14 +502,17 @@ export function Signals() {
               </button>
             ))}
           </div>
+
           <p className="text-xs text-white/60">
             {receivedActiveList.length} signal{receivedActiveList.length === 1 ? "" : "s"} visualizzati
           </p>
+
           {receivedActiveList.length === 0 && (
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/60">
               Nessun Signal per questa categoria.
             </div>
           )}
+
           <div className="space-y-3">
             {receivedActiveList.map((item, index) => {
               const overall = safeNum(item.overall_score);
@@ -470,21 +520,32 @@ export function Signals() {
               const scoreLabel = levelFromScore(overall);
               const shortId = item.request_id.slice(0, 6).toUpperCase();
               const cardClass = getCardClasses(receivedStatusTab);
+
               const sharedContent = (
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="w-6 text-right text-sm text-white/50 tabular-nums">{index + 1}</div>
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-white/60">
                       <span>{item.kind === "promo" ? "Promo Signal" : "Collab Signal"}</span>
-                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{safeText(item.genre)}</span>
+                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">
+                        {safeText(item.genre)}
+                      </span>
                       {scoreLabel && (
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{scoreLabel}</span>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">
+                          {scoreLabel}
+                        </span>
                       )}
                       {item.key && (
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">Key {item.key}</span>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">
+                          Key {item.key}
+                        </span>
                       )}
                     </div>
-                    <div className="truncate text-lg font-semibold text-white">{safeText(item.project_title, "Project")}</div>
+
+                    <div className="truncate text-lg font-semibold text-white">
+                      {safeText(item.project_title, "Project")}
+                    </div>
+
                     <div className="text-xs text-white/60">
                       Codice {shortId}
                       {bpm ? ` · ${Math.round(bpm)} BPM` : ""}
@@ -499,7 +560,6 @@ export function Signals() {
                   <article key={item.request_id} className={`rounded-2xl border px-4 py-4 transition ${cardClass}`}>
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="flex items-center gap-3">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={item.sender_avatar ?? "/img/avatar-placeholder.png"}
                           alt={safeText(item.sender_name, "Artista")}
@@ -511,7 +571,7 @@ export function Signals() {
                         <div>
                           <p className="text-[11px] uppercase tracking-[0.5em] text-white/60">Signal ACCETTATO</p>
                           <h3 className="text-xl font-semibold">
-                            {safeText(item.sender_name, "Artista")} – {safeText(item.project_title, "Project")}
+                            {safeText(item.sender_name, "Artista")} - {safeText(item.project_title, "Project")}
                           </h3>
                           <p className="text-xs text-white/60">
                             {safeText(item.genre)} · Key {safeText(item.key ?? "n.d.")}
@@ -519,21 +579,24 @@ export function Signals() {
                           <p className="text-[11px] text-white/60">Codice {shortId}</p>
                         </div>
                       </div>
+
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => playSignal(item)}
                           className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 ${
-                            item.audio_url ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
+                            item.audio_url && item.version_id ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
                           }`}
                           aria-label="Play"
+                          disabled={!item.audio_url || !item.version_id}
                         >
                           <Play className="h-4 w-4" />
                         </button>
-                        {item.audio_url && (
+
+                        {item.audio_url && item.version_id && (
                           <button
                             type="button"
-                            onClick={() => handleDownload(item.audio_url!)}
+                            onClick={() => handleDownload(item.audio_url)}
                             className="rounded-full border border-white/40 px-4 py-1 uppercase tracking-[0.2em]"
                           >
                             Download
@@ -541,32 +604,34 @@ export function Signals() {
                         )}
                       </div>
                     </div>
+
                     <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-white/70">
                       <p className="font-semibold uppercase tracking-[0.35em] text-white/60">Chat</p>
-                      {renderMessages(item)}
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Scrivi un messaggio..."
-                            value={messageInputs[`received-${item.request_id}`] ?? ""}
-                            onChange={(event) =>
-                              setMessageInputs((prev) => ({
-                                ...prev,
-                                [`received-${item.request_id}`]: event.target.value,
-                              }))
-                            }
-                            className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSendMessage(item, "received")}
-                            disabled={!((messageInputs[`received-${item.request_id}`] ?? "").trim())}
-                            className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
-                          >
-                            Invia
-                          </button>
-                        </div>
+                      {renderMessages({ messages: item.messages, sender_id: item.sender_id, sender_name: item.sender_name })}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Scrivi un messaggio..."
+                          value={messageInputs[`received-${item.request_id}`] ?? ""}
+                          onChange={(event) =>
+                            setMessageInputs((prev) => ({
+                              ...prev,
+                              [`received-${item.request_id}`]: event.target.value,
+                            }))
+                          }
+                          className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSendMessage(item, "received")}
+                          disabled={!((messageInputs[`received-${item.request_id}`] ?? "").trim())}
+                          className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
+                        >
+                          Invia
+                        </button>
+                      </div>
                     </div>
+
                     <div className="mt-3 flex items-center gap-2 text-xs text-white/70">
                       <span className="rounded-full border border-white/20 px-3 py-1">Chiuso cronologicamente</span>
                     </div>
@@ -577,17 +642,20 @@ export function Signals() {
               return (
                 <article key={item.request_id} className={`rounded-2xl border px-4 py-3 transition ${cardClass}`}>
                   {sharedContent}
+
                   <div className="mt-3 flex flex-col items-end gap-2">
                     <button
                       type="button"
                       onClick={() => playSignal(item)}
                       className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 ${
-                        item.audio_url ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
+                        item.audio_url && item.version_id ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
                       }`}
                       aria-label="Play"
+                      disabled={!item.audio_url || !item.version_id}
                     >
                       <Play className="h-4 w-4" />
                     </button>
+
                     {receivedStatusTab === "pending" && (
                       <div className="flex gap-2">
                         <button
@@ -607,6 +675,7 @@ export function Signals() {
                       </div>
                     )}
                   </div>
+
                   {item.message && <p className="mt-3 text-xs text-white/60">{item.message}</p>}
                 </article>
               );
@@ -631,11 +700,13 @@ export function Signals() {
               </button>
             ))}
           </div>
+
           {sentActiveList.length === 0 && (
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/60">
               Nessun Signal inviato in questa categoria.
             </div>
           )}
+
           <div className="space-y-3">
             {sentActiveList.map((item, index) => {
               const overall = safeNum(item.overall_score);
@@ -643,72 +714,76 @@ export function Signals() {
               const scoreLabel = levelFromScore(overall);
               const shortId = item.request_id.slice(0, 6).toUpperCase();
               const cardClass = getCardClasses(sentStatusTab);
-              const sharedContent = (
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="w-6 text-right text-sm text-white/50 tabular-nums">{index + 1}</div>
-                  <div className="flex-1">
-                    <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-white/60">
-                      <span>{item.kind === "promo" ? "Promo Signal" : "Collab Signal"}</span>
-                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{safeText(item.genre)}</span>
-                      {scoreLabel && (
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{scoreLabel}</span>
-                      )}
-                      {item.key && (
-                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">Key {item.key}</span>
-                      )}
-                    </div>
-                    <div className="truncate text-lg font-semibold text-white">{safeText(item.project_title, "Project")}</div>
-                    <div className="text-xs text-white/60">
-                      Destinatario: {safeText(item.receiver_name)} · Codice {shortId}
-                      {bpm ? ` · ${Math.round(bpm)} BPM` : ""}
-                    </div>
-                  </div>
-                </div>
-              );
 
               return (
                 <article key={item.request_id} className={`rounded-2xl border px-4 py-3 transition ${cardClass}`}>
-                  {sharedContent}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="w-6 text-right text-sm text-white/50 tabular-nums">{index + 1}</div>
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-white/60">
+                        <span>{item.kind === "promo" ? "Promo Signal" : "Collab Signal"}</span>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{safeText(item.genre)}</span>
+                        {scoreLabel && (
+                          <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">{scoreLabel}</span>
+                        )}
+                        {item.key && (
+                          <span className="rounded-full border border-white/10 px-2 py-0.5 text-white/60">Key {item.key}</span>
+                        )}
+                      </div>
+
+                      <div className="truncate text-lg font-semibold text-white">{safeText(item.project_title, "Project")}</div>
+
+                      <div className="text-xs text-white/60">
+                        Destinatario: {safeText(item.receiver_name)} · Codice {shortId}
+                        {bpm ? ` · ${Math.round(bpm)} BPM` : ""}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => playSignal(item, `Inviato a ${safeText(item.receiver_name, "Destinatario")}`)}
                         className={`inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/20 ${
-                          item.audio_url ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
+                          item.audio_url && item.version_id ? "bg-white/10 text-white" : "bg-white/5 text-white/40"
                         }`}
                         aria-label="Play"
+                        disabled={!item.audio_url || !item.version_id}
                       >
                         <Play className="h-4 w-4" />
                       </button>
                     </div>
+
                     <div className="rounded-2xl border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/70">
                       <p className="font-semibold uppercase tracking-[0.35em] text-white/60">Chat</p>
-                      {renderMessages(item)}
-                        <div className="mt-2 flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Scrivi un messaggio..."
-                            value={messageInputs[`sent-${item.request_id}`] ?? ""}
-                            onChange={(event) =>
-                              setMessageInputs((prev) => ({
-                                ...prev,
-                                [`sent-${item.request_id}`]: event.target.value,
-                              }))
-                            }
-                            className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSendMessage(item, "sent")}
-                            disabled={!((messageInputs[`sent-${item.request_id}`] ?? "").trim())}
-                            className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
-                          >
-                            Invia
-                          </button>
-                        </div>
+                      {renderMessages({ messages: item.messages })}
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Scrivi un messaggio..."
+                          value={messageInputs[`sent-${item.request_id}`] ?? ""}
+                          onChange={(event) =>
+                            setMessageInputs((prev) => ({
+                              ...prev,
+                              [`sent-${item.request_id}`]: event.target.value,
+                            }))
+                          }
+                          className="flex-1 rounded-full border border-white/30 bg-black/40 px-4 py-2 text-xs text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSendMessage(item, "sent")}
+                          disabled={!((messageInputs[`sent-${item.request_id}`] ?? "").trim())}
+                          className="rounded-full border border-white/30 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-white/60 disabled:border-white/10 disabled:text-white/30 disabled:opacity-50"
+                        >
+                          Invia
+                        </button>
+                      </div>
                     </div>
                   </div>
+
+                  {item.message && <p className="mt-3 text-xs text-white/60">{item.message}</p>}
                 </article>
               );
             })}

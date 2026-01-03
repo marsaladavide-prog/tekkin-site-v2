@@ -13,6 +13,7 @@ import {
 } from "react";
 import { Download, MoreVertical, Search, Send, Settings, Trash2 } from "lucide-react";
 import Image from "next/image";
+import { toast } from "sonner";
 
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -206,6 +207,9 @@ export default function ProjectsPage() {
   const [genreSelectValue, setGenreSelectValue] = useState("");
   const [downloadingProjectId, setDownloadingProjectId] = useState<string | null>(null);
   const downloadTimerRef = useRef<number | null>(null);
+  const [confirmExitProject, setConfirmExitProject] = useState<ProjectRow | null>(null);
+  const [exitingProjectId, setExitingProjectId] = useState<string | null>(null);
+  const [exitError, setExitError] = useState<string | null>(null);
 
   const allowProjectInfoSelectRef = useRef(true);
   const waveformBandsSelectableRef = useRef(true);
@@ -214,6 +218,7 @@ export default function ProjectsPage() {
 
   const player = useTekkinPlayer();
   const [userId, setUserId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const filteredProjects = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -437,7 +442,7 @@ export default function ProjectsPage() {
     };
 
     void load();
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     const shouldLoadArtists =
@@ -535,6 +540,41 @@ export default function ProjectsPage() {
       setDeletingId(null);
     }
   }
+
+  const handleExitCollab = useCallback(
+    async (project: ProjectRow) => {
+      setExitError(null);
+      setExitingProjectId(project.id);
+      try {
+        const res = await fetch("/api/projects/leave-collab", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project_id: project.id }),
+        });
+
+        const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+        if (!res.ok) {
+          const message = payload?.error ?? "Errore lasciando la collab.";
+          setExitError(message);
+          toast.error(message);
+          return;
+        }
+
+        toast.success("Hai lasciato la collab.");
+        setConfirmExitProject(null);
+        setReloadKey((prev) => prev + 1);
+      } catch (err) {
+        console.error("Exit collab error:", err);
+        const message = err instanceof Error ? err.message : "Errore lasciando la collab.";
+        setExitError(message);
+        toast.error(message);
+      } finally {
+        setExitingProjectId(null);
+      }
+    },
+    []
+  );
 
   const handleRenameProject = useCallback((project: ProjectRow) => {
     setRenameModalProject(project);
@@ -1214,24 +1254,33 @@ export default function ProjectsPage() {
                     >
                       Apri project
                     </Link>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSignal(p.id, canSignal)}
-                      className="inline-flex items-center gap-2 rounded-full border border-cyan-400/60 px-3 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/10 disabled:opacity-50 disabled:hover:bg-transparent"
-                      disabled={!canSignal}
-                      title={canSignal ? undefined : "Carica una versione con audio per inviare un Signal"}
-                    >
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSignal(p.id, canSignal)}
+                        className="inline-flex items-center gap-2 rounded-full border border-cyan-400/60 px-3 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/10 disabled:opacity-50 disabled:hover:bg-transparent"
+                        disabled={!canSignal}
+                        title={canSignal ? undefined : "Carica una versione con audio per inviare un Signal"}
+                      >
                       <Send className="h-3.5 w-3.5" />
                       Send Signal
-                    </button>
+                      </button>
+                      {p.isCollaborator && userId && p.user_id !== userId && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmExitProject(p)}
+                          className="inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/10"
+                        >
+                          Esci dalla collab
+                        </button>
+                      )}
                     <button
                       type="button"
                       onClick={() => {
                         setDeleteError(null);
-                        setConfirmProject(p);
-                      }}
-                      className="flex items-center justify-center rounded-full border border-red-500/40 bg-black/20 px-3 py-1 text-[11px] font-semibold text-red-400 transition hover:border-red-400/70 hover:bg-red-500/10"
-                      aria-label={`Elimina ${p.title}`}
+                          setConfirmProject(p);
+                        }}
+                        className="flex items-center justify-center rounded-full border border-red-500/40 bg-black/20 px-3 py-1 text-[11px] font-semibold text-red-400 transition hover:border-red-400/70 hover:bg-red-500/10"
+                        aria-label={`Elimina ${p.title}`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       <span className="sr-only">Elimina</span>
@@ -1545,6 +1594,40 @@ export default function ProjectsPage() {
             >
               Chiudi
             </button>
+          </div>
+        </div>
+      )}
+
+      {confirmExitProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[var(--sidebar-bg)] p-5 shadow-2xl">
+            <p className="text-sm font-semibold text-white">
+              Esci dalla collab "{confirmExitProject.title}"
+            </p>
+            <p className="mt-2 text-xs text-white/70">
+              Uscendo dalla collab rimuoverai il tuo accesso al project e ai Signals.
+            </p>
+
+            {exitError && <p className="mt-2 text-xs text-red-300">{exitError}</p>}
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmExitProject(null)}
+                className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-white/80 hover:border-white/20 hover:text-white"
+                disabled={exitingProjectId === confirmExitProject.id}
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExitCollab(confirmExitProject)}
+                className="rounded-full bg-red-500 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                disabled={exitingProjectId === confirmExitProject.id}
+              >
+                {exitingProjectId === confirmExitProject.id ? "Uscita..." : "Esci dalla collab"}
+              </button>
+            </div>
           </div>
         </div>
       )}

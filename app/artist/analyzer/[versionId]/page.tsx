@@ -6,6 +6,7 @@ import { createClient } from "@/utils/supabase/server";
 
 import TekkinAnalyzerPageClient from "@/components/analyzer/TekkinAnalyzerPageClient";
 import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersion";
+import { buildAnalyzerCardsModel } from "@/lib/analyzer/cards/buildAnalyzerCardsModel";
 import { mapVersionToAnalyzerCompareModel } from "@/lib/analyzer/v2/mapVersionToAnalyzerCompareModel";
 import { calculateTekkinVersionRankFromModel } from "@/lib/analyzer/tekkinVersionRank";
 import { computeModelMatch } from "@/lib/analyzer/modelMatch";
@@ -197,6 +198,7 @@ export default async function Page({
     analyzer_arrays: arraysJson ?? null,
     reference_model_key: effectiveReferenceKey,
     reference_bands_norm: referenceBandsNorm,
+    project,
   };
 
   // MAPPERS
@@ -210,6 +212,11 @@ export default async function Page({
     versionForPreview,
     referenceModel
   ) as AnalyzerCompareModel;
+
+  const cardsModel = buildAnalyzerCardsModel({
+    version: versionForPreview,
+    referenceModel,
+  });
 
   console.log("[v2] transients model:", v2Model?.transients);
 
@@ -331,7 +338,7 @@ export default async function Page({
   });
 
   return (
-    <AppShell>
+    <AppShell className="!bg-transparent">
       <TekkinAnalyzerPageClient
         ui={ui}
         versionId={versionId}
@@ -339,6 +346,7 @@ export default async function Page({
         initialData={initialData}
         v2Model={v2Model}
         sharePath={sharePath}
+        cardsModel={cardsModel}
       />
     </AppShell>
   );

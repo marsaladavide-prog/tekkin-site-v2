@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { notify } from "@/lib/notifications/notify";
+import { mapProjectVersionRowToTrackSnapshot } from "@/lib/tracks/trackSnapshot";
 
 export const runtime = "nodejs";
 
@@ -41,12 +42,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { data: latestVersion, error: latestErr } = await supabase
+      .from("project_versions")
+      .select("id")
+      .eq("project_id", project_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestErr) {
+      console.error("[discovery][request] latest version err", latestErr);
+      return NextResponse.json(
+        { error: "Errore risolvendo la versione del progetto" },
+        { status: 500 }
+      );
+    }
+
+    if (!latestVersion?.id) {
+      return NextResponse.json(
+        { error: "Nessuna versione trovata per questo progetto" },
+        { status: 400 }
+      );
+    }
+
+    const version_id = latestVersion.id as string;
+
     const { data: insertData, error: insertError } = await supabase
       .from("discovery_requests")
       .insert({
         sender_id: user.id,
         receiver_id,
         project_id,
+        version_id,
         kind,
         message: message ?? null,
         is_anonymous: true,
@@ -74,52 +101,48 @@ export async function POST(req: NextRequest) {
           ? "Hai ricevuto una richiesta promo anonima."
           : "Hai ricevuto una richiesta collab anonima.",
       href: "/discovery",
-      data: { request_id: insertData.id, project_id, kind },
+      data: { request_id: insertData.id, project_id, version_id, kind },
     });
 
-    async function ensureDiscoveryTrack(projectId: string, ownerId: string) {
-      const { data: versions, error: versionErr } = await supabase
+    async function ensureDiscoveryTrack(projectId: string, ownerId: string, versionId: string) {
+      const { data: version, error: versionErr } = await supabase
         .from("project_versions")
         .select(
-          "genre, overall_score, mix_score, master_score, bass_energy, has_vocals, bpm, audio_path, audio_url"
+          "id, project_id, genre, version_name, mix_type, overall_score, master_score, bass_energy, has_vocals, bpm, audio_path, audio_url, visibility, waveform_peaks, waveform_bands, waveform_duration, created_at, analyzer_bpm, analyzer_key"
         )
-        .eq("project_id", projectId)
-        .order("created_at", { ascending: false })
-        .limit(1);
+        .eq("id", versionId)
+        .maybeSingle();
 
       if (versionErr) {
         console.error("[discovery][request] discovery_tracks source error", versionErr);
         return;
       }
 
-      const version = versions?.[0];
       if (!version) return;
 
-      const audioValue =
-        typeof version.audio_path === "string" && version.audio_path.trim()
-          ? version.audio_path.trim()
-          : typeof version.audio_url === "string" && version.audio_url.trim()
-          ? version.audio_url.trim()
-          : null;
+        const snapshot = mapProjectVersionRowToTrackSnapshot(version as any);
+        const resolvedVersionId = snapshot.versionId;
+        if (!resolvedVersionId) return;
+        const audioValue = snapshot.audioPath ?? snapshot.audioUrl ?? null;
 
-      try {
-        const { error: upsertErr } = await admin.from("discovery_tracks").upsert(
-          {
-            owner_id: ownerId,
-            project_id: projectId,
-            genre: version.genre ?? null,
-            overall_score: version.overall_score ?? null,
-            mix_score: version.mix_score ?? null,
-            master_score: version.master_score ?? null,
-            bass_energy: version.bass_energy ?? null,
-            has_vocals:
-              typeof version.has_vocals === "boolean" ? version.has_vocals : null,
-            bpm: typeof version.bpm === "number" ? version.bpm : null,
-            is_enabled: Boolean(audioValue),
-            audio_url: audioValue,
-          },
-          { onConflict: "project_id" }
-        );
+        try {
+          const { error: upsertErr } = await admin.from("discovery_tracks").upsert(
+            {
+              owner_id: ownerId,
+              project_id: projectId,
+              version_id: resolvedVersionId,
+              genre: typeof version.genre === "string" && version.genre.trim() ? version.genre : "unknown",
+              overall_score: snapshot.overallScore ?? null,
+              master_score: version.master_score ?? null,
+              bass_energy: version.bass_energy ?? null,
+              has_vocals:
+                typeof version.has_vocals === "boolean" ? version.has_vocals : null,
+              bpm: snapshot.analyzerBpm ?? null,
+              is_enabled: Boolean(audioValue),
+              audio_url: audioValue,
+            },
+            { onConflict: "project_id" }
+          );
         if (upsertErr) {
           console.error("[discovery][request] discovery_tracks upsert error", upsertErr);
         } else {
@@ -130,7 +153,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    void ensureDiscoveryTrack(project_id, user.id);
+    void ensureDiscoveryTrack(project_id, user.id, version_id);
 
     return NextResponse.json(
       {

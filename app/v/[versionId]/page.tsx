@@ -5,6 +5,7 @@ import TekkinAnalyzerPageClient from "@/components/analyzer/TekkinAnalyzerPageCl
 import { createAdminClient } from "@/utils/supabase/admin";
 import { signTrackUrl } from "@/lib/storage/signTrackUrl";
 import { toPreviewDataFromVersion } from "@/lib/analyzer/toPreviewDataFromVersion";
+import { buildAnalyzerCardsModel } from "@/lib/analyzer/cards/buildAnalyzerCardsModel";
 import { loadReferenceModel } from "@/lib/reference/loadReferenceModel";
 import { mapVersionToAnalyzerV2Model } from "@/lib/analyzer/mapVersionToAnalyzerV2Model";
 
@@ -133,6 +134,17 @@ export default async function PublicVersionPage({ params }: Props) {
     arrays: parsedArrays,
   });
 
+  const versionForCards = {
+    ...(row as any),
+    analyzer_arrays: parsedArrays,
+    reference_model_key: profileKey,
+    project,
+  };
+  const cardsModel = buildAnalyzerCardsModel({
+    version: versionForCards,
+    referenceModel: reference,
+  });
+
   return (
     <AppShell maxWidth="default">
       <TekkinAnalyzerPageClient
@@ -151,6 +163,7 @@ export default async function PublicVersionPage({ params }: Props) {
           createdAt: (row as any)?.created_at ?? null,
         }}
         sharePath={`/v/${versionId}`}
+        cardsModel={cardsModel}
       />
     </AppShell>
   );

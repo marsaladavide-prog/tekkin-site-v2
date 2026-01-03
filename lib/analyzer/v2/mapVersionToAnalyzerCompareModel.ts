@@ -308,14 +308,6 @@ function pickSpectrumDb(obj: unknown): { hz: unknown; db: unknown } | null {
   return null;
 }
 
-function _safeJsonParse(v: string) {
-  try {
-    return JSON.parse(v);
-  } catch {
-    return null;
-  }
-}
-
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }

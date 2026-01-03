@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import type { Loudness } from "@/lib/analyzer/v2/types";
-import type { RefState } from "../utils/refState";
+import type { RefState } from "@/lib/analyzer/cards/refState";
 import { Card, Pill, SourcePills, StatusChip } from "../utils/ui";
 import { clamp01, formatDb } from "../utils/number";
 
